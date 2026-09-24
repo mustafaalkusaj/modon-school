@@ -1,8 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createServiceSupabaseClient } from "@/lib/supabase-server";
 import { uploadFile } from "@/lib/storage";
+import { sniffImageType } from "@/lib/image-sniff";
+import { enforceRateLimit } from "@/lib/rate-limit";
 
-const ALLOWED_TYPES = new Set(["image/jpeg", "image/png", "image/webp"]);
 const MAX_SIZE = 5 * 1024 * 1024; // 5MB
 const MAX_PHOTOS = 4;
 
@@ -11,6 +12,13 @@ const MAX_PHOTOS = 4;
  * Query: ?sessionId=xxx
  */
 export async function POST(req: NextRequest) {
+  const rateLimited = await enforceRateLimit(req, {
+    namespace: "public-exam-photos",
+    windowMs: 10 * 60_000,
+    maxHits: 30,
+  });
+  if (rateLimited) return rateLimited;
+
   const sessionId = new URL(req.url).searchParams.get("sessionId");
   if (!sessionId || !/^[a-zA-Z0-9_-]{8,64}$/.test(sessionId)) {
     return NextResponse.json({ error: "Invalid session ID" }, { status: 400 });
@@ -34,20 +42,23 @@ export async function POST(req: NextRequest) {
   if (!file) {
     return NextResponse.json({ error: "No file" }, { status: 400 });
   }
-  if (!ALLOWED_TYPES.has(file.type)) {
-    return NextResponse.json({ error: "نوع الملف غير مدعوم" }, { status: 400 });
-  }
   if (file.size > MAX_SIZE) {
     return NextResponse.json({ error: "حجم الصورة أكبر من 5MB" }, { status: 400 });
   }
 
-  const ext = file.name.split(".").pop() || "jpg";
-  const idx = (existing?.length ?? 0) + 1;
-  const path = `${sessionId}/${idx}.${ext}`;
+  // Type and extension come from the bytes, never from the client's
+  // File.type or file name.
   const buffer = await file.arrayBuffer();
+  const image = sniffImageType(buffer);
+  if (!image) {
+    return NextResponse.json({ error: "نوع الملف غير مدعوم" }, { status: 400 });
+  }
+
+  const idx = (existing?.length ?? 0) + 1;
+  const path = `${sessionId}/${idx}.${image.ext}`;
 
   try {
-    const url = await uploadFile(supabase, "exam-photos", path, buffer, file.type);
+    const url = await uploadFile(supabase, "exam-photos", path, buffer, image.mime);
     const count = (existing?.length ?? 0) + 1;
     return NextResponse.json({ ok: true, url, count });
   } catch (err: unknown) {

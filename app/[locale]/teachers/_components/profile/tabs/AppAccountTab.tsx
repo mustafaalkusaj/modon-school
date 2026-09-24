@@ -5,6 +5,10 @@ import { fetchJsonWithAuthorizedSession, withJsonHeaders } from "@/lib/authorize
 import type { TeacherRecord } from "../../../_types";
 import { buildWhatsAppShareLink, buildLoginCardMessage } from "@/lib/whatsapp";
 import { buildSmsLink } from "@/lib/sms";
+import { escapeHtml } from "@/lib/export";
+
+// Values below are user-editable and written into a same-origin window.
+const h = (value: unknown) => escapeHtml(String(value ?? ""));
 
 interface Props {
   teacher: TeacherRecord;
@@ -161,7 +165,7 @@ export function AppAccountTab({ teacher, schoolId, canManage, locale, refetch }:
 <html dir="rtl" lang="ar">
 <head>
   <meta charset="UTF-8"/>
-  <title>بطاقة دخول — ${teacher.full_name}</title>
+  <title>بطاقة دخول — ${h(teacher.full_name)}</title>
   <style>
     @import url('https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700;900&display=swap');
 
@@ -319,24 +323,24 @@ export function AppAccountTab({ teacher, schoolId, canManage, locale, refetch }:
     <div class="card">
 
       <div class="card-header">
-        <div class="avatar">${initials}</div>
+        <div class="avatar">${h(initials)}</div>
         <div class="header-text">
           <div class="card-type">${isEn ? "Teacher · Login Card" : "معلم · بطاقة تسجيل الدخول"}</div>
-          <div class="teacher-name">${teacher.full_name}</div>
+          <div class="teacher-name">${h(teacher.full_name)}</div>
           ${teacher.job_title || teacher.subject
-            ? `<div class="teacher-meta">${[teacher.job_title, teacher.subject].filter(Boolean).join(" · ")}</div>`
+            ? `<div class="teacher-meta">${h([teacher.job_title, teacher.subject].filter(Boolean).join(" · "))}</div>`
             : ""}
         </div>
       </div>
 
       <div class="card-body">
         <div class="qr-wrap">
-          <img src="${qrUrl}" alt="QR" id="qrimg"/>
+          <img src="${h(qrUrl)}" alt="QR" id="qrimg"/>
         </div>
         <div class="qr-info">
           <div class="qr-hint">${isEn ? "Scan to log in to the mobile app" : "امسح الرمز للدخول في تطبيق الجوال"}</div>
           <div class="badge"><span class="dot"></span>${isEn ? "Active Account" : "حساب نشط"}</div>
-          ${teacher.employee_id ? `<div class="emp-id">#${teacher.employee_id}</div>` : ""}
+          ${teacher.employee_id ? `<div class="emp-id">#${h(teacher.employee_id)}</div>` : ""}
         </div>
       </div>
 
@@ -344,11 +348,11 @@ export function AppAccountTab({ teacher, schoolId, canManage, locale, refetch }:
         <div class="creds-title">${isEn ? "Login Credentials" : "بيانات تسجيل الدخول"}</div>
         <div class="cred-row">
           <span class="cred-label">${isEn ? "Username" : "اسم المستخدم"}</span>
-          <span class="cred-value">${teacher.app_username ?? ""}</span>
+          <span class="cred-value">${h(teacher.app_username)}</span>
         </div>
         ${pwd ? `<div class="cred-row">
           <span class="cred-label">${isEn ? "Password" : "كلمة المرور"}</span>
-          <span class="cred-value">${pwd}</span>
+          <span class="cred-value">${h(pwd)}</span>
         </div>` : ""}
       </div>
 

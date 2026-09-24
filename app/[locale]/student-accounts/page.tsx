@@ -7,9 +7,14 @@ import { useSchoolScope } from "@/hooks/useSchoolScope";
 import { fetchWithAuthorizedSession } from "@/lib/authorized-api";
 import { Download, Printer, Search, Loader2, UserPlus, QrCode, CreditCard, KeyRound, Users, Copy, Check, Filter } from "lucide-react";
 import QRCode from "qrcode";
+import { escapeHtml } from "@/lib/export";
 import { AppSidebar } from "@/components/AppSidebar";
 import { AppShellTopbar } from "@/components/AppShellTopbar";
 import { SchoolScopeEmptyState } from "@/components/SchoolScopeBanner";
+
+// Account names come from user-editable records and are written into a
+// same-origin window with document.write, so every value must be escaped.
+const h = (value: unknown) => escapeHtml(String(value ?? ""));
 
 interface StudentAccount {
   studentId: string;
@@ -111,7 +116,7 @@ function StudentAccountsContent() {
       if (qrUrls[student.username]) {
         const w = window.open("", "_blank");
         if (!w) return;
-        w.document.write(`<!DOCTYPE html><html dir="rtl"><head><meta charset="utf-8"/><title>QR - ${student.fullName}</title><style>body{display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:100vh;font-family:sans-serif;}</style></head><body><h2>${student.fullName}</h2><img src="${qrUrls[student.username]}" width="250" height="250"/><p style="color:#666">${student.username}</p></body></html>`);
+        w.document.write(`<!DOCTYPE html><html dir="rtl"><head><meta charset="utf-8"/><title>QR - ${h(student.fullName)}</title><style>body{display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:100vh;font-family:sans-serif;}</style></head><body><h2>${h(student.fullName)}</h2><img src="${h(qrUrls[student.username])}" width="250" height="250"/><p style="color:#666">${h(student.username)}</p></body></html>`);
         w.document.close();
         return;
       }
@@ -139,7 +144,7 @@ function StudentAccountsContent() {
         setQrUrls((p) => ({ ...p, [student.username]: dataUrl }));
         const w = window.open("", "_blank");
         if (!w) return;
-        w.document.write(`<!DOCTYPE html><html dir="rtl"><head><meta charset="utf-8"/><title>QR - ${student.fullName}</title><style>body{display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:100vh;font-family:sans-serif;}</style></head><body><h2>${student.fullName}</h2><img src="${dataUrl}" width="250" height="250"/><p style="color:#666">${student.username}</p></body></html>`);
+        w.document.write(`<!DOCTYPE html><html dir="rtl"><head><meta charset="utf-8"/><title>QR - ${h(student.fullName)}</title><style>body{display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:100vh;font-family:sans-serif;}</style></head><body><h2>${h(student.fullName)}</h2><img src="${h(dataUrl)}" width="250" height="250"/><p style="color:#666">${h(student.username)}</p></body></html>`);
         w.document.close();
       } catch {
         /* skip */
@@ -204,10 +209,10 @@ function StudentAccountsContent() {
         (s, i) =>
           `<tr>
             <td style="padding:8px;border:1px solid #ddd;text-align:center">${i + 1}</td>
-            <td style="padding:8px;border:1px solid #ddd">${s.fullName}</td>
-            <td style="padding:8px;border:1px solid #ddd;text-align:center">${s.className ?? ""}</td>
-            <td style="padding:8px;border:1px solid #ddd;text-align:center;direction:ltr">${s.username}</td>
-            <td style="padding:8px;border:1px solid #ddd;text-align:center;direction:ltr">${s.password || "—"}</td>
+            <td style="padding:8px;border:1px solid #ddd">${h(s.fullName)}</td>
+            <td style="padding:8px;border:1px solid #ddd;text-align:center">${h(s.className ?? "")}</td>
+            <td style="padding:8px;border:1px solid #ddd;text-align:center;direction:ltr">${h(s.username)}</td>
+            <td style="padding:8px;border:1px solid #ddd;text-align:center;direction:ltr">${h(s.password || "—")}</td>
           </tr>`,
       )
       .join("");
@@ -260,30 +265,30 @@ function StudentAccountsContent() {
       <div class="info-section">
         <div class="info-row">
           <span class="info-label">الاسم الكامل</span>
-          <span class="info-value">${student.fullName}</span>
+          <span class="info-value">${h(student.fullName)}</span>
         </div>
         <div class="info-row">
           <span class="info-label">الصف</span>
-          <span class="info-value">${student.className || "—"}</span>
+          <span class="info-value">${h(student.className || "—")}</span>
         </div>
       </div>
       <div class="credentials">
         <div class="cred-row">
           <span class="cred-label">اسم المستخدم</span>
-          <span class="cred-value" dir="ltr">${student.username}</span>
+          <span class="cred-value" dir="ltr">${h(student.username)}</span>
         </div>
         <div class="cred-row">
           <span class="cred-label">كلمة المرور</span>
-          <span class="cred-value" dir="ltr">${student.password || "—"}</span>
+          <span class="cred-value" dir="ltr">${h(student.password || "—")}</span>
         </div>
       </div>
       <div class="qr-row">
         <div class="qr-block">
-          <img src="${siteQr}" class="qr-img" alt="QR"/>
+          <img src="${h(siteQr)}" class="qr-img" alt="QR"/>
           <div class="qr-label">رابط الموقع</div>
         </div>
         <div class="qr-block">
-          <img src="${studentQr}" class="qr-img" alt="QR"/>
+          <img src="${h(studentQr)}" class="qr-img" alt="QR"/>
           <div class="qr-label">تسجيل دخول الطالب</div>
         </div>
       </div>
