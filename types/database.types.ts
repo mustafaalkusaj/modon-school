@@ -8516,7 +8516,6 @@ export type Database = {
           address: string | null
           app_last_login: string | null
           app_password_hash: string | null
-          app_password_plain: string | null
           app_status: string | null
           app_username: string | null
           auth_user_id: string | null
@@ -8586,7 +8585,6 @@ export type Database = {
           address?: string | null
           app_last_login?: string | null
           app_password_hash?: string | null
-          app_password_plain?: string | null
           app_status?: string | null
           app_username?: string | null
           auth_user_id?: string | null
@@ -8656,7 +8654,6 @@ export type Database = {
           address?: string | null
           app_last_login?: string | null
           app_password_hash?: string | null
-          app_password_plain?: string | null
           app_status?: string | null
           app_username?: string | null
           auth_user_id?: string | null

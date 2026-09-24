@@ -64,10 +64,6 @@
     {
       "path": "/api/cron/installment-reminder",
       "schedule": "0 10 1 * *"
-    },
-    {
-      "path": "/api/cron/account-deletion",
-      "schedule": "0 23 * * *"
     }
   ]
 }
