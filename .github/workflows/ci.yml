@@ -35,6 +35,12 @@ jobs:
 
       - name: Build
         run: npm run build
+        # Placeholders only: page-data collection imports server modules that
+        # validate these at load time. No real Supabase project is contacted.
         env:
           JWT_SECRET: ci-test-secret-for-build-only-12345678
           NODE_ENV: production
+          NEXT_PUBLIC_SUPABASE_URL: https://ci-placeholder.supabase.co
+          NEXT_PUBLIC_SUPABASE_ANON_KEY: ci-placeholder-anon-key
+          SUPABASE_SERVICE_ROLE_KEY: ci-placeholder-service-role-key
+          RBAC_COOKIE_SECRET: ci-placeholder-rbac-cookie-secret-0123456789abcdef
