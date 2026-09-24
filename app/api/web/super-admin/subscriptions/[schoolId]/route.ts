@@ -2,9 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 
 import { resolveSuperAdminActorContext } from "@/lib/super-admin-server";
 import { addDaysBaghdadIso, todayBaghdadIso } from "@/lib/tz";
-import { jsonServerError } from "@/lib/route-utils";
 
-const DAY_IN_MS = 24 * 60 * 60 * 1000;
 const VALID_PLANS = ["basic", "premium", "enterprise"] as const;
 const VALID_STATUSES = ["active", "suspended", "inactive", "expired"] as const;
 type SchoolPlan = typeof VALID_PLANS[number];

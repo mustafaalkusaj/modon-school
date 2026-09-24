@@ -6,10 +6,9 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
-import { Progress } from "@/components/ui/progress";
 import {
   DistributionItem, DistributionRecord, StudentBasic,
-  DeliveryStatus, STATUS_LABELS, ItemWithRecord,
+  DeliveryStatus, STATUS_LABELS,
 } from "../_types";
 import { GRADE_MAP, GRADES } from "../_constants";
 

@@ -6,7 +6,7 @@ import { cn } from "@/lib/brand/brand-utils";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Modal, ModalHeader, ModalBody, ModalFooter } from "@/components/ui/modal";
 import {
-  Plus, Pencil, Trash2, KeyRound, Phone, CheckCircle2, Loader2, UserRoundPlus, RefreshCw, Eye, Printer,
+  Plus, Pencil, Trash2, KeyRound, Phone, Loader2, UserRoundPlus, RefreshCw, Eye, Printer,
 } from "@/lib/icons";
 import { ConfirmDialog, CredentialsDialog } from "./dialogs";
 import { DriverDetail } from "./driver-detail";

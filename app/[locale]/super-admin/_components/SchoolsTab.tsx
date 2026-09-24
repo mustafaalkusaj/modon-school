@@ -147,7 +147,6 @@ export function SchoolsTab({
   importingSchoolId,
   onRefresh,
   onCopyClasses,
-  onCopySettings,
 }: SchoolsTabProps) {
   const [page, setPage] = useState(0);
   const [selected, setSelected] = useState<Set<string>>(new Set());

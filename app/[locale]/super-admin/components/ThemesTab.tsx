@@ -6,7 +6,6 @@ import {
   BRAND_THEME_FAMILIES,
   type BrandThemeFamilyId,
   type BrandThemePreset,
-  type BrandThemeFamily,
 } from "@/lib/brand/themes";
 import type { SchoolRecord } from "../_components/types";
 import { DEFAULT_SCHOOL_BRANDING } from "../_components/types";

@@ -3,7 +3,7 @@ import { applyBranchScopeToQuery, resolveBranchScope } from "@/lib/branch-scope"
 import { resolveSchoolScopedActorContext } from "@/lib/managed-users-server";
 import { enforceRateLimit } from "@/lib/rate-limit";
 import { routeUserHasPermission } from "@/lib/route-permissions";
-import { jsonError, jsonServerError, logRouteError } from "@/lib/route-utils";
+import { jsonError, logRouteError } from "@/lib/route-utils";
 import { todayBaghdadIso } from "@/lib/tz";
 
 export async function GET(

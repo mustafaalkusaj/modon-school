@@ -9,8 +9,6 @@ function jsonError(message: string, status: number) {
   return NextResponse.json({ error: { message } }, { status });
 }
 
-type CountRow = { school_id: string | null; role?: string | null };
-
 export async function GET(request: NextRequest) {
   const context = await resolveSuperAdminActorContext(request.headers.get("authorization"));
   if (!context.ok) {

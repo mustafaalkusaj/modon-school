@@ -43,6 +43,60 @@ interface ExamResults {
   breakdown: QuestionResult[];
 }
 
+/* SVG score ring */
+function ScoreRing({
+  percentage,
+  passed,
+  t,
+}: {
+  percentage: number;
+  passed: boolean;
+  t: (ar: string, en: string) => string;
+}) {
+  const RADIUS = 54;
+  const CIRCUMFERENCE = 2 * Math.PI * RADIUS;
+  const offset = CIRCUMFERENCE - (percentage / 100) * CIRCUMFERENCE;
+  const color = passed ? "var(--success)" : "var(--danger)";
+
+  return (
+    <div className="relative w-36 h-36">
+      <svg viewBox="0 0 120 120" className="w-full h-full -rotate-90">
+        <circle
+          cx="60"
+          cy="60"
+          r={RADIUS}
+          fill="none"
+          stroke="var(--surface-soft)"
+          strokeWidth="10"
+        />
+        <circle
+          cx="60"
+          cy="60"
+          r={RADIUS}
+          fill="none"
+          stroke={color}
+          strokeWidth="10"
+          strokeLinecap="round"
+          strokeDasharray={CIRCUMFERENCE}
+          strokeDashoffset={offset}
+          style={{ transition: "stroke-dashoffset 1s ease-out" }}
+        />
+      </svg>
+      <div className="absolute inset-0 flex flex-col items-center justify-center">
+        <span
+          className="text-2xl font-bold"
+          style={{ color }}
+        >
+          {percentage}%
+        </span>
+        <span className="text-xs text-[var(--text-muted)]">
+          {passed ? t("ناجح", "Passed") : t("راسب", "Failed")}
+        </span>
+      </div>
+    </div>
+  );
+}
+
 export default function ExamResultsPage() {
   const pathname = usePathname();
   const { id } = useParams<{ id: string }>();
@@ -73,58 +127,6 @@ export default function ExamResultsPage() {
     if (m > 0 && s > 0) return `${m} ${t("دقيقة", "min")} ${s} ${t("ثانية", "sec")}`;
     if (m > 0) return `${m} ${t("دقيقة", "min")}`;
     return `${s} ${t("ثانية", "sec")}`;
-  }
-
-  /* SVG score ring */
-  function ScoreRing({
-    percentage,
-    passed,
-  }: {
-    percentage: number;
-    passed: boolean;
-  }) {
-    const RADIUS = 54;
-    const CIRCUMFERENCE = 2 * Math.PI * RADIUS;
-    const offset = CIRCUMFERENCE - (percentage / 100) * CIRCUMFERENCE;
-    const color = passed ? "var(--success)" : "var(--danger)";
-
-    return (
-      <div className="relative w-36 h-36">
-        <svg viewBox="0 0 120 120" className="w-full h-full -rotate-90">
-          <circle
-            cx="60"
-            cy="60"
-            r={RADIUS}
-            fill="none"
-            stroke="var(--surface-soft)"
-            strokeWidth="10"
-          />
-          <circle
-            cx="60"
-            cy="60"
-            r={RADIUS}
-            fill="none"
-            stroke={color}
-            strokeWidth="10"
-            strokeLinecap="round"
-            strokeDasharray={CIRCUMFERENCE}
-            strokeDashoffset={offset}
-            style={{ transition: "stroke-dashoffset 1s ease-out" }}
-          />
-        </svg>
-        <div className="absolute inset-0 flex flex-col items-center justify-center">
-          <span
-            className="text-2xl font-bold"
-            style={{ color }}
-          >
-            {percentage}%
-          </span>
-          <span className="text-xs text-[var(--text-muted)]">
-            {passed ? t("ناجح", "Passed") : t("راسب", "Failed")}
-          </span>
-        </div>
-      </div>
-    );
   }
 
   return (
@@ -185,6 +187,7 @@ export default function ExamResultsPage() {
                   <ScoreRing
                     percentage={results.percentage}
                     passed={results.passed}
+                    t={t}
                   />
 
                   <p className="text-xl font-bold text-[var(--text-primary)]">

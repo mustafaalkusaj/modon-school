@@ -59,8 +59,6 @@ export function StudentsTable({
   openMenu,
   onPageChange,
   compactMode = false,
-  selectedStudents = new Set(),
-  onSelectStudent,
   onQuickView,
 }: StudentsTableProps) {
   const t = useTranslations("students.table");

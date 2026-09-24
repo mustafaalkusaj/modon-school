@@ -319,17 +319,6 @@ function formatDateShort(value: string | null, locale: Locale = "ar") {
   });
 }
 
-function formatDateFull(value: string, locale: Locale = "ar") {
-  const loc = locale === "en" ? "en-US" : "ar-IQ-u-nu-latn";
-  return new Date(value).toLocaleDateString(loc, {
-    timeZone: "Asia/Baghdad",
-    weekday: "long",
-    year: "numeric",
-    month: "long",
-    day: "numeric",
-  });
-}
-
 function fmtNum(value: number | null | undefined): string {
   if (value == null) return "—";
   return value.toLocaleString("en-US");
@@ -2025,7 +2014,7 @@ function GradingTab({ schoolId, locale }: { schoolId: string | null; locale: Loc
       setAnswers(answersPayload?.items ?? []);
 
       // Fetch questions for this exam
-      const { payload: questionsPayload } = await fetchJsonWithAuthorizedSession<{
+      await fetchJsonWithAuthorizedSession<{
         ok: boolean; items: ExamQuestion[];
       }>(`/api/web/exams/${attempt.exam_id}/answers?examId=${attempt.exam_id}&schoolId=${schoolId}`);
 

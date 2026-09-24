@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useMemo, useCallback, useEffect } from "react";
-import { CreditCard, RefreshCw, History, PencilLine, Loader2 } from "@/lib/icons";
+import { RefreshCw, History, PencilLine, Loader2 } from "@/lib/icons";
 import { DatePicker } from "@/components/ui/date-picker";
 import { ModalFrame } from "./ui";
 import { formatDate, calculateDaysLeft, isSubscriptionExpired, relationName } from "./utils";

@@ -2,7 +2,6 @@
 
 import { useEffect, useState, useCallback } from "react";
 import {
-  CalendarDays,
   ChevronLeft,
   ChevronRight,
   Play,

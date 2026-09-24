@@ -15,7 +15,6 @@ import {
 import { TimePicker } from "@/components/ui/time-picker";
 import { useTimeSlotsSettings } from "../_hooks/useTimeSlotsSettings";
 import type { TimeSlot } from "../_hooks/useTimeSlotsSettings";
-import { WorkingDaysToggle } from "./WorkingDaysToggle";
 
 type Props = {
   open: boolean;

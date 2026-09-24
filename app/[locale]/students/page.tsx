@@ -20,8 +20,6 @@ import { useRuntimeBranding } from "@/hooks/brand";
 import { getLocaleFromPath } from "@/lib/locale-routing";
 import { resolveSchoolIdForProfile } from "@/lib/school/context";
 import { fetchJsonWithAuthorizedSession } from "@/lib/authorized-api";
-import { printHtmlDocument } from "@/lib/print/branding";
-import { buildBulkLoginCardsHtml, type BulkCardItem } from "./_utils";
 import { useTranslations } from "next-intl";
 import { usePathname } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
@@ -317,49 +315,6 @@ export default function StudentsPage() {
       setResettingPassword(false);
     }
   }, [modals, profile, schoolScope.selectedSchoolId, locale]);
-
-  const printAllStudentCards = useCallback(async () => {
-    if (!profile) return;
-    modals.setPrintingCards(true);
-    modals.setError("");
-    try {
-      const schoolId = await resolveSchoolIdForProfile(profile, { selectedSchoolId: schoolScope.selectedSchoolId });
-      if (!schoolId) {
-        modals.setError(locale === "en" ? "No school selected." : "لم يتم تحديد المدرسة.");
-        return;
-      }
-      const params = new URLSearchParams({ schoolId });
-      if (effectiveBranchId) params.set("branchId", effectiveBranchId);
-
-      const { response, payload } = await fetchJsonWithAuthorizedSession<{ ok?: boolean; cards?: BulkCardItem[]; error?: { message?: string } }>(
-        `/api/dashboard/students/bulk-cards?${params.toString()}`,
-      );
-
-      if (!response.ok || !payload?.cards) {
-        modals.setError(payload?.error?.message || (locale === "en" ? "Could not load student cards." : "تعذر تحميل بطاقات الطلاب."));
-        return;
-      }
-
-      if (payload.cards.length === 0) {
-        modals.setError(locale === "en" ? "No students with active accounts found." : "لا يوجد طلاب بحسابات نشطة.");
-        return;
-      }
-
-      const html = await buildBulkLoginCardsHtml(payload.cards, {
-        locale,
-        schoolName: runtimeBranding.schoolName,
-        logoUrl: runtimeBranding.logoUrl,
-        primaryColor: runtimeBranding.primaryColor,
-        secondaryColor: runtimeBranding.secondaryColor,
-        cardBgUrl: runtimeBranding.cardBgUrl,
-      });
-      printHtmlDocument(html);
-    } catch {
-      modals.setError(locale === "en" ? "Failed to prepare cards." : "حدث خطأ أثناء تجهيز البطاقات.");
-    } finally {
-      modals.setPrintingCards(false);
-    }
-  }, [profile, schoolScope.selectedSchoolId, effectiveBranchId, locale, modals, runtimeBranding]);
 
   const [_resettingPasswords, setResettingPasswords] = useState(false);
   const bulkResetConfirmedRef = useRef(false);

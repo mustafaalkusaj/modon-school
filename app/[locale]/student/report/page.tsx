@@ -14,7 +14,6 @@ import {
 import { StudentShell } from "@/components/StudentShell";
 import { getLocaleFromPath } from "@/lib/locale-routing";
 import { fetchJsonWithAuthorizedSession } from "@/lib/authorized-api";
-import { StatsCard, KPIGrid } from "@/components/ui/stats-card";
 import {
   Card,
   CardHeader,

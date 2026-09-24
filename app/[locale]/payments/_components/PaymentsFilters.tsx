@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { useTranslations } from "next-intl";
 import { motion, AnimatePresence } from "framer-motion";
-import { Download, Plus, SlidersHorizontal, ChevronDown, Users, FileX, CheckCircle2, Tag, GraduationCap, PauseCircle, Trash2, GraduationCap as ClassIcon, ArrowUpDown, ArrowUp, ArrowDown, DollarSign, RotateCcw, School } from "lucide-react";
+import { Download, Plus, SlidersHorizontal, ChevronDown, Users, FileX, CheckCircle2, Tag, GraduationCap, PauseCircle, Trash2, ArrowUpDown, ArrowUp, ArrowDown, DollarSign, RotateCcw, School } from "lucide-react";
 import { QUICK_FILTERS } from "../_types";
 
 interface PaymentsFiltersProps {

@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useCallback } from "react";
-import { usePathname, useRouter } from "next/navigation";
+import { usePathname } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { motion, AnimatePresence } from "framer-motion";
 import { AppSidebar } from "@/components/AppSidebar";
@@ -17,16 +17,15 @@ import { useSchoolScope } from "@/hooks/useSchoolScope";
 import { useBranchScope } from "@/hooks/useBranchScope";
 import { useRuntimeBranding } from "@/hooks/brand";
 import { getLocaleFromPath } from "@/lib/locale-routing";
-import { School, Layers, Banknote } from "@/lib/icons";
+import { School, Layers } from "@/lib/icons";
 import { cn } from "@/lib/brand/brand-utils";
 import { useClassesSections } from "../dashboard/_hooks/useClassesSections";
 import { useDashboardData } from "../dashboard/_hooks/useDashboardData";
 import { useFeeManagement } from "../dashboard/_hooks/useFeeManagement";
 import type { ClassItem, SectionItem, ClassForm, SectionForm } from "../dashboard/_components/types";
-import { ClassFeesTable, FeeModal } from "../dashboard/_components";
+import { FeeModal } from "../dashboard/_components";
 import { ClassFormModal } from "./_components/ClassFormModal";
 import { SectionFormModal } from "./_components/SectionFormModal";
-import { ClassesTable } from "./_components/ClassesTable";
 import { UnifiedClassesTable } from "./_components/UnifiedClassesTable";
 import { SectionsTable } from "./_components/SectionsTable";
 import { ClassesStats } from "./_components/ClassesStats";
@@ -36,10 +35,8 @@ import { fetchJsonWithAuthorizedSession, withJsonHeaders } from "@/lib/authorize
 
 export default function ClassesPage() {
   const pathname = usePathname();
-  const router = useRouter();
   const locale = getLocaleFromPath(pathname) as "ar" | "en";
   const t = useTranslations("classes");
-  const commonT = useTranslations("common");
   const { profile, canAny } = useRole();
   const schoolScope = useSchoolScope(profile);
   const branchScope = useBranchScope(profile);
@@ -83,7 +80,6 @@ export default function ClassesPage() {
   // Local UI state
   const [activeView, setActiveView] = useState<"classes" | "sections">("classes");
   const [search, setSearch] = useState("");
-  const [showAddMenu, setShowAddMenu] = useState(false);
   const [showClassForm, setShowClassForm] = useState(false);
   const [showSectionForm, setShowSectionForm] = useState(false);
   const [editingClass, setEditingClass] = useState<ClassItem | null>(null);

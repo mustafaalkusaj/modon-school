@@ -8,7 +8,7 @@ import { Select } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
 import { Modal, ModalHeader, ModalBody, ModalFooter } from "@/components/ui/modal";
 import type { DistributionItem, DistributionSettings } from "../_types";
-import { GRADES, GRADE_MAP, DEFAULT_SIZE_SCALES, ACADEMIC_YEAR } from "../_constants";
+import { GRADES, DEFAULT_SIZE_SCALES, ACADEMIC_YEAR } from "../_constants";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 interface SettingsTabProps {

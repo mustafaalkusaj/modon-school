@@ -2,7 +2,6 @@
 
 import Link from "next/link";
 import Image from "next/image";
-import { usePathname } from "next/navigation";
 import { localizeAppPath } from "@/lib/locale-routing";
 import { Pencil, Trash2, Printer, Phone, GraduationCap, Users, ClipboardList } from "@/lib/icons";
 import type { TeacherRecord } from "../_types";
@@ -64,7 +63,6 @@ function TeacherAvatar({ name, photo }: { name: string; photo?: string | null })
 
 export function TeachersTable({ teachers, loading, canManage, locale, assignmentsMap, onEdit, onDelete, onPrint, onPrintInfo }: Props) {
   const isEn = locale === "en";
-  const pathname = usePathname();
 
   if (loading) {
     return (

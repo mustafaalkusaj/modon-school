@@ -36,8 +36,9 @@ const OUTPUT_DIR = path.join(process.cwd(), "output/playwright/comprehensive-tes
 const REPORT_PATH = path.join(OUTPUT_DIR, "comprehensive-test-report.json");
 const SCREENSHOTS_DIR = path.join(OUTPUT_DIR, "screenshots");
 
-const ids = getQAIds();
-const superAdmin = getQAAccount("super_admin");
+// Called for their fail-fast env validation (throw if QA env vars are missing).
+getQAIds();
+getQAAccount("super_admin");
 const schoolAdmin = getQAAccount("school_admin_a");
 
 const TS = Date.now();
@@ -205,28 +206,6 @@ async function runFlow(
 /* ═══════════════════════════════════════════════════════════════════════════
    SECTION FLOWS
    ═══════════════════════════════════════════════════════════════════════════ */
-
-/* ─── 1. BRANDING (Super Admin) ─────────────────────────────────────────── */
-
-async function flowBrandingSave(page: Page) {
-  await page.goto(`/ar/dashboard?school=${ids.schoolAId}`, { waitUntil: "domcontentloaded" });
-  const saveBtn = page.getByRole("button", { name: "حفظ الهوية" });
-  if (!await saveBtn.isVisible({ timeout: 15_000 }).catch(() => false)) {
-    blocked("Branding save button not visible");
-  }
-
-  await waitForApi(page, /\/api\/web\/dashboard\/branding$/, () => saveBtn.click());
-  await expect(page.getByText(/تم تحديث الشعار|حُفظت الألوان/).first()).toBeVisible({ timeout: 15_000 });
-  await screenshot(page, "01-branding-saved");
-  return "Branding saved successfully (no-op save on existing data)";
-}
-
-async function flowSchoolLogoSmoke(page: Page) {
-  await page.goto(`/ar/dashboard?school=${ids.schoolAId}`, { waitUntil: "domcontentloaded" });
-  await expect(page.getByTestId("school-logo-input")).toBeAttached({ timeout: 20_000 });
-  await screenshot(page, "02-school-logo-control");
-  return "School logo upload control is present and attached";
-}
 
 /* ─── 2. STUDENTS (School Admin) ────────────────────────────────────────── */
 
@@ -920,24 +899,6 @@ async function flowReportsExport(page: Page) {
 
   await screenshot(page, "22-reports-export");
   return `Exported reports as: ${download!.suggestedFilename()}`;
-}
-
-/* ─── 13. BRANCHES (Super Admin) ────────────────────────────────────────── */
-
-async function flowBranchesPage(page: Page) {
-  await page.goto("/ar/super-admin", { waitUntil: "domcontentloaded" });
-  await page.waitForTimeout(3_000);
-
-  const pageContent = await page.textContent("body");
-  const hasBranchContent =
-    pageContent?.includes("المدارس") ||
-    pageContent?.includes("الفروع") ||
-    pageContent?.includes("إضافة");
-
-  if (!hasBranchContent) blocked("Branches/schools page did not load expected content");
-
-  await screenshot(page, "23-branches-page");
-  return "Branches/schools page loaded for super admin";
 }
 
 /* ─── 14. SETTINGS (School Admin) ───────────────────────────────────────── */

@@ -1,8 +1,8 @@
 "use client";
 
 import { useState, useMemo, useEffect, type ElementType } from "react";
-import { Users, UserRoundPlus, FileDown, PencilLine, Trash2, KeyRound, ExternalLink, GraduationCap, BookOpen, ShieldCheck, Search } from "@/lib/icons";
-import { formatDate, relationName } from "./utils";
+import { UserRoundPlus, FileDown, PencilLine, Trash2, KeyRound, ExternalLink, GraduationCap, BookOpen, ShieldCheck, Search } from "@/lib/icons";
+import { relationName } from "./utils";
 import type { BranchOptionRecord, SchoolRecord, UserRecord } from "./types";
 import { ROLE_LABELS, ROLE_COLORS } from "@/lib/auth";
 import { exportToCSV } from "@/lib/export";

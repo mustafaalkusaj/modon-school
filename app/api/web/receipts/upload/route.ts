@@ -54,7 +54,7 @@ export async function POST(req: NextRequest) {
 
   try {
     const url = await uploadLogoToStorage({
-      bucket: "school-logos" as "school-logos",
+      bucket: "school-logos" as const,
       file,
       mime: validation.mime,
       objectPrefix: "receipt",

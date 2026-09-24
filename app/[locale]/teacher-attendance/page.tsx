@@ -67,18 +67,6 @@ type AttendanceSettings = {
   max_late_days_before_absent: number;
 };
 
-type AttendanceLogRecord = {
-  id: string;
-  attendance_date: string;
-  teacher_id: string;
-  teacher_name: string;
-  subject: string | null;
-  status: AttendanceStatus;
-  check_in_time: string | null;
-  check_out_time: string | null;
-  notes: string | null;
-};
-
 type TodayLecture = {
   id: string;
   teacher_id: string;

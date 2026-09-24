@@ -40,11 +40,6 @@ function StudentAccountsContent() {
   const [qrLoading, setQrLoading] = useState<Record<string, boolean>>({});
   const [qrUrls, setQrUrls] = useState<Record<string, string>>({});
   const [copied, setCopied] = useState<string | null>(null);
-  const [recreating, setRecreating] = useState(false);
-  const [recreateResult, setRecreateResult] = useState<{
-    ok: boolean;
-    message: string;
-  } | null>(null);
 
   const fetchStudents = useCallback(async () => {
     if (!schoolId) return;
@@ -109,44 +104,6 @@ function StudentAccountsContent() {
       setProvisioning(false);
     }
   }, [schoolId, provisioning, fetchStudents]);
-
-  const handleRecreateAll = useCallback(async () => {
-    if (!schoolId || recreating) return;
-    if (!window.confirm("سيتم حذف جميع حسابات الطلبة الحالية وإعادة إنشائها بالتنسيق الجديد. هل أنت متأكد؟")) return;
-    setRecreating(true);
-    setRecreateResult(null);
-    try {
-      const res = await fetchWithAuthorizedSession(
-        "/api/web/student-accounts/recreate-all",
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ schoolId }),
-        },
-      );
-      const data = await res.json();
-      if (!data.ok) {
-        const msg = typeof data.error === "string" ? data.error : data.error?.message;
-        throw new Error(msg ?? "فشل في إعادة إنشاء الحسابات");
-      }
-      const parts: string[] = [];
-      if (data.deleted > 0) parts.push(`تم حذف ${data.deleted} حساب`);
-      if (data.created > 0) parts.push(`تم إنشاء ${data.created} حساب`);
-      if (data.failed > 0) parts.push(`فشل ${data.failed} حساب`);
-      setRecreateResult({
-        ok: data.failed === 0,
-        message: parts.length > 0 ? parts.join(" · ") : "لا توجد حسابات لإعادة إنشائها.",
-      });
-      fetchStudents();
-    } catch (err: unknown) {
-      setRecreateResult({
-        ok: false,
-        message: err instanceof Error ? err.message : "خطأ غير متوقع",
-      });
-    } finally {
-      setRecreating(false);
-    }
-  }, [schoolId, recreating, fetchStudents]);
 
   const handleShowQr = useCallback(
     async (student: StudentAccount) => {
@@ -476,8 +433,6 @@ function StudentAccountsContent() {
     [openPrintCards, filtered],
   );
 
-  const withAccount = useMemo(() => students.filter((s) => s.hasAccount).length, [students]);
-  const withoutAccountLocal = students.length - withAccount;
   const withPassword = useMemo(() => students.filter((s) => s.password).length, [students]);
   const withoutPassword = students.length - withPassword;
 

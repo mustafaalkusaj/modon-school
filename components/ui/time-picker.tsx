@@ -106,9 +106,9 @@ export function TimePicker({ value, onChange, className, disabled, placeholder }
   const dropdownRef = useRef<HTMLDivElement>(null);
   const [pos, setPos] = useState<{ top: number; left: number; width: number }>({ top: 0, left: 0, width: 220 });
   // Use current time for scroll position when value is empty
-  const now = useRef(new Date());
+  const [now] = useState(() => new Date());
   const hasValue = !!value;
-  const { h, m } = hasValue ? parseTime(value) : { h: now.current.getHours(), m: now.current.getMinutes() };
+  const { h, m } = hasValue ? parseTime(value) : { h: now.getHours(), m: now.getMinutes() };
 
   const isPM = h >= 12;
   const h12 = h === 0 ? 12 : h > 12 ? h - 12 : h;

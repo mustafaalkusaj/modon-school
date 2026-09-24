@@ -11,12 +11,16 @@ import type {
   DistributionSettings,
   StudentBasic,
 } from "../_types";
-import { STATUS_LABELS } from "../_types";
-import { GRADES, GRADE_MAP } from "../_constants";
+import { GRADE_MAP } from "../_constants";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
 type ReportType = "delivery" | "gaps" | "purchase";
+
+const REPORT_ACTION_BUTTONS = [
+  { action: "print", icon: "⎙", text: "طباعة" },
+  { action: "copy", icon: "📋", text: "نسخ" },
+] as const;
 
 interface ReportsTabProps {
   students: StudentBasic[];
@@ -289,10 +293,13 @@ export default function ReportsTab({
         <>
           {/* Action Buttons */}
           <div className="flex gap-2 print:hidden">
-            {([{ fn: handlePrint, icon: "⎙", text: "طباعة" }, { fn: handleCopy, icon: "📋", text: "نسخ" }] as const).map((btn) => (
+            {REPORT_ACTION_BUTTONS.map((btn) => (
               <button
                 key={btn.text}
-                onClick={btn.fn}
+                onClick={() => {
+                  if (btn.action === "print") handlePrint();
+                  else void handleCopy();
+                }}
                 style={{ display: "inline-flex", alignItems: "center", gap: "6px", padding: "8px 20px", borderRadius: "999px", border: "1.5px solid var(--border)", background: "var(--card-bg)", color: "var(--text-primary)", fontWeight: 600, fontSize: "0.85rem", cursor: "pointer", transition: "all 0.2s" }}
               >
                 <span style={{ fontSize: "1.1rem" }}>{btn.icon}</span>

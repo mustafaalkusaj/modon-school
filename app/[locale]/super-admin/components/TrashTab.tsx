@@ -2,7 +2,6 @@
 
 import { useEffect, useState, useCallback, useMemo } from "react";
 import {
-  Trash2,
   RotateCcw,
   RefreshCw,
   Building2,

@@ -8,7 +8,6 @@ import { formatDate } from "@/lib/formatting";
 import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/empty-state";
 import { ErrorState } from "@/components/ui/error-state";
-import { cn } from "@/lib/brand/brand-utils";
 import type { NotificationListItem, NotificationStatus, NotificationPriority, NotificationCategory } from "@/lib/notifications/types";
 
 interface Props {
@@ -58,7 +57,7 @@ function SkeletonCard() {
   );
 }
 
-export function NotificationHistory({ schoolId, locale, refreshKey }: Props) {
+export function NotificationHistory({ schoolId, refreshKey }: Props) {
   const t = useTranslations("notifications.history");
   const commonT = useTranslations("common");
 

@@ -7,8 +7,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 
 export const dynamic = "force-dynamic";
 
-const VALID_SCOPES = ["school", "branch", "class", "role", "user"] as const;
-type TargetScope = typeof VALID_SCOPES[number];
+type TargetScope = "school" | "branch" | "class" | "role" | "user";
 
 function unauthorized() {
   return NextResponse.json(

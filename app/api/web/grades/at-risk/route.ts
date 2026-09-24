@@ -78,7 +78,7 @@ export async function GET(req: NextRequest) {
     branchStudentIds = ((bs ?? []) as Array<{ id: string }>).map((s) => s.id);
   }
 
-  const [entriesResult, schemesResult] = await Promise.all([
+  const [entriesResult] = await Promise.all([
     fetchGradeEntriesForSection(actorSupabase, targetSchoolId, {
       classId,
       academicYear,
@@ -96,7 +96,6 @@ export async function GET(req: NextRequest) {
     });
   }
 
-  const scheme = schemesResult.gradeTypes?.[0] ?? null;
   const report = detectAtRiskStudents(entriesResult.items, null);
 
   return NextResponse.json({ ok: true, gate: { available: true }, report });

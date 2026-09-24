@@ -21,7 +21,7 @@ interface DashboardAlertsProps {
   attendanceSummary?: AttendanceSummary;
 }
 
-export function DashboardAlerts({ dashboardTotals, overdueStudents, monthChange = EMPTY_MONTH_CHANGE, attendanceSummary = EMPTY_ATTENDANCE }: DashboardAlertsProps) {
+export function DashboardAlerts({ overdueStudents, monthChange = EMPTY_MONTH_CHANGE, attendanceSummary = EMPTY_ATTENDANCE }: DashboardAlertsProps) {
   const alerts: AlertItem[] = [];
 
   if (overdueStudents.length > 0) {

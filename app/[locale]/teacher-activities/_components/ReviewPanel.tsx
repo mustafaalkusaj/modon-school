@@ -136,7 +136,7 @@ function ActivityMedia({ activity }: { activity: Activity }) {
   );
 }
 
-export function ReviewPanel({ schoolId }: { schoolId: string }) {
+export function ReviewPanel(_props: { schoolId: string }) {
   const toast = useToast();
   const [activeTab, setActiveTab] = useState<ReviewTab>("pending");
   const [activities, setActivities] = useState<Record<ReviewTab, Activity[]>>({ pending: [], approved: [], rejected: [], flagged: [] });

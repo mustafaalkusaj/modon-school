@@ -5,7 +5,6 @@ import { LayoutGrid, Trash2, Plus, ToggleLeft, ToggleRight, Pencil, Search } fro
 import { fetchWithAuthorizedSession, withJsonHeaders } from "@/lib/authorized-api";
 import { formatDate } from "@/lib/formatting";
 import { Button } from "@/components/ui/button";
-import { EmptyState } from "@/components/ui/empty-state";
 import { ErrorState } from "@/components/ui/error-state";
 import { cn } from "@/lib/brand/brand-utils";
 import { CreateAdModal } from "./CreateAdModal";
@@ -49,7 +48,7 @@ const TYPE_COLOR: Record<AdItem["type"], string> = {
   document: "var(--success)",
 };
 
-export function AdsList({ schoolId, locale }: Props) {
+export function AdsList({ schoolId }: Props) {
   const [items, setItems] = useState<AdItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);

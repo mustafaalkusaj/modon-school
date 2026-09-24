@@ -1,4 +1,4 @@
-import { randomBytes } from "crypto";
+import { createHash, randomBytes, timingSafeEqual } from "crypto";
 import bcrypt from "bcryptjs";
 
 import { isMissingTableError } from "@/lib/admin-infrastructure";
@@ -34,24 +34,6 @@ function normalizeNullableTimestamp(value: unknown) {
   return typeof value === "string" && value.trim() ? value : null;
 }
 
-function randomFragment(length = 6) {
-  const alphabet = "abcdefghijklmnopqrstuvwxyz0123456789";
-  const bytes = randomBytes(length);
-  let result = "";
-  for (let i = 0; i < length; i++) {
-    result += alphabet[bytes[i] % alphabet.length];
-  }
-  return result;
-}
-
-function slugifyIdentifier(value: string) {
-  return value
-    .trim()
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "");
-}
-
 // Password generation and hashing
 export function generateTemporaryPassword() {
   const digits = "0123456789";
@@ -80,7 +62,6 @@ export function verifyPassword(password: string, hash: string): boolean {
     return bcrypt.compareSync(password, hash);
   }
   // Legacy sha256 — constant-time comparison to avoid timing attacks
-  const { createHash, timingSafeEqual } = require("crypto") as typeof import("crypto");
   const inputHash = createHash("sha256").update(password).digest();
   const storedHash = Buffer.from(hash, "hex");
   if (inputHash.length !== storedHash.length) return false;

@@ -2,7 +2,6 @@
 
 import { useState } from "react";
 import { Modal, ModalHeader, ModalBody, ModalFooter } from "@/components/ui/modal";
-import { cn } from "@/lib/brand/brand-utils";
 import { AlertTriangle, Copy, CheckCircle2, Eye, EyeOff } from "@/lib/icons";
 import type { Credentials } from "./types";
 

@@ -12,7 +12,6 @@ import { useRole } from "@/hooks/useRole";
 import { useSchoolScope } from "@/hooks/useSchoolScope";
 import { getLocaleFromPath, localizeAppPath } from "@/lib/locale-routing";
 import { cn } from "@/lib/brand/brand-utils";
-import { invalidateCurrencyCache } from "@/hooks/useCurrency";
 import {
   Settings,
   Palette,
@@ -60,7 +59,6 @@ import {
   type BrandThemeFamilyId,
   type BrandThemePresetId,
 } from "@/lib/brand/themes";
-import { mixColors, shiftColor } from "@/lib/brand/palette";
 import {
   getExcelTheme,
   EXCEL_THEMES,
@@ -105,12 +103,6 @@ type PayrollSettings = {
   working_days_per_month: number | null;
   currency_label: string | null;
   default_lecture_price: number | null;
-};
-
-type PayrollSettingsResponse = {
-  ok?: boolean;
-  settings?: PayrollSettings | null;
-  error?: { message?: string };
 };
 
 
@@ -1003,139 +995,6 @@ function BrandingTab({ schoolId }: { schoolId: string }) {
         <div className="flex justify-end">
           <SaveButton saving={saving} />
         </div>
-      </form>
-    </div>
-  );
-}
-
-// ─── Payroll Tab ──────────────────────────────────────────────────────────────
-
-function PayrollTab({ schoolId }: { schoolId: string }) {
-  const [workingDays, setWorkingDays] = useState("22");
-  const [lecturePrice, setLecturePrice] = useState("0");
-  const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
-  const [success, setSuccess] = useState("");
-  const [error, setError] = useState("");
-
-  const load = useCallback(async () => {
-    if (!schoolId) {
-      setLoading(false);
-      return;
-    }
-    setLoading(true);
-    setError("");
-    try {
-      const { response, payload } = await fetchJsonWithAuthorizedSession<PayrollSettingsResponse>(
-        `/api/web/payroll/settings?schoolId=${encodeURIComponent(schoolId)}`,
-      );
-      if (!response.ok) {
-        throw new Error(getApiErrorMessage(payload, "تعذر تحميل إعدادات الرواتب."));
-      }
-      const s = payload?.settings;
-      if (s) {
-        setWorkingDays(String(s.working_days_per_month ?? 22));
-        setLecturePrice(String(s.default_lecture_price ?? 0));
-      }
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "تعذر تحميل إعدادات الرواتب.");
-    } finally {
-      setLoading(false);
-    }
-  }, [schoolId]);
-
-  useEffect(() => {
-    void load();
-  }, [load]);
-
-  async function handleSubmit(e: React.FormEvent) {
-    e.preventDefault();
-    if (!schoolId) return;
-    setSaving(true);
-    setError("");
-    setSuccess("");
-    try {
-      const { response, payload } = await fetchJsonWithAuthorizedSession<MutationResponse>(
-        "/api/web/payroll/settings",
-        {
-          method: "PUT",
-          headers: withJsonHeaders(),
-          body: JSON.stringify({
-            school_id: schoolId,
-            working_days_per_month: Number(workingDays) || 22,
-            default_lecture_price: Number(lecturePrice) || 0,
-          }),
-        },
-      );
-      if (!response.ok) {
-        throw new Error(getApiErrorMessage(payload, "تعذر حفظ إعدادات الرواتب."));
-      }
-      const s = payload?.settings;
-      if (s) {
-        setWorkingDays(String(s.working_days_per_month ?? 22));
-        setLecturePrice(String(s.default_lecture_price ?? 0));
-      }
-      invalidateCurrencyCache();
-      setSuccess("تم حفظ إعدادات الرواتب بنجاح.");
-      setTimeout(() => setSuccess(""), 3500);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "تعذر حفظ إعدادات الرواتب.");
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  if (loading) {
-    return (
-      <div className="flex items-center justify-center py-20 gap-3">
-        <Loader2 size={20} className="animate-spin text-[var(--primary)]" />
-        <span className="text-sm font-bold text-[var(--text-muted)]">جارٍ التحميل...</span>
-      </div>
-    );
-  }
-
-  return (
-    <div className="space-y-5">
-      <Toast success={success} error={error} />
-
-      <form onSubmit={handleSubmit}>
-        <Section
-          title="إعدادات الرواتب والمحاضرات"
-          description="هذه الإعدادات تؤثر على حساب الرواتب الشهرية وأسعار المحاضرات."
-        >
-          <Field label="أيام العمل في الشهر" htmlFor="working-days-input">
-            <input
-              id="working-days-input"
-              className={INPUT_CLS}
-              type="number"
-              min={1}
-              max={31}
-              step={1}
-              placeholder="22"
-              value={workingDays}
-              onChange={(e) => setWorkingDays(e.target.value)}
-              required
-            />
-          </Field>
-
-          <Field label="سعر المحاضرة الافتراضي" htmlFor="lecture-price-input">
-            <input
-              id="lecture-price-input"
-              className={INPUT_CLS}
-              type="number"
-              min={0}
-              step={500}
-              placeholder="0"
-              value={lecturePrice}
-              onChange={(e) => setLecturePrice(e.target.value)}
-              required
-            />
-          </Field>
-
-          <div className="flex justify-end pt-2">
-            <SaveButton saving={saving} />
-          </div>
-        </Section>
       </form>
     </div>
   );

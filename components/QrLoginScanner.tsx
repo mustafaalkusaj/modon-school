@@ -15,7 +15,6 @@ interface QrLoginScannerProps {
 
 export function QrLoginScanner({
   onSuccess,
-  onError,
   isRTL,
 }: QrLoginScannerProps) {
   const [scanning, setScanning] = useState(false);

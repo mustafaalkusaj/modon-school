@@ -792,7 +792,6 @@ export default function ExpensesPage() {
 
   const filteredTypes = useMemo(() => expenseTypes.filter((t) => !typeSearch || t.name.includes(typeSearch)), [expenseTypes, typeSearch]);
   const totalFiltered = expenseSummary.filteredTotalAmount;
-  const totalAll = expenseSummary.schoolTotalAmount;
 
   const inputClasses = "h-11 rounded-xl border border-[var(--border)] bg-[var(--surface-strong)] px-4 py-2 text-sm text-[var(--text-primary)] outline-none transition focus:border-[var(--primary)] focus:ring-4 focus:ring-[var(--primary)]/10 w-full";
 

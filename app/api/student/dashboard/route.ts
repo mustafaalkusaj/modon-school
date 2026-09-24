@@ -1,16 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { resolveStudentContext, unauthorized } from "@/lib/student-api";
 
-const DAY_MAP: Record<number, string> = {
-  0: "sunday",
-  1: "monday",
-  2: "tuesday",
-  3: "wednesday",
-  4: "thursday",
-  5: "friday",
-  6: "saturday",
-};
-
 export async function GET(req: NextRequest) {
   const ctx = await resolveStudentContext(req);
   if (!ctx) return unauthorized();
