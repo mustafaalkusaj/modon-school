@@ -246,7 +246,7 @@ async function main() {
   console.log("\n=== Seed complete ===");
   console.log(`School: QA_DEMO_SCHOOL`);
   console.log(`Branch: QA_DEMO_BRANCH`);
-  console.log(`Password for all users: ${DEMO_PASSWORD}`);
+  console.log("Password for all users: the value of SEED_DEMO_PASSWORD");
   console.log("\nUsers:");
   for (const user of USERS) {
     console.log(`  ${user.role.padEnd(14)} ${user.email}`);
