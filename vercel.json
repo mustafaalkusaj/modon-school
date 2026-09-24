@@ -1,5 +1,7 @@
 {
-  "regions": ["fra1"],
+  "regions": [
+    "fra1"
+  ],
   "functions": {
     "app/api/**/*.ts": {
       "maxDuration": 30
@@ -35,6 +37,10 @@
     }
   ],
   "crons": [
+    {
+      "path": "/api/cron/scheduled-notifications",
+      "schedule": "*/5 * * * *"
+    },
     {
       "path": "/api/ops/warm",
       "schedule": "0 6 * * *"
