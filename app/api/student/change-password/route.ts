@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { resolveStudentContext, unauthorized } from "@/lib/student-api";
+import { enforceRateLimit } from "@/lib/rate-limit";
 import { createClient } from "@supabase/supabase-js";
 import { z } from "zod";
 
@@ -11,6 +12,18 @@ const changePasswordSchema = z.object({
 export async function POST(req: NextRequest) {
   const ctx = await resolveStudentContext(req);
   if (!ctx) return unauthorized();
+
+  // Each attempt verifies current_password against Supabase Auth, so without
+  // a limit this endpoint is a password-guessing oracle for a hijacked session.
+  const rateLimited = await enforceRateLimit(req, {
+    namespace: "student-change-password",
+    windowMs: 15 * 60_000,
+    maxHits: 5,
+    identifier: ctx.userId,
+    productionFailureMode: "memory-fallback",
+    onRateLimited: { error: "too_many_attempts", message: "محاولات كثيرة، حاول لاحقاً" },
+  });
+  if (rateLimited) return rateLimited;
 
   const raw = await req.json().catch(() => null);
   const parsed = changePasswordSchema.safeParse(raw);

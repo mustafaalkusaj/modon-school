@@ -5,6 +5,8 @@ import { resolveWebUserProfileWithStatus } from "@/lib/authorization/snapshot";
 import { studentLoginRequestSchema } from "@/lib/api-schemas";
 import { createServiceSupabaseClient } from "@/lib/supabase-server";
 import {
+  ACCOUNT_LOGIN_RATE_LIMIT,
+  buildAccountRateLimitIdentifier,
   buildAuthRateLimitIdentifier,
   enforceRateLimit,
   normalizeRateLimitEmail,
@@ -92,6 +94,17 @@ export async function POST(req: NextRequest) {
     });
     if (rateLimited) {
       return rateLimited;
+    }
+
+    const accountId = buildAccountRateLimitIdentifier(normalizedEmail);
+    if (accountId) {
+      const accountLimited = await enforceRateLimit(req, {
+        ...ACCOUNT_LOGIN_RATE_LIMIT,
+        identifier: accountId,
+        productionFailureMode: "memory-fallback",
+        onRateLimited: { error: "too_many_attempts", message: LOGIN_RATE_LIMIT_MESSAGE },
+      });
+      if (accountLimited) return accountLimited;
     }
 
     _step = "rbac_secret_check";

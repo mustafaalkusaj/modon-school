@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 
 import {
+  ACCOUNT_LOGIN_RATE_LIMIT,
+  buildAccountRateLimitIdentifier,
   buildAuthRateLimitIdentifier,
   enforceRateLimit,
 } from "@/lib/rate-limit";
@@ -39,6 +41,17 @@ export async function POST(req: NextRequest) {
       },
     });
     if (rateLimited) return rateLimited;
+
+    const accountId = buildAccountRateLimitIdentifier(identifier);
+    if (accountId) {
+      const accountLimited = await enforceRateLimit(req, {
+        ...ACCOUNT_LOGIN_RATE_LIMIT,
+        identifier: accountId,
+        productionFailureMode: "memory-fallback",
+        onRateLimited: { error: "too_many_attempts", message: "محاولات كثيرة، حاول لاحقاً" },
+      });
+      if (accountLimited) return accountLimited;
+    }
 
     const { supabaseUrl, supabaseAnonKey } = getPublicEnv();
     const supabase = createClient(supabaseUrl, supabaseAnonKey, {

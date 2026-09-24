@@ -71,7 +71,7 @@ export async function POST(
       entity_type: "user",
       entity_id: normalizedUserId,
       summary: `Super admin impersonated user ${userProfile.email}`,
-      ip_address: req.headers.get("x-forwarded-for") || null,
+      ip_address: getRateLimitClientIp(req),
       user_agent: req.headers.get("user-agent") || null,
     });
 

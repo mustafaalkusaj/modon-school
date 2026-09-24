@@ -331,6 +331,86 @@ describe("Rate Limiting", () => {
     });
   });
 
+  describe("client IP resolution", () => {
+    function withHeaders(headers: Record<string, string>) {
+      return new NextRequest("https://example.test/api", { headers });
+    }
+
+    it("uses CF-Connecting-IP only when nginx's peer is a Cloudflare edge", async () => {
+      const { getRateLimitClientIp } = await importRateLimit();
+      expect(
+        getRateLimitClientIp(
+          withHeaders({ "x-real-ip": "172.70.1.2", "cf-connecting-ip": "198.51.100.7" }),
+        ),
+      ).toBe("198.51.100.7");
+      expect(
+        getRateLimitClientIp(
+          withHeaders({ "x-real-ip": "2606:4700:10::6816:1", "cf-connecting-ip": "198.51.100.8" }),
+        ),
+      ).toBe("198.51.100.8");
+    });
+
+    it("ignores a forged CF-Connecting-IP sent straight to the origin", async () => {
+      const { getRateLimitClientIp } = await importRateLimit();
+      expect(
+        getRateLimitClientIp(
+          withHeaders({
+            "x-real-ip": "203.0.113.50",
+            "cf-connecting-ip": "10.9.8.7",
+            "x-forwarded-for": "1.2.3.4, 203.0.113.50",
+          }),
+        ),
+      ).toBe("203.0.113.50");
+    });
+
+    it("falls back to X-Forwarded-For only without a proxy peer header", async () => {
+      const { getRateLimitClientIp } = await importRateLimit();
+      expect(getRateLimitClientIp(withHeaders({ "x-forwarded-for": "203.0.113.10, 10.0.0.1" }))).toBe("203.0.113.10");
+      expect(getRateLimitClientIp(withHeaders({}))).toBe("unknown");
+      expect(getRateLimitClientIp(withHeaders({ "x-forwarded-for": "not-an-ip" }))).toBe("unknown");
+    });
+
+    it("matches Cloudflare ranges precisely", async () => {
+      const { isCloudflareIp } = await importRateLimit();
+      expect(isCloudflareIp("104.16.0.1")).toBe(true);
+      expect(isCloudflareIp("104.32.0.1")).toBe(false);
+      expect(isCloudflareIp("::ffff:162.158.1.1")).toBe(true);
+      expect(isCloudflareIp("2a06:98c7::1")).toBe(true);
+      expect(isCloudflareIp("2a06:98c8::1")).toBe(false);
+      expect(isCloudflareIp("garbage")).toBe(false);
+    });
+  });
+
+  describe("per-account login limit", () => {
+    it("keys on the account only, ignoring IP and case", async () => {
+      const { buildAccountRateLimitIdentifier } = await importRateLimit();
+      const a = buildAccountRateLimitIdentifier(" Student1 ");
+      expect(a).toMatch(/^[a-f0-9]{24}$/);
+      expect(buildAccountRateLimitIdentifier("student1@schoolapp.local")).toBe(a);
+      expect(buildAccountRateLimitIdentifier("")).toBeNull();
+    });
+
+    it("blocks an account after the limit even when the IP changes", async () => {
+      setNodeEnv("production");
+      const { enforceRateLimit, buildAccountRateLimitIdentifier } = await importRateLimit();
+      const identifier = buildAccountRateLimitIdentifier("victim@example.com");
+      const opts = {
+        namespace: "acct-test",
+        windowMs: 60_000,
+        maxHits: 2,
+        identifier,
+        productionFailureMode: "memory-fallback" as const,
+      };
+      const ipReq = (ip: string) =>
+        new NextRequest("https://example.test/api", { headers: { "x-real-ip": ip } });
+
+      expect(await enforceRateLimit(ipReq("203.0.113.1"), opts)).toBeNull();
+      expect(await enforceRateLimit(ipReq("203.0.113.2"), opts)).toBeNull();
+      const blocked = await enforceRateLimit(ipReq("203.0.113.3"), opts);
+      expect(blocked?.status).toBe(429);
+    });
+  });
+
   describe("auth login identifiers", () => {
     it("builds a safe identifier from IP and normalized email", async () => {
       const { buildAuthRateLimitIdentifier } = await importRateLimit();
