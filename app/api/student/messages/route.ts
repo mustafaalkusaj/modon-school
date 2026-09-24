@@ -44,7 +44,7 @@ export async function GET(req: NextRequest) {
   }
 
   // 3. Batch-fetch all participants for these conversations (display_name is
-  // stored directly on conversation_participants in nakheel's schema, so no
+  // stored directly on conversation_participants, so no
   // extra join to user_profiles is needed here).
   const { data: allParticipants } = await supabase
     .from("conversation_participants")

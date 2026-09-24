@@ -86,3 +86,15 @@ student-credentials-*.txt
 
 # graft's local graph cache — regenerable, not committed (run `graft build`).
 /graft/
+
+# generated reports / test output (keep them out of the repo)
+/artifacts/
+/playwright-report/
+/test-results/
+*.bak
+*.backup
+*.log
+/lint-output.*
+/warnings_report.json
+/clean_warnings.json
+/perf--*.png
