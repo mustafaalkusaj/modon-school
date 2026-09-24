@@ -204,7 +204,8 @@ export function GradeEntryModal({
       const formData = new FormData();
       formData.append("file", file);
       try {
-        const localSessionId = `local-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+        // Anyone who knows the id can list the photos, so it must be unguessable.
+        const localSessionId = `local-${crypto.randomUUID()}`;
         const res = await fetch(`/api/public/exam-photos?sessionId=${localSessionId}`, {
           method: "POST",
           body: formData,

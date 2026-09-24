@@ -7,8 +7,13 @@ import { useSchoolScope } from "@/hooks/useSchoolScope";
 import { fetchWithAuthorizedSession } from "@/lib/authorized-api";
 import { Download, Printer, Search, Loader2, UserPlus, QrCode, CreditCard, KeyRound, Copy, Check, GraduationCap, Filter } from "@/lib/icons";
 import QRCode from "qrcode";
+import { escapeHtml } from "@/lib/export";
 import { AppSidebar } from "@/components/AppSidebar";
 import { AppShellTopbar } from "@/components/AppShellTopbar";
+
+// Account names come from user-editable records and are written into a
+// same-origin window with document.write, so every value must be escaped.
+const h = (value: unknown) => escapeHtml(String(value ?? ""));
 
 const SITE_URL = "https://modon-school.com";
 const SCHOOL_NAME = "مدارس مدن الأهلية";
@@ -95,7 +100,7 @@ function TeacherAccountsContent() {
   const openQrWindow = useCallback((teacher: TeacherAccount, dataUrl: string) => {
     const w = window.open("", "_blank");
     if (!w) return;
-    w.document.write(`<!DOCTYPE html><html dir="rtl"><head><meta charset="utf-8"/><title>QR - ${teacher.fullName}</title><style>body{display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:100vh;font-family:sans-serif;}</style></head><body><h2>${teacher.fullName}</h2><img src="${dataUrl}" width="250" height="250"/><p style="color:#666">${teacher.username}</p></body></html>`);
+    w.document.write(`<!DOCTYPE html><html dir="rtl"><head><meta charset="utf-8"/><title>QR - ${h(teacher.fullName)}</title><style>body{display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:100vh;font-family:sans-serif;}</style></head><body><h2>${h(teacher.fullName)}</h2><img src="${h(dataUrl)}" width="250" height="250"/><p style="color:#666">${h(teacher.username)}</p></body></html>`);
     w.document.close();
   }, []);
 
@@ -193,10 +198,10 @@ function TeacherAccountsContent() {
         (t, i) =>
           `<tr>
             <td style="padding:8px;border:1px solid #ddd;text-align:center">${i + 1}</td>
-            <td style="padding:8px;border:1px solid #ddd">${t.fullName}</td>
-            <td style="padding:8px;border:1px solid #ddd;text-align:center">${t.subject ?? ""}</td>
-            <td style="padding:8px;border:1px solid #ddd;text-align:center;direction:ltr">${t.username}</td>
-            <td style="padding:8px;border:1px solid #ddd;text-align:center;direction:ltr">${t.password || "—"}</td>
+            <td style="padding:8px;border:1px solid #ddd">${h(t.fullName)}</td>
+            <td style="padding:8px;border:1px solid #ddd;text-align:center">${h(t.subject ?? "")}</td>
+            <td style="padding:8px;border:1px solid #ddd;text-align:center;direction:ltr">${h(t.username)}</td>
+            <td style="padding:8px;border:1px solid #ddd;text-align:center;direction:ltr">${h(t.password || "—")}</td>
           </tr>`,
       )
       .join("");
@@ -249,30 +254,30 @@ function TeacherAccountsContent() {
       <div class="info-section">
         <div class="info-row">
           <span class="info-label">الاسم الكامل</span>
-          <span class="info-value">${teacher.fullName}</span>
+          <span class="info-value">${h(teacher.fullName)}</span>
         </div>
         <div class="info-row">
           <span class="info-label">المادة</span>
-          <span class="info-value">${teacher.subject || "—"}</span>
+          <span class="info-value">${h(teacher.subject || "—")}</span>
         </div>
       </div>
       <div class="credentials">
         <div class="cred-row">
           <span class="cred-label">اسم المستخدم</span>
-          <span class="cred-value" dir="ltr">${teacher.username}</span>
+          <span class="cred-value" dir="ltr">${h(teacher.username)}</span>
         </div>
         <div class="cred-row">
           <span class="cred-label">كلمة المرور</span>
-          <span class="cred-value" dir="ltr">${teacher.password || "—"}</span>
+          <span class="cred-value" dir="ltr">${h(teacher.password || "—")}</span>
         </div>
       </div>
       <div class="qr-row">
         <div class="qr-block">
-          <img src="${siteQr}" class="qr-img" alt="QR الموقع"/>
+          <img src="${h(siteQr)}" class="qr-img" alt="QR الموقع"/>
           <div class="qr-label">رابط الموقع</div>
         </div>
         <div class="qr-block">
-          <img src="${teacherQr}" class="qr-img" alt="QR الأستاذ"/>
+          <img src="${h(teacherQr)}" class="qr-img" alt="QR الأستاذ"/>
           <div class="qr-label">تسجيل دخول الأستاذ</div>
         </div>
       </div>
