@@ -129,6 +129,20 @@ export async function regenerateQrToken(
   return data as unknown as QrLoginToken;
 }
 
+export async function getQrTokenById(
+  tokenId: string,
+): Promise<QrLoginToken | null> {
+  const supabase = createServiceSupabaseClient();
+  const { data, error } = await supabase
+    .from("qr_login_tokens" as any)
+    .select("*")
+    .eq("id", tokenId)
+    .maybeSingle();
+
+  if (error) throw error;
+  return (data as unknown as QrLoginToken) ?? null;
+}
+
 export async function listQrTokensBySchool(
   schoolId: string,
 ): Promise<QrLoginToken[]> {

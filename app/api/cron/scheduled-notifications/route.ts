@@ -73,8 +73,8 @@ async function handle(req: NextRequest) {
   const client = createServiceSupabaseClient();
   const now = new Date().toISOString();
 
-  const { data: pending, error: fetchError } = await (client
-    .from("scheduled_notifications") as ReturnType<typeof client.from>)
+  const { data: pending, error: fetchError } = await client
+    .from("scheduled_notifications")
     .select("*")
     .eq("status", "pending")
     .lte("scheduled_at", now)
@@ -104,8 +104,8 @@ async function handle(req: NextRequest) {
       const userIds = await resolveTargetUserIds(client, schoolId, scope, targetValue);
 
       if (userIds.length === 0) {
-        await (client
-          .from("scheduled_notifications") as ReturnType<typeof client.from>)
+        await client
+          .from("scheduled_notifications")
           .update({ status: "sent", sent_at: now, result: { targeted: 0, sent: 0 } })
           .eq("id", id);
         sent++;
@@ -122,8 +122,8 @@ async function handle(req: NextRequest) {
         link: (item.link as string) ?? null,
       });
 
-      await (client
-        .from("scheduled_notifications") as ReturnType<typeof client.from>)
+      await client
+        .from("scheduled_notifications")
         .update({
           status: "sent",
           sent_at: now,
@@ -140,8 +140,8 @@ async function handle(req: NextRequest) {
     } catch (error) {
       failed++;
       logRouteError("cron/scheduled-notifications:send", error);
-      await (client
-        .from("scheduled_notifications") as ReturnType<typeof client.from>)
+      await client
+        .from("scheduled_notifications")
         .update({ status: "failed", result: { error: String(error) } })
         .eq("id", id);
     }

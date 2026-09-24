@@ -67,11 +67,11 @@
 
 | Role | Email | Password | Branch | Status |
 |------|-------|----------|--------|--------|
-| Branch (Primary) | zena3@modon-school.com | zena102030 | ابتدائية النخيل | Ready |
-| Branch (Boys Secondary) | saif1@modon-school.com | saif102030 | ثانوية البنين | Ready |
-| Branch (Girls Secondary) | zena1@modon-school.com | zena102030 | ثانوية البنات | Ready |
-| School Manager | dr.anmar@modon-school.com | anmar12345 | Multi-branch | Ready |
-| Super Admin | super.admin@modon-school.com | Admin@School2026 | All schools | Ready |
+| Branch (Primary) | zena3@modon-school.com | <redacted> | ابتدائية النخيل | Ready |
+| Branch (Boys Secondary) | saif1@modon-school.com | <redacted> | ثانوية البنين | Ready |
+| Branch (Girls Secondary) | zena1@modon-school.com | <redacted> | ثانوية البنات | Ready |
+| School Manager | dr.anmar@modon-school.com | <redacted> | Multi-branch | Ready |
+| Super Admin | super.admin@modon-school.com | <redacted> | All schools | Ready |
 
 ---
 

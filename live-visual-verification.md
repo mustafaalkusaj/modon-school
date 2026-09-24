@@ -13,7 +13,7 @@ Verification method: live Playwright browser capture + direct screenshot review
 
 ## Authenticated QA Strategy Used
 
-- login credentials: `admin@schoolapp.com / Admin@12345`
+- login credentials: `admin@schoolapp.com / <redacted>`
 - protected-route language switching verified through [`tests/e2e/authenticated-locale-switch.smoke.spec.ts`](/Users/musatafa/modon-school/tests/e2e/authenticated-locale-switch.smoke.spec.ts)
 - login smoke verified through [`tests/e2e/login.smoke.spec.ts`](/Users/musatafa/modon-school/tests/e2e/login.smoke.spec.ts)
 - screenshot proof generated through [`tests/e2e/redesign-visual-capture.spec.ts`](/Users/musatafa/modon-school/tests/e2e/redesign-visual-capture.spec.ts)

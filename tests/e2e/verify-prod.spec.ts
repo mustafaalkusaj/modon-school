@@ -1,10 +1,14 @@
 import { test, expect } from '@playwright/test';
 
+import { e2ePassword, hasE2EPasswords } from './_credentials';
+
+test.skip(!hasE2EPasswords('QA_SCHOOL_ADMIN'), 'Set E2E_QA_SCHOOL_ADMIN_PASSWORD');
+
 // Production verification for bulk import fix
 test.describe('Production Bulk Import - Schema Fix Verification', () => {
   const BASE_URL = 'https://modon-school.com';
   const EMAIL = 'qa.schooladmin.a@example.test';
-  const PASSWORD = '8eI1DRKPEHMNTvNLdhPYA4_kgAc';
+  const PASSWORD = e2ePassword('QA_SCHOOL_ADMIN');
 
   test('should load students page without schema errors', async ({ page }) => {
     // Login

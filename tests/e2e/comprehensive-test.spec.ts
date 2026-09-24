@@ -1,36 +1,43 @@
 import { test, expect } from "@playwright/test";
 
+import { e2ePassword, hasE2EPasswords } from "./_credentials";
+
+test.skip(
+  !hasE2EPasswords("TEACHER_PRIMARY", "TEACHER_BOYS", "TEACHER_GIRLS", "SCHOOL_ADMIN", "SUPER_ADMIN"),
+  "Set the E2E_*_PASSWORD env vars (see tests/e2e/_credentials.ts)",
+);
+
 const BASE_URL = "http://localhost:3000";
 
 const accounts = [
   {
     name: "ابتدائية",
     email: "zena3@modon-school.com",
-    password: "zena102030",
+    password: e2ePassword("TEACHER_PRIMARY"),
     type: "teacher",
   },
   {
     name: "ثانوية بنين",
     email: "saif1@modon-school.com",
-    password: "saif102030",
+    password: e2ePassword("TEACHER_BOYS"),
     type: "teacher",
   },
   {
     name: "ثانوية بنات",
     email: "zena1@modon-school.com",
-    password: "zena102030",
+    password: e2ePassword("TEACHER_GIRLS"),
     type: "teacher",
   },
   {
     name: "مدير مدرسة",
     email: "dr.anmar@modon-school.com",
-    password: "anmar12345",
+    password: e2ePassword("SCHOOL_ADMIN"),
     type: "admin",
   },
   {
     name: "super admin",
     email: "super.admin@modon-school.com",
-    password: "Admin@School2026",
+    password: e2ePassword("SUPER_ADMIN"),
     type: "super_admin",
   },
 ];
@@ -106,7 +113,7 @@ test.describe("Comprehensive App Test Suite", () => {
       // Login as saif1 (branch 1)
       await page1.goto(`${BASE_URL}/ar/login`);
       await page1.fill('input[type="email"]', "saif1@modon-school.com");
-      await page1.fill('input[type="password"]', "saif102030");
+      await page1.fill('input[type="password"]', e2ePassword("TEACHER_BOYS"));
       await page1.click('button[type="submit"]');
       await page1.waitForNavigation();
 
@@ -119,7 +126,7 @@ test.describe("Comprehensive App Test Suite", () => {
       // Login as zena3 (different branch)
       await page2!.goto(`${BASE_URL}/ar/login`);
       await page2!.fill('input[type="email"]', "zena3@modon-school.com");
-      await page2!.fill('input[type="password"]', "zena102030");
+      await page2!.fill('input[type="password"]', e2ePassword("TEACHER_PRIMARY"));
       await page2!.click('button[type="submit"]');
       await page2!.waitForNavigation();
 
@@ -138,7 +145,7 @@ test.describe("Comprehensive App Test Suite", () => {
     }) => {
       await page.goto(`${BASE_URL}/ar/login`);
       await page.fill('input[type="email"]', "super.admin@modon-school.com");
-      await page.fill('input[type="password"]', "Admin@School2026");
+      await page.fill('input[type="password"]', e2ePassword("SUPER_ADMIN"));
       await page.click('button[type="submit"]');
       await page.waitForNavigation();
 
@@ -166,7 +173,7 @@ test.describe("Comprehensive App Test Suite", () => {
     test("Dashboard loads under 5s", async ({ page }) => {
       await page.goto(`${BASE_URL}/ar/login`);
       await page.fill('input[type="email"]', "super.admin@modon-school.com");
-      await page.fill('input[type="password"]', "Admin@School2026");
+      await page.fill('input[type="password"]', e2ePassword("SUPER_ADMIN"));
       const start = Date.now();
       await page.click('button[type="submit"]');
       await page.waitForNavigation();
@@ -177,7 +184,7 @@ test.describe("Comprehensive App Test Suite", () => {
     test("API response under 1s", async ({ page }) => {
       await page.goto(`${BASE_URL}/ar/login`);
       await page.fill('input[type="email"]', "super.admin@modon-school.com");
-      await page.fill('input[type="password"]', "Admin@School2026");
+      await page.fill('input[type="password"]', e2ePassword("SUPER_ADMIN"));
       await page.click('button[type="submit"]');
       await page.waitForNavigation();
 
@@ -195,7 +202,7 @@ test.describe("Comprehensive App Test Suite", () => {
     test("Super admin can view all schools", async ({ page }) => {
       await page.goto(`${BASE_URL}/ar/login`);
       await page.fill('input[type="email"]', "super.admin@modon-school.com");
-      await page.fill('input[type="password"]', "Admin@School2026");
+      await page.fill('input[type="password"]', e2ePassword("SUPER_ADMIN"));
       await page.click('button[type="submit"]');
       await page.waitForNavigation();
 
@@ -209,7 +216,7 @@ test.describe("Comprehensive App Test Suite", () => {
     test("Admin can view school-scoped data", async ({ page }) => {
       await page.goto(`${BASE_URL}/ar/login`);
       await page.fill('input[type="email"]', "dr.anmar@modon-school.com");
-      await page.fill('input[type="password"]', "anmar12345");
+      await page.fill('input[type="password"]', e2ePassword("SCHOOL_ADMIN"));
       await page.click('button[type="submit"]');
       await page.waitForNavigation();
 
@@ -222,7 +229,7 @@ test.describe("Comprehensive App Test Suite", () => {
     test("Teacher can view students", async ({ page }) => {
       await page.goto(`${BASE_URL}/ar/login`);
       await page.fill('input[type="email"]', "saif1@modon-school.com");
-      await page.fill('input[type="password"]', "saif102030");
+      await page.fill('input[type="password"]', e2ePassword("TEACHER_BOYS"));
       await page.click('button[type="submit"]');
       await page.waitForNavigation();
 

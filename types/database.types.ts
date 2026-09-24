@@ -6544,6 +6544,75 @@ export type Database = {
           },
         ]
       }
+      scheduled_notifications: {
+        Row: {
+          branch_id: string | null
+          created_at: string
+          created_by: string
+          id: string
+          link: string | null
+          message: string
+          result: Json | null
+          scheduled_at: string
+          school_id: string
+          sent_at: string | null
+          status: string
+          target_scope: string
+          target_value: string | null
+          title: string
+          type: string
+        }
+        Insert: {
+          branch_id?: string | null
+          created_at?: string
+          created_by: string
+          id?: string
+          link?: string | null
+          message: string
+          result?: Json | null
+          scheduled_at: string
+          school_id: string
+          sent_at?: string | null
+          status?: string
+          target_scope: string
+          target_value?: string | null
+          title: string
+          type?: string
+        }
+        Update: {
+          branch_id?: string | null
+          created_at?: string
+          created_by?: string
+          id?: string
+          link?: string | null
+          message?: string
+          result?: Json | null
+          scheduled_at?: string
+          school_id?: string
+          sent_at?: string | null
+          status?: string
+          target_scope?: string
+          target_value?: string | null
+          title?: string
+          type?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "scheduled_notifications_branch_id_fkey"
+            columns: ["branch_id"]
+            isOneToOne: false
+            referencedRelation: "branches"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "scheduled_notifications_school_id_fkey"
+            columns: ["school_id"]
+            isOneToOne: false
+            referencedRelation: "schools"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       school_announcements: {
         Row: {
           body: string

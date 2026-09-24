@@ -11,11 +11,11 @@ const REPORT_PATH = path.join(OUTPUT_DIR, "critical-flow-audit.json");
 const CREDENTIALS = {
   admin: {
     email: process.env.PW_ADMIN_EMAIL ?? "admin@schoolapp.com",
-    password: process.env.PW_ADMIN_PASSWORD ?? "Admin@12345",
+    password: process.env.PW_ADMIN_PASSWORD ?? "",
   },
   super_admin: {
     email: process.env.PW_SUPER_ADMIN_EMAIL ?? "super.admin@schoolapp.com",
-    password: process.env.PW_SUPER_ADMIN_PASSWORD ?? "Owner@12345",
+    password: process.env.PW_SUPER_ADMIN_PASSWORD ?? "",
   },
 };
 

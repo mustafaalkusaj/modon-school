@@ -22,8 +22,8 @@ export async function GET(request: NextRequest) {
   const { actorSupabase, targetSchoolId } = context.value;
   const status = searchParams.get("status") ?? "pending";
 
-  const { data, error } = await (actorSupabase
-    .from("scheduled_notifications") as ReturnType<typeof actorSupabase.from>)
+  const { data, error } = await actorSupabase
+    .from("scheduled_notifications")
     .select("*")
     .eq("school_id", targetSchoolId)
     .eq("status", status)
@@ -73,8 +73,8 @@ export async function POST(request: NextRequest) {
     return jsonError("scheduled_at must be a valid future date", 400);
   }
 
-  const { data, error } = await (actorSupabase
-    .from("scheduled_notifications") as ReturnType<typeof actorSupabase.from>)
+  const { data, error } = await actorSupabase
+    .from("scheduled_notifications")
     .insert({
       school_id: targetSchoolId,
       branch_id: scope === "branch" ? targetValue ?? actorBranchId ?? null : actorBranchId ?? null,
@@ -111,8 +111,8 @@ export async function DELETE(request: NextRequest) {
 
   const { actorSupabase, targetSchoolId } = context.value;
 
-  const { error } = await (actorSupabase
-    .from("scheduled_notifications") as ReturnType<typeof actorSupabase.from>)
+  const { error } = await actorSupabase
+    .from("scheduled_notifications")
     .update({ status: "cancelled" })
     .eq("id", id)
     .eq("school_id", targetSchoolId)

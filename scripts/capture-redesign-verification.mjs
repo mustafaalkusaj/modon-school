@@ -3,7 +3,7 @@ import fs from "node:fs/promises";
 
 const outDir = "output/playwright/redesign-verification";
 const adminEmail = process.env.PW_ADMIN_EMAIL ?? "admin@schoolapp.com";
-const adminPassword = process.env.PW_ADMIN_PASSWORD ?? "Admin@12345";
+const adminPassword = process.env.PW_ADMIN_PASSWORD ?? "";
 
 async function login(page, locale = "ar") {
   await page.goto(`http://127.0.0.1:3000/${locale}/login`, { waitUntil: "domcontentloaded" });
