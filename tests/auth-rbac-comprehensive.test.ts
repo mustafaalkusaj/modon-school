@@ -64,12 +64,15 @@ describe("RBAC Session - buildRBACSessionPayload", () => {
     ...overrides,
   });
 
-  it("يجب أن تكون RBAC_SESSION_MAX_AGE ساعة واحدة لتقليل نافذة سرقة الجلسة", async () => {
+  // Long-lived by product decision: the cookie is not refreshed in the
+  // background, and recheckRbacFreshness() revalidates is_active and
+  // permissions_version on every request, which bounds the stale-cookie risk.
+  it("يجب أن تكون RBAC_SESSION_MAX_AGE مساوية لـ 300 يوم", async () => {
     const { RBAC_SESSION_MAX_AGE } = await import("@/lib/rbac-session");
-    expect(RBAC_SESSION_MAX_AGE).toBe(3600);
+    expect(RBAC_SESSION_MAX_AGE).toBe(60 * 60 * 24 * 300);
   });
 
-  it("يجب أن تحسب exp = iat + 3600", async () => {
+  it("يجب أن تحسب exp = iat + RBAC_SESSION_MAX_AGE", async () => {
     const { buildRBACSessionPayload, RBAC_SESSION_MAX_AGE } =
       await import("@/lib/rbac-session");
 
@@ -80,7 +83,7 @@ describe("RBAC Session - buildRBACSessionPayload", () => {
     expect(payload.iat).toBeGreaterThanOrEqual(before);
     expect(payload.iat).toBeLessThanOrEqual(after);
     expect(payload.exp).toBe(payload.iat + RBAC_SESSION_MAX_AGE);
-    expect(payload.exp - payload.iat).toBe(3600);
+    expect(payload.exp - payload.iat).toBe(60 * 60 * 24 * 300);
   });
 
   it("يجب أن يضع version=2 عندما لا توجد deepPermissions", async () => {
@@ -487,13 +490,30 @@ describe("Auth - getDefaultRouteForProfile", () => {
       full_name: "Custom Path User",
       email: "custom@example.com",
       role: "admin" as const,
-      permissions: ["view_students"] as const,
+      permissions: ["view_students", "view_payments"] as const,
       school_id: "school-1",
       is_active: true,
       default_path: "/payments",
     };
 
     expect(getDefaultRouteForProfile(profile)).toBe("/payments");
+  });
+
+  it("يجب أن يتجاهل default_path إذا كانت الصفحة غير مسموحة للمستخدم", async () => {
+    const { getDefaultRouteForProfile } = await import("@/lib/auth");
+
+    const profile = {
+      id: "custom-2",
+      full_name: "Custom Path User",
+      email: "custom@example.com",
+      role: "admin" as const,
+      permissions: ["view_students"] as const,
+      school_id: "school-1",
+      is_active: true,
+      default_path: "/payments",
+    };
+
+    expect(getDefaultRouteForProfile(profile)).not.toBe("/payments");
   });
 
   it("يجب أن يرجع /dashboard عند تمرير null", async () => {

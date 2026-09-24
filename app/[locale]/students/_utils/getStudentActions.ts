@@ -39,7 +39,6 @@ export function getStudentActions(options: GetStudentActionsOptions): StudentAct
     onOpenEdit,
     onOpenCredentials,
     onInitDelete,
-    onQuickPay,
     onCopyData,
     onWhatsApp,
     onViewPayments,
@@ -80,7 +79,18 @@ export function getStudentActions(options: GetStudentActionsOptions): StudentAct
       };
 
 
-  const credentialActions: StudentActionItem[] = [];
+  const credentialActions: StudentActionItem[] = canManageStudentAccounts
+    ? [
+        {
+          icon: "🪪",
+          label: copy.credentials,
+          fn: () => {
+            onOpenCredentials(student);
+            setActiveMenu(null);
+          },
+        },
+      ]
+    : [];
 
   const printAction: StudentActionItem = {
     icon: "🖨️",

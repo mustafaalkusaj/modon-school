@@ -135,7 +135,7 @@ describe("POST /api/auth/login", () => {
 
     const response = await POST(
       createLoginRequest({
-        email: "invalid-email",
+        email: "",
         password: "123",
       }),
     );
