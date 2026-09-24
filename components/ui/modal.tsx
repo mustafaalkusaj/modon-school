@@ -118,7 +118,7 @@ export function Modal({
 }: ModalProps) {
   const containerRef = React.useRef<HTMLDivElement>(null);
   const [mounted, setMounted] = React.useState(false);
-  const prefersReducedMotion = usePrefersReducedMotion();
+  usePrefersReducedMotion();
   const titleId = React.useId();
 
   // Handle mounting for portal

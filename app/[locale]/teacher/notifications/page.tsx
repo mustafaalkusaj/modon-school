@@ -6,7 +6,6 @@ import { Bell, CheckCheck } from "lucide-react";
 import { TeacherShell } from "@/components/TeacherShell";
 import { getLocaleFromPath } from "@/lib/locale-routing";
 import { fetchJsonWithAuthorizedSession } from "@/lib/authorized-api";
-import { Badge } from "@/components/ui/badge";
 import { EmptyState } from "@/components/ui/empty-state";
 
 interface Notification {

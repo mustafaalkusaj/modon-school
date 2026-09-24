@@ -8,7 +8,7 @@ import type { PermModule } from "@/types/deep-permissions";
 import { AppSidebar } from "@/components/AppSidebar";
 import { AppShellTopbar } from "@/components/AppShellTopbar";
 import { ProtectedRoute } from "@/components/ProtectedRoute";
-import { PAGE_PATHS, type PageCode } from "@/lib/authorization/page-access";
+import { type PageCode } from "@/lib/authorization/page-access";
 import { requestRuntimeBrandingRefresh, useRuntimeBranding } from "@/hooks/brand";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -429,7 +429,6 @@ function CreateUserModal({
   const [phone, setPhone] = useState("");
   const [jobTitle, setJobTitle] = useState("");
   const [allowedPages, setAllowedPages] = useState<PageCode[]>([]);
-  const isSinglePage = allowedPages.length === 1;
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -799,7 +798,7 @@ function UserCard({ user, accentColor, onEdit, onDelete, onResetPassword, onView
 // ─── Edit User Modal ─────────────────────────────────────────────────────────
 
 function EditUserModal({
-  user, roles, accentColor, onClose, onSaved,
+  user, accentColor, onClose, onSaved,
 }: {
   user: RoleUser; roles: SchoolRole[]; accentColor: string;
   onClose: () => void; onSaved: () => void;

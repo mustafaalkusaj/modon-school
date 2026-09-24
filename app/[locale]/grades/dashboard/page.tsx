@@ -1,6 +1,6 @@
 'use client'
 
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { usePathname } from 'next/navigation'
 import { AppSidebar } from '@/components/AppSidebar'
 import { AppShellTopbar } from '@/components/AppShellTopbar'

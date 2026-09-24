@@ -6,7 +6,7 @@ import { useTranslations } from "next-intl";
 import {
   Send, AlertCircle, CheckCircle2, Users, GraduationCap, School,
   BookOpen, Layers, User, Bell, AlertTriangle, Ban, Search, Loader2,
-  Image, Video, ExternalLink, Pin, Upload, X,
+  Image, Video, ExternalLink, Upload, X,
 } from "@/lib/icons";
 import { fetchWithAuthorizedSession, withJsonHeaders } from "@/lib/authorized-api";
 import { useRuntimeBranding } from "@/hooks/brand/useRuntimeBranding";
@@ -82,7 +82,7 @@ function SectionCard({ step, title, color, children }: { step: number; title: st
   );
 }
 
-export function SendNotificationForm({ schoolId, branchId, locale, onSuccess }: Props) {
+export function SendNotificationForm({ schoolId, branchId, onSuccess }: Props) {
   const branding = useRuntimeBranding();
   const t      = useTranslations("notifications.form");
   const tTypes = useTranslations("notifications.targetTypes");

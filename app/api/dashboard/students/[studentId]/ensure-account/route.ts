@@ -265,7 +265,7 @@ export async function POST(
       // Include the plaintext password for one-time reveal (only when a new password was generated)
       temporary_password: revealedPassword,
     });
-  } catch (error) {
+  } catch {
     return jsonError("تعذر تجهيز حساب التطبيق لهذا الطالب.", 500);
   }
 }

@@ -73,7 +73,7 @@ function CSSBarChart({ segments }: { segments: { label: string; count: number; c
   );
 }
 
-export function AnalyticsTab({ onNavigate }: AnalyticsTabProps = {}) {
+export function AnalyticsTab(_props: AnalyticsTabProps = {}) {
   const [schools, setSchools] = useState<SchoolRecord[]>([]);
   const [users, setUsers] = useState<UserRecord[]>([]);
   const [subscriptions, setSubscriptions] = useState<SubscriptionRecord[]>([]);
@@ -282,7 +282,7 @@ export function AnalyticsTab({ onNavigate }: AnalyticsTabProps = {}) {
             { label: "المستخدمون النشطون",   value: `${stats.uActive}/${stats.totalUsers}`,     icon: Users,         tab: "users"         },
             { label: "الاشتراكات النشطة",    value: stats.activeSubs,                           icon: CreditCard,    tab: "subscriptions" },
             { label: "ينتهي خلال 30 يوم",   value: `${stats.expiring} مدرسة`,                 icon: AlertTriangle, tab: "subscriptions" },
-          ].map(({ label, value, icon: Icon, tab }) => (
+          ].map(({ label, value, icon: Icon }) => (
             <button
               key={label}
               type="button"

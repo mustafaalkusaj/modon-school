@@ -56,10 +56,6 @@ export function DailyFinancialAnalysis({
   const todayPayments = recentPayments.filter((p) => isSameDay(p.created_at, now));
   const todayTotal = todayPayments.reduce((sum, p) => sum + (p.amount ?? 0), 0);
   const todayCount = todayPayments.length;
-  const todayMax =
-    todayPayments.length > 0
-      ? Math.max(...todayPayments.map((p) => p.amount ?? 0))
-      : 0;
   const uniqueStudentsToday = new Set(todayPayments.map((p) => p.student_name ?? p.id)).size;
 
   const yesterday = new Date(now);

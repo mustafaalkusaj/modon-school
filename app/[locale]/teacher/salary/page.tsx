@@ -6,8 +6,6 @@ import {
   Banknote,
   TrendingDown,
   Wallet,
-  CheckCircle2,
-  Clock,
 } from "lucide-react";
 import { TeacherShell } from "@/components/TeacherShell";
 import { getLocaleFromPath } from "@/lib/locale-routing";

@@ -8,7 +8,6 @@ import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Modal, ModalHeader, ModalBody, ModalFooter } from "@/components/ui/modal";
 import {
   Plus, Pencil, Trash2, Users, Loader2, Search, X, GitBranch,
-  CheckCircle2, AlertTriangle,
 } from "@/lib/icons";
 import { ConfirmDialog } from "./dialogs";
 import type { DriverRow, RouteRow, RouteMember, StudentCandidate } from "./types";

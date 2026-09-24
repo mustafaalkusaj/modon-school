@@ -42,7 +42,6 @@ const SIDEBAR_WIDTH_BY_MODE = {
   default: "260px",
   wide: "320px",
 } as const;
-const SIDEBAR_COLLAPSED_WIDTH = "72px";
 
 type SidebarMode = keyof typeof SIDEBAR_WIDTH_BY_MODE;
 
@@ -117,7 +116,7 @@ export function AppSidebar({
   const branchScope = useBranchScope(profile);
   const [scopedSchoolId, setScopedSchoolId] = useState<string | null>(() => readSchoolScopeFromWindow());
   const [mobileOpen, setMobileOpen] = useState(false);
-  const [sidebarMode, setSidebarMode] = useState<SidebarMode>(() => {
+  const [sidebarMode] = useState<SidebarMode>(() => {
     if (typeof window === "undefined") return "default";
     const stored = window.localStorage.getItem(SIDEBAR_MODE_STORAGE_KEY);
     return stored === "wide" ? "wide" : "default";

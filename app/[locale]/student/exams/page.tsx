@@ -199,7 +199,6 @@ export default function StudentExamsPage() {
 
 function ExamCard({
   exam,
-  isAr,
   t,
   upcoming,
 }: {

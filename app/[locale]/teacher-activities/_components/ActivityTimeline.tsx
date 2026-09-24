@@ -70,7 +70,7 @@ function formatTime(iso: string): string {
   return new Date(iso).toLocaleTimeString("ar-IQ-u-nu-latn", { hour: "2-digit", minute: "2-digit" });
 }
 
-export function ActivityTimeline({ schoolId }: { schoolId: string }) {
+export function ActivityTimeline(_props: { schoolId: string }) {
   const t = useTranslations("teacherActivities");
   const toast = useToast();
   const [activities, setActivities] = useState<Activity[]>([]);

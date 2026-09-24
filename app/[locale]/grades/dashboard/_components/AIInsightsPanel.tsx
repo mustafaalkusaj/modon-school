@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useCallback } from 'react'
-import { fetchJsonWithAuthorizedSession, withJsonHeaders } from '@/lib/authorized-api'
+import { withJsonHeaders } from '@/lib/authorized-api'
 
 interface Props {
   academicYear: string

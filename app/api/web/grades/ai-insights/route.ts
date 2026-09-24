@@ -92,7 +92,7 @@ export async function POST(req: NextRequest) {
   }
 
   // Fetch analytics + entries + scheme in parallel
-  const [analyticsResult, entriesResult, schemesResult] = await Promise.all([
+  const [analyticsResult, entriesResult] = await Promise.all([
     fetchGradeAnalytics(actorSupabase, targetSchoolId, {
       academicYear,
       semester: resolvedSemester,
@@ -114,7 +114,6 @@ export async function POST(req: NextRequest) {
 
   const subjectAnalytics = analyticsResult.data;
   const entries = entriesResult.ok ? entriesResult.items : [];
-  const scheme = schemesResult.gradeTypes?.[0] ?? null;
 
   if (!subjectAnalytics.length) {
     return jsonError("لا توجد بيانات كافية للتحليل. تأكد من وجود درجات مؤكدة.", 422);

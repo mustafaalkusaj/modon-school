@@ -11,10 +11,8 @@ import {
 } from "@/lib/ops/error-capture";
 import { writeAuditLog } from "@/lib/audit/audit-log";
 import { createServiceSupabaseClient } from "@/lib/supabase-server";
-import { mainMenuKeyboard } from "@/lib/ops/telegram-bot-menus";
 import { getSchoolsOverview, getSchoolDetail } from "@/lib/ops/telegram-bot-schools";
 import {
-  getUsersOverview,
   searchUser,
   getNewUsers,
   getInactiveUsers,

@@ -7,7 +7,7 @@ import {
   parseTelegramUpdate,
 } from "@/lib/ops/telegram-commands";
 import { maskChatId, sendTelegramBotReply } from "@/lib/ops/telegram";
-import { getTelegramSecretToken, verifyTelegramSecret } from "@/lib/ops/telegram-secret";
+import { verifyTelegramSecret } from "@/lib/ops/telegram-secret";
 import { botAnswerCallback, botEditMessage, botSendMessage } from "@/lib/ops/telegram-bot-api";
 import { checkRateLimit, logUnauthorizedAccess } from "@/lib/ops/telegram-bot-guards";
 import {

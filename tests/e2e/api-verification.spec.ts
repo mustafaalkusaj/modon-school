@@ -1,4 +1,4 @@
-import { test, expect } from "@playwright/test";
+import { test } from "@playwright/test";
 
 import { ensureE2EEnvLoaded, getPlaywrightBaseUrl } from "./helpers/e2e-env";
 
@@ -90,7 +90,7 @@ test.describe("API Endpoints Verification", () => {
     console.log(`Page response status: ${pageResponse.status()}`);
   });
 
-  test("verify request/response structure for student updates", async ({ request }) => {
+  test("verify request/response structure for student updates", async () => {
     console.log("=== PHASE 3: API Request/Response Structure ===");
 
     // Create test body matching the expected schema

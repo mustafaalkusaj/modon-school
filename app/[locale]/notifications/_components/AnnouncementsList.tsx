@@ -6,7 +6,6 @@ import { Megaphone, Pin, PinOff, Trash2, Plus, ExternalLink, Image, FileText, Vi
 import { fetchWithAuthorizedSession, withJsonHeaders } from "@/lib/authorized-api";
 import { formatDate } from "@/lib/formatting";
 import { Button } from "@/components/ui/button";
-import { EmptyState } from "@/components/ui/empty-state";
 import { ErrorState } from "@/components/ui/error-state";
 import { cn } from "@/lib/brand/brand-utils";
 import { CreateAnnouncementModal } from "./CreateAnnouncementModal";
@@ -25,7 +24,7 @@ const MEDIA_ICON: Record<AnnouncementMediaType, React.ReactNode> = {
   link: <ExternalLink size={14} />,
 };
 
-export function AnnouncementsList({ schoolId, branchId, locale }: Props) {
+export function AnnouncementsList({ schoolId, branchId }: Props) {
   const t = useTranslations("notifications.announcements");
   const commonT = useTranslations("common");
 

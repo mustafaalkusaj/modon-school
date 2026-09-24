@@ -97,7 +97,6 @@ export async function PATCH(req: NextRequest, { params }: Params) {
   }
 
   const row = data as Record<string, unknown>;
-  const student = row.students as { auth_user_id?: string | null } | null;
 
   // Best-effort: notify the student their work was graded (push + in-app).
   if (row.student_id) {

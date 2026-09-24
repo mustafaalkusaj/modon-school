@@ -169,7 +169,14 @@ export function getDefaultRouteForProfile(profile: UserProfile | null) {
     return "/group";
   }
 
-  if (profile?.default_path && profile.default_path.startsWith("/")) {
+  // A stale default_path can point at a page the profile may not open (e.g.
+  // /dashboard for a branch user). ProtectedRoute redirects forbidden users
+  // here, so honoring it would loop; fall through to the scope default.
+  if (
+    profile?.default_path &&
+    profile.default_path.startsWith("/") &&
+    getAccessDecision(profile, profile.default_path).allowed
+  ) {
     return profile.default_path;
   }
 

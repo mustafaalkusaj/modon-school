@@ -315,10 +315,6 @@ export default function HomeworkPage() {
     () => Array.from(new Set(rows.map((r) => r.subject).filter(Boolean))) as string[],
     [rows],
   );
-  const classNames = useMemo(
-    () => Array.from(new Set(rows.map((r) => r.class_name).filter(Boolean))) as string[],
-    [rows],
-  );
 
   return (
     <ProtectedRoute roles={["super_admin", "admin"]}>

@@ -43,7 +43,7 @@ const cardVariants = {
   visible: (i: number) => ({ opacity: 1, y: 0, transition: { delay: i * 0.07, duration: 0.35 } }),
 };
 
-export function ActivityDashboard({ schoolId }: { schoolId: string }) {
+export function ActivityDashboard(_props: { schoolId: string }) {
   const t = useTranslations("teacherActivities");
   const [data, setData] = useState<DashboardData | null>(null);
   const [loading, setLoading] = useState(true);

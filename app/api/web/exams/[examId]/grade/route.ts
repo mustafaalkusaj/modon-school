@@ -83,7 +83,6 @@ export async function POST(
 
   // Update each graded answer
   const grades = body.grades as Array<{ questionId: string; marks_awarded: number; feedback?: string }>;
-  let manualTotal = 0;
 
   for (const grade of grades) {
     const maxMarks = maxMarksByQuestion.get(grade.questionId);
@@ -102,8 +101,6 @@ export async function POST(
         { status: 400 },
       );
     }
-
-    manualTotal += marksAwarded;
 
     await actorSupabase
       .from("student_answers")

@@ -25,7 +25,7 @@ function isSchoolSubscriptionExpired(endDate: string | null | undefined) {
 
 // Cheap single-row recheck of the user's live RBAC state against the DB.
 // Guards the signed-cookie fast-path: a cookie is valid for up to
-// RBAC_SESSION_MAX_AGE (8h), during which an admin may have deactivated the
+// RBAC_SESSION_MAX_AGE (300 days), during which an admin may have deactivated the
 // user or bumped permissions_version. Returns "stale" when the cookie must be
 // rejected, "ok" when it is still trustworthy, and "skip" when the lookup
 // itself failed (do not block on infra errors — fall through to full resolve).
@@ -53,7 +53,7 @@ async function recheckRbacFreshness(
     // Run the user-state and subscription rechecks together. The subscription
     // recheck closes the gap where permissions_version is NOT bumped on
     // subscription expiry, so an already-logged-in admin would otherwise keep
-    // write access for up to the full 8h cookie lifetime after expiry.
+    // write access for up to the full cookie lifetime (RBAC_SESSION_MAX_AGE) after expiry.
     const [profileResult, subscriptionResult] = await Promise.all([
       serviceClient
         .from("user_profiles")
@@ -185,7 +185,7 @@ export async function resolveSchoolScopedActorContext(
       return result;
     }
 
-    // Cheap DB recheck: the signed cookie can be up to 8h old. If the user was
+    // Cheap DB recheck: the signed cookie can be up to RBAC_SESSION_MAX_AGE old. If the user was
     // deactivated or permissions_version was bumped since the cookie was
     // issued, reject the fast-path and fall through to full re-resolution
     // (which re-reads the DB and enforces the live state).

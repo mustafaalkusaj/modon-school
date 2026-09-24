@@ -8,7 +8,6 @@ import { ProfileMenu } from "@/components/ProfileMenu";
 import { LanguageToggle } from "@/components/LanguageToggle";
 import { useRole } from "@/hooks/useRole";
 import { getAcademicYearLabel } from "@/lib/academic-year";
-import { translateLegacyText } from "@/lib/legacy-locale";
 import { getLocaleFromPath } from "@/lib/locale-routing";
 import { cn } from "@/lib/brand/brand-utils";
 import { isGroupOverviewOnlyProfile, shouldUseSinglePageShell } from "@/lib/auth";
@@ -21,8 +20,6 @@ const ThemeModeToggle = dynamic(
 );
 
 export function AppShellTopbar({
-  title,
-  subtitle,
   className,
   fixed = false,
   showAcademicYear = true,

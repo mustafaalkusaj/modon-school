@@ -21,12 +21,6 @@ function fmtCurrency(value: number) {
   return `${fmt(value)} IQD`;
 }
 
-function pctColor(pct: number) {
-  if (pct >= 75) return "text-[var(--success)]";
-  if (pct >= 40) return "text-[var(--warning)]";
-  return "text-[var(--danger)]";
-}
-
 /** SVG donut gauge — replaces the plain circular border */
 function DonutGauge({ pct }: { pct: number }) {
   const r = 30;

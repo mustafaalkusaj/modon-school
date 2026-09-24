@@ -22,7 +22,7 @@ type Props = {
   onRefresh: () => void;
 };
 
-export function DriverDetail({ driver, onBack, onRefresh }: Props) {
+export function DriverDetail({ driver, onBack }: Props) {
   const [documents, setDocuments] = useState<DriverDocument[]>([]);
   const [students, setStudents] = useState<DriverStudentMember[]>([]);
   const [routes, setRoutes] = useState<{ id: string; name: string }[]>([]);

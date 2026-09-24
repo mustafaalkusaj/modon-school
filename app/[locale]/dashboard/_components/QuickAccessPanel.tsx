@@ -10,7 +10,7 @@ import {
   getVariants,
 } from "@/lib/motion-variants";
 import {
-  Users, CreditCard, ClipboardList, CalendarDays, BookOpen,
+  Users, CreditCard, CalendarDays, BookOpen,
   GraduationCap, Plus, ReceiptText, Wallet, X, Loader2, CheckCircle2, Banknote,
 } from "@/lib/icons";
 import { fetchWithAuthorizedSession, withJsonHeaders } from "@/lib/authorized-api";

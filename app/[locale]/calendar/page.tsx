@@ -8,7 +8,6 @@ import { ProtectedRoute } from "@/components/ProtectedRoute";
 import { SchoolScopeBanner, SchoolScopeEmptyState } from "@/components/SchoolScopeBanner";
 import { useSchoolScope } from "@/hooks/useSchoolScope";
 import { useRole } from "@/hooks/useRole";
-import { useRuntimeBranding } from "@/hooks/brand";
 import { getLocaleFromPath } from "@/lib/locale-routing";
 import { CalendarDays, Sparkles, BookOpen, Clock, RefreshCw, Plus, ChevronRight, ChevronLeft } from "@/lib/icons";
 import { useCalendarEvents, type CalendarEvent, EVENT_TYPE_CONFIG } from "./_hooks/useCalendarEvents";
@@ -41,7 +40,6 @@ export default function CalendarPage() {
   const _locale = getLocaleFromPath(pathname);
   const { profile } = useRole();
   const schoolScope = useSchoolScope(profile);
-  const runtimeBranding = useRuntimeBranding();
   const canManage = profile?.role === "super_admin" || profile?.role === "admin";
 
   const schoolId =

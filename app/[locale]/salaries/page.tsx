@@ -5,7 +5,6 @@ import { usePathname } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { supabase } from "@/lib/supabase";
 import { formatNumber, formatDate } from "@/lib/formatting";
-import { AppIcon } from "@/components/AppIcon";
 import { AppSidebar } from "@/components/AppSidebar";
 import { AppShellTopbar } from "@/components/AppShellTopbar";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
@@ -19,7 +18,6 @@ import { printHtmlDocument, wrapPrintDocument, escapeHtml } from "@/lib/print/br
 import { fetchJsonWithAuthorizedSession, withJsonHeaders } from "@/lib/authorized-api";
 import { useSalariesData } from "./_hooks";
 import {
-  SalariesSidebar,
   QuickAccessGrid,
   TeachersTable,
   TeacherDetailPanel,
@@ -39,9 +37,9 @@ import {
   PrintModal,
   ManagerModals,
 } from "./_components";
-import { EMPTY_TEACHER_FORM, EMPTY_SALARY_FORM, EMPTY_EXPORT_OPTIONS, SIDEBAR_ITEMS, type Teacher, type TeacherFormData, type SalaryFormData, type ExportOptions } from "./_types";
+import { EMPTY_TEACHER_FORM, EMPTY_SALARY_FORM, EMPTY_EXPORT_OPTIONS, type Teacher, type TeacherFormData, type SalaryFormData, type ExportOptions } from "./_types";
 import { cn } from "@/lib/brand/brand-utils";
-import { AlertCircle, Wallet, Users, Banknote, CalendarCheck, CheckCircle2, Archive, CalendarDays, CalendarRange, BarChart3, Settings } from "@/lib/icons";
+import { AlertCircle, Wallet, Users, Banknote, CalendarCheck, CheckCircle2, Archive, CalendarRange, BarChart3, Settings } from "@/lib/icons";
 import { useArchiveMode } from "@/hooks/useArchiveMode";
 import { useCurrency } from "@/hooks/useCurrency";
 import { motion, AnimatePresence, useMotionValue, useTransform, animate } from "framer-motion";

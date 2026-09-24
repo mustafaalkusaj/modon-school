@@ -7,7 +7,6 @@ import { computePercentage, computeGradeLabel } from '@/lib/grades/grade-calcula
 import type { GradeEntry, GradeType, GradeEntryInput } from '@/lib/grades/types'
 import type { GradeFilters, GradeEntryDraft, StudentOption } from '../_types'
 import { GradeStatusBadge } from './GradeStatusBadge'
-import { GradeLabelBadge } from './GradeLabelBadge'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 

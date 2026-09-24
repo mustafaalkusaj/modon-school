@@ -42,7 +42,6 @@ export function UnifiedClassesTable({
   canManage,
   selectedClassId,
   confirmDeleteClassId,
-  confirmDeleteFeeId,
   getClassStats,
   onSelectClass,
   onEditClass,
@@ -50,9 +49,6 @@ export function UnifiedClassesTable({
   onConfirmDeleteClass,
   onCancelDeleteClass,
   onEditFee,
-  onDeleteFee,
-  onConfirmDeleteFee,
-  onCancelDeleteFee,
   locale,
 }: UnifiedClassesTableProps) {
   const isEn = locale === "en";

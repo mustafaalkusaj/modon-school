@@ -183,10 +183,12 @@ describe("POST /api/auth/login", () => {
 
   // ── Schema validation (400) ─────────────────────────────────────────────
 
-  it("returns 400 for invalid email format", async () => {
+  // The login field accepts either an email or a managed-account username,
+  // so only an empty identifier is a schema error.
+  it("returns 400 for an empty login identifier", async () => {
     const { POST } = await import("@/app/api/auth/login/route");
     const res = await POST(
-      makeRequest({ email: "not-an-email", password: "password123" }),
+      makeRequest({ email: "   ", password: "password123" }),
     );
     const body = await res.json();
 
@@ -195,10 +197,10 @@ describe("POST /api/auth/login", () => {
     expect(mockState.createRouteSupabaseClient).not.toHaveBeenCalled();
   });
 
-  it("returns 400 for password shorter than 8 characters", async () => {
+  it("returns 400 for password shorter than 4 characters", async () => {
     const { POST } = await import("@/app/api/auth/login/route");
     const res = await POST(
-      makeRequest({ email: "user@example.com", password: "short" }),
+      makeRequest({ email: "user@example.com", password: "abc" }),
     );
     const body = await res.json();
 
@@ -209,7 +211,7 @@ describe("POST /api/auth/login", () => {
 
   it("returns 400 when both email and password are invalid", async () => {
     const { POST } = await import("@/app/api/auth/login/route");
-    const res = await POST(makeRequest({ email: "bad", password: "123" }));
+    const res = await POST(makeRequest({ email: "", password: "123" }));
     const body = await res.json();
 
     expect(res.status).toBe(400);

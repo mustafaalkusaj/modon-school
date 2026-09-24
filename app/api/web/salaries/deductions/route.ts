@@ -5,7 +5,6 @@ import { resolveSchoolScopedActorContext } from "@/lib/managed-users-server";
 import { enforceRateLimit } from "@/lib/rate-limit";
 import { routeUserHasPermission } from "@/lib/route-permissions";
 import { invalidateSchoolCacheDomains } from "@/lib/server-cache";
-import { jsonServerError } from "@/lib/route-utils";
 import { todayBaghdadIso } from "@/lib/tz";
 
 function jsonError(message: string, status: number) {

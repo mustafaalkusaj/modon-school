@@ -3,12 +3,11 @@
 import * as React from "react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import { Badge } from "@/components/ui/badge";
 import type {
   DistributionItem, DistributionRecord, DistributionStock,
   DistributionSettings, StudentBasic,
 } from "../_types";
-import { GRADES, GRADE_MAP } from "../_constants";
+import { GRADES } from "../_constants";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 type CategoryFilter = "uniform" | "book";
@@ -112,7 +111,7 @@ function TableHead({ labels }: { labels: string[] }) {
 
 // ── Component ────────────────────────────────────────────────────────────────
 export default function StockTab({
-  items, stock, records, students, settings, onUpdateStock,
+  items, stock, records, settings, onUpdateStock,
 }: StockTabProps) {
   const [category, setCategory] = React.useState<CategoryFilter>("uniform");
   const [pendingUpdates, setPendingUpdates] = React.useState<Record<string, boolean>>({});

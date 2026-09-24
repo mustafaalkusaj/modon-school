@@ -7,9 +7,6 @@ import { resolveSuperAdminActorContext } from "@/lib/super-admin-server";
 import { rateLimitMiddleware, RATE_LIMIT_CONFIG } from "@/lib/rate-limit";
 import { logger } from "@/lib/logger";
 import { addDaysBaghdadIso, todayBaghdadIso } from "@/lib/tz";
-import { jsonServerError } from "@/lib/route-utils";
-
-const DAY_IN_MS = 24 * 60 * 60 * 1000;
 
 function jsonError(message: string, status: number) {
   return NextResponse.json({ error: { message } }, { status });

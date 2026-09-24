@@ -27,7 +27,7 @@ import { TeacherGradesTab } from "./_components/TeacherGradesTab";
 import { EditGradeModal } from "./_components/EditGradeModal";
 import type { EditGradePayload } from "./_components/EditGradeModal";
 import { GradeTypeAddModal } from "./_components/GradeTypeAddModal";
-import type { GradeFilters, GradeEntry, GradeType } from "./_types";
+import type { GradeFilters, GradeEntry } from "./_types";
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
@@ -56,7 +56,6 @@ export default function GradesPage() {
 
   const canEnterGrades = can("enter_grades");
   const canConfirmGrades = can("confirm_grades");
-  const canLockGrades = can("lock_grades");
   const canExportGrades = can("export_grades");
 
   const schoolId = schoolScope.selectedSchoolId ?? "";

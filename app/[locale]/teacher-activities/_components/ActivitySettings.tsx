@@ -46,7 +46,7 @@ const DEFAULT: MonitoringSettings = {
   teacher_storage_limit_mb: 500,
 };
 
-export function ActivitySettings({ schoolId }: { schoolId: string }) {
+export function ActivitySettings(_props: { schoolId: string }) {
   const t = useTranslations("teacherActivities");
   const toast = useToast();
   const [settings, setSettings] = useState<MonitoringSettings>(DEFAULT);

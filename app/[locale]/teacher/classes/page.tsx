@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
-import { BookOpen, Users, FileText } from "lucide-react";
+import { BookOpen, Users } from "lucide-react";
 import { TeacherShell } from "@/components/TeacherShell";
 import { getLocaleFromPath } from "@/lib/locale-routing";
 import { fetchJsonWithAuthorizedSession } from "@/lib/authorized-api";
