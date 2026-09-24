@@ -1,0 +1,95 @@
+{
+  "name": "modon-school",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev --turbopack",
+    "build": "next build --webpack",
+    "start": "next start",
+    "lint": "eslint",
+    "typecheck": "node -e \"const fs=require('node:fs'); for (const path of ['.next/types','.next/dev/types','tsconfig.tsbuildinfo']) fs.rmSync(path,{recursive:true,force:true});\" && npx next typegen && tsc --noEmit --incremental false",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:api": "vitest run lib/__tests__/**/*.test.ts",
+    "test:all": "npm run test && npm run test:e2e",
+    "test:e2e": "playwright test",
+    "test:e2e:headed": "playwright test --headed",
+    "test:e2e:ui": "playwright test --ui",
+    "playwright:install": "playwright install chromium",
+    "check": "npm run lint && npm run typecheck && npm run build",
+    "predeploy:check": "node scripts/predeploy-check.mjs",
+    "postdeploy:smoke": "node scripts/postdeploy-smoke.mjs",
+    "postdeploy:login-rate-limit": "node scripts/postdeploy-login-rate-limit.mjs",
+    "deploy:direct": "bash scripts/direct-deploy.sh",
+    "audit:prod": "npm audit --omit=dev",
+    "seed:users": "node scripts/create-default-users.mjs",
+    "qa:seed:e2e": "npx tsx scripts/qa-seed-e2e-accounts.ts",
+    "prisma:generate": "prisma generate",
+    "prisma:migrate": "prisma migrate deploy",
+    "prisma:migrate:dev": "prisma migrate dev",
+    "check:schema": "node scripts/check-schema-drift.mjs",
+    "db:preflight": "node scripts/check-supabase-target.mjs",
+    "db:push:safe": "npm run db:preflight && npx supabase db push",
+    "db:validate-migrations": "node scripts/validate-migrations-rollback.mjs supabase/migrations/20260713171635_teacher_mobile_release_security.sql supabase/migrations/20260713171933_messaging_safety_and_account_deletion.sql supabase/migrations/20260713191144_exam_atomic_creation.sql"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "0.96.0",
+    "@prisma/client": "6.19.3",
+    "@supabase/ssr": "0.9.0",
+    "@supabase/supabase-js": "2.99.2",
+    "@types/qrcode": "1.5.6",
+    "@upstash/redis": "1.37.0",
+    "bcryptjs": "3.0.3",
+    "clsx": "2.1.1",
+    "exceljs": "4.4.0",
+    "framer-motion": "12.40.0",
+    "html5-qrcode": "^2.3.8",
+    "lucide-react": "0.577.0",
+    "next": "16.2.12",
+    "next-intl": "^4.13.2",
+    "next-themes": "0.4.6",
+    "qrcode": "1.5.4",
+    "qrcode.react": "4.2.0",
+    "react": "19.2.3",
+    "react-dom": "19.2.3",
+    "recharts": "3.8.0",
+    "sharp": "0.35.3",
+    "tailwind-merge": "3.5.0",
+    "web-push": "^3.6.7",
+    "zod": "4.3.6"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.59.1",
+    "@tailwindcss/postcss": "4",
+    "@types/node": "20",
+    "@types/react": "19",
+    "@types/react-dom": "19",
+    "@types/web-push": "^3.6.4",
+    "@vitest/coverage-v8": "4.1.5",
+    "eslint": "9",
+    "eslint-config-next": "16.2.3",
+    "prisma": "6.2.1",
+    "tailwindcss": "4",
+    "typescript": "5",
+    "vitest": "4.1.5"
+  },
+  "pnpm": {
+    "overrides": {
+      "fast-uri": ">=3.1.2",
+      "postcss": ">=8.5.10"
+    }
+  },
+  "overrides": {
+    "exceljs": {
+      "uuid": "11.1.1"
+    },
+    "next": {
+      "postcss": "^8.5.23",
+      "sharp": "0.35.3"
+    },
+    "brace-expansion": "^5.0.8"
+  },
+  "engines": {
+    "node": ">=18.18.0"
+  }
+}

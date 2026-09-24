@@ -1,0 +1,160 @@
+import { NextRequest, NextResponse } from "next/server";
+import {
+  createRouteSupabaseClient,
+  createServiceSupabaseClient,
+  getRouteAuthenticatedUser,
+} from "@/lib/supabase-server";
+
+function jsonError(message: string, status: number) {
+  return NextResponse.json({ ok: false, error: message }, { status });
+}
+
+// `teacher_appointments` is not present in the generated Database types yet,
+// so we intentionally bypass the typed `.from()` overloads for this table to
+// avoid excessively-deep type instantiation while preserving existing
+// runtime behavior.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function teacherAppointmentsTable(client: unknown): any {
+  return (client as { from: (table: string) => unknown }).from(
+    "teacher_appointments",
+  );
+}
+
+/**
+ * GET /api/mobile/parent/appointments
+ * Returns the parent's teacher appointment requests.
+ */
+export async function GET(req: NextRequest) {
+  try {
+    const routeSupabase = await createRouteSupabaseClient();
+    const authResult = await getRouteAuthenticatedUser(
+      routeSupabase,
+      req.headers.get("authorization"),
+    );
+
+    if (authResult.error || !authResult.data.user?.id) {
+      return jsonError("يجب تسجيل الدخول أولاً.", 401);
+    }
+
+    const userId = authResult.data.user.id;
+    const serviceSupabase = createServiceSupabaseClient();
+
+    const { data, error } = await teacherAppointmentsTable(serviceSupabase)
+      .select(
+        `id, status, parent_notes, scheduled_at, created_at,
+         students(full_name),
+         teachers(full_name, subject)`,
+      )
+      .eq("parent_user_id", userId)
+      .order("created_at", { ascending: false });
+
+    if (error) {
+      return jsonError("خطأ في جلب المواعيد.", 500);
+    }
+
+    const items = ((data ?? []) as Record<string, unknown>[]).map(
+      (row: Record<string, unknown>) => {
+        const student = row.students as { full_name?: string } | null;
+        const teacher = row.teachers as {
+          full_name?: string;
+          subject?: string;
+        } | null;
+        return {
+          id: row.id,
+          status: row.status,
+          parent_notes: row.parent_notes,
+          scheduled_at: row.scheduled_at,
+          created_at: row.created_at,
+          student_name: student?.full_name ?? null,
+          teacher_name: teacher?.full_name ?? null,
+          teacher_subject: teacher?.subject ?? null,
+        };
+      },
+    );
+
+    return NextResponse.json({ ok: true, items });
+  } catch {
+    return jsonError("خطأ داخلي في الخادم.", 500);
+  }
+}
+
+/**
+ * POST /api/mobile/parent/appointments
+ * Creates a new appointment request.
+ * Body: { student_id, parent_notes? }
+ */
+export async function POST(req: NextRequest) {
+  try {
+    const routeSupabase = await createRouteSupabaseClient();
+    const authResult = await getRouteAuthenticatedUser(
+      routeSupabase,
+      req.headers.get("authorization"),
+    );
+
+    if (authResult.error || !authResult.data.user?.id) {
+      return jsonError("يجب تسجيل الدخول أولاً.", 401);
+    }
+
+    const userId = authResult.data.user.id;
+    const serviceSupabase = createServiceSupabaseClient();
+
+    const body = (await req.json().catch(() => null)) ?? {};
+    const studentId = body.student_id as string | undefined;
+    const parentNotes = (body.parent_notes as string | undefined) ?? null;
+
+    if (!studentId) {
+      return jsonError("student_id مطلوب.", 400);
+    }
+
+    // Verify student belongs to user via parent_student_links or managed_user_profiles
+    let resolvedSchoolId: string | null = null;
+
+    const { data: link, error: linkError } = await serviceSupabase
+      .from("parent_student_links")
+      .select("school_id")
+      .eq("parent_user_id", userId)
+      .eq("student_id", studentId)
+      .maybeSingle();
+
+    if (linkError) {
+      return jsonError("خطأ في التحقق من بيانات الطالب.", 500);
+    }
+
+    if (link) {
+      resolvedSchoolId = (link as { school_id: string }).school_id;
+    } else {
+      const { data: mp } = await serviceSupabase
+        .from("managed_user_profiles")
+        .select("school_id")
+        .eq("auth_user_id", userId)
+        .eq("student_id", studentId)
+        .maybeSingle();
+      resolvedSchoolId = mp?.school_id ?? null;
+    }
+
+    if (!resolvedSchoolId) {
+      return jsonError("الطالب غير مرتبط بحسابك.", 403);
+    }
+
+    const { data: appointment, error: insertError } =
+      await teacherAppointmentsTable(serviceSupabase)
+        .insert({
+          school_id: resolvedSchoolId,
+          parent_user_id: userId,
+          student_id: studentId,
+          teacher_id: null,
+          parent_notes: parentNotes,
+          status: "pending",
+        })
+        .select("id, status, created_at")
+        .single();
+
+    if (insertError) {
+      return jsonError("تعذر إنشاء طلب الموعد.", 500);
+    }
+
+    return NextResponse.json({ ok: true, appointment });
+  } catch {
+    return jsonError("خطأ داخلي في الخادم.", 500);
+  }
+}

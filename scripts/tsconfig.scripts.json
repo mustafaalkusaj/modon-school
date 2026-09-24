@@ -1,0 +1,11 @@
+{
+  "//": "Isolated tsconfig for terminal scripts run via `npx tsx --tsconfig scripts/tsconfig.scripts.json`. lib/supabase-server.ts starts with `import \"server-only\"`, a Next-only guard that is not resolvable outside the Next build. Point it at the copy Next already ships so server helpers can be reused from a script without touching the root tsconfig or node_modules.",
+  "extends": "../tsconfig.json",
+  "compilerOptions": {
+    "baseUrl": "..",
+    "paths": {
+      "@/*": ["./*"],
+      "server-only": ["./node_modules/next/dist/compiled/server-only/empty.js"]
+    }
+  }
+}

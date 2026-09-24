@@ -1,0 +1,241 @@
+"use client";
+
+import { useEffect, useState } from "react";
+import { usePathname } from "next/navigation";
+import {
+  Star,
+  CheckCircle2,
+  AlertCircle,
+  TrendingUp,
+  TrendingDown,
+  Award,
+} from "lucide-react";
+import { StudentShell } from "@/components/StudentShell";
+import { getLocaleFromPath } from "@/lib/locale-routing";
+import { fetchJsonWithAuthorizedSession } from "@/lib/authorized-api";
+import { StatsCard, KPIGrid } from "@/components/ui/stats-card";
+import {
+  Card,
+  CardHeader,
+  CardTitle,
+  CardContent,
+} from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
+import { EmptyState } from "@/components/ui/empty-state";
+
+interface BehaviorRecord {
+  id: string;
+  date: string;
+  type: "positive" | "negative";
+  points: number;
+  reason: string | null;
+  teacher_name: string | null;
+}
+
+export default function StudentBehaviorPage() {
+  const pathname = usePathname();
+  const locale = getLocaleFromPath(pathname);
+  const isAr = locale === "ar";
+  const t = (ar: string, en: string) => (isAr ? ar : en);
+  const [records, setRecords] = useState<BehaviorRecord[]>([]);
+  const [totalPoints, setTotalPoints] = useState<number | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(false);
+
+  useEffect(() => {
+    fetchJsonWithAuthorizedSession("/api/student/behavior")
+      .then((res) => {
+        if (res.response.ok) {
+          const d = (res.payload as any)?.data;
+          setRecords(d?.records ?? []);
+          setTotalPoints(d?.total_points ?? null);
+        }
+      })
+      .catch(() => setError(true))
+      .finally(() => setLoading(false));
+  }, []);
+
+  const positiveCount = records.filter((r) => r.type === "positive").length;
+  const negativeCount = records.filter((r) => r.type === "negative").length;
+  const positivePoints = records
+    .filter((r) => r.type === "positive")
+    .reduce((s, r) => s + r.points, 0);
+  const negativePoints = records
+    .filter((r) => r.type === "negative")
+    .reduce((s, r) => s + r.points, 0);
+
+  if (error) {
+    return (
+      <StudentShell
+        currentPath="/student/behavior"
+        titleAr="سلوكي"
+        titleEn="My Behavior"
+      >
+        <div className="flex items-center justify-center min-h-[60vh]">
+          <Card className="max-w-md w-full">
+            <CardContent className="pt-6 text-center">
+              <AlertCircle className="h-12 w-12 text-red-500 mx-auto mb-4" />
+              <h3 className="text-lg font-semibold mb-2">{t("حدث خطأ", "Something went wrong")}</h3>
+              <p className="text-muted-foreground mb-4">{t("تعذر تحميل البيانات. حاول مرة أخرى.", "Failed to load data. Please try again.")}</p>
+              <button onClick={() => window.location.reload()} className="px-4 py-2 bg-primary text-primary-foreground rounded-md hover:opacity-90">{t("إعادة المحاولة", "Retry")}</button>
+            </CardContent>
+          </Card>
+        </div>
+      </StudentShell>
+    );
+  }
+
+  return (
+    <StudentShell
+      currentPath="/student/behavior"
+      titleAr="سلوكي"
+      titleEn="My Behavior"
+    >
+      <div className="space-y-6">
+        {loading ? (
+          <div className="space-y-4">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+              {Array.from({ length: 3 }).map((_, i) => (
+                <div
+                  key={i}
+                  className="h-[100px] rounded-[var(--card-radius)] bg-[var(--card-bg)] border border-[var(--card-border)] animate-pulse"
+                />
+              ))}
+            </div>
+            <div className="h-[300px] rounded-[var(--card-radius)] bg-[var(--card-bg)] border border-[var(--card-border)] animate-pulse" />
+          </div>
+        ) : (
+          <>
+            {totalPoints != null && (
+              <div
+                className="relative overflow-hidden rounded-2xl p-5 sm:p-6"
+                style={{
+                  background: totalPoints >= 0
+                    ? "linear-gradient(135deg, var(--success) 0%, color-mix(in srgb, var(--success) 70%, var(--primary)) 100%)"
+                    : "linear-gradient(135deg, var(--danger) 0%, color-mix(in srgb, var(--danger) 70%, var(--warning)) 100%)",
+                }}
+              >
+                <div
+                  className="absolute inset-0 opacity-10"
+                  style={{
+                    backgroundImage:
+                      "radial-gradient(circle at 80% 20%, white 0%, transparent 50%), radial-gradient(circle at 20% 80%, white 0%, transparent 40%)",
+                  }}
+                />
+                <div className="relative flex flex-col items-center py-2">
+                  <div className="flex items-center justify-center w-14 h-14 sm:w-16 sm:h-16 rounded-full bg-white/20 backdrop-blur-sm border border-white/30 mb-3">
+                    <Award className="h-7 w-7 sm:h-8 sm:w-8 text-white" />
+                  </div>
+                  <p className="text-sm text-white/75">
+                    {t("مجموع النقاط", "Total Points")}
+                  </p>
+                  <p className="text-4xl sm:text-5xl font-bold mt-1 text-white tabular-nums">
+                    {totalPoints > 0
+                      ? `+${totalPoints}`
+                      : String(totalPoints)}
+                  </p>
+                </div>
+              </div>
+            )}
+
+            <KPIGrid>
+              <StatsCard
+                label={t("نقاط إيجابية", "Positive Points")}
+                value={`+${positivePoints}`}
+                icon={TrendingUp}
+                variant="success"
+                description={`${positiveCount} ${t("سجل", "records")}`}
+              />
+              <StatsCard
+                label={t("نقاط سلبية", "Negative Points")}
+                value={`-${negativePoints}`}
+                icon={TrendingDown}
+                variant="danger"
+                description={`${negativeCount} ${t("سجل", "records")}`}
+              />
+            </KPIGrid>
+
+            <Card>
+              <CardHeader>
+                <div className="flex items-center gap-2">
+                  <Star className="h-5 w-5 text-[var(--warning)]" />
+                  <CardTitle className="text-base">
+                    {t("سجل السلوك", "Behavior Log")}
+                  </CardTitle>
+                </div>
+              </CardHeader>
+              <CardContent>
+                {records.length === 0 ? (
+                  <EmptyState
+                    icon={
+                      <Star className="h-10 w-10 text-[var(--text-tertiary)]" />
+                    }
+                    title={t(
+                      "لا توجد سجلات سلوك",
+                      "No behavior records",
+                    )}
+                    className="py-6 min-h-0"
+                  />
+                ) : (
+                  <div className="space-y-3">
+                    {records.map((r) => (
+                      <div
+                        key={r.id}
+                        className="flex items-start gap-3 rounded-lg border border-[var(--card-border)] p-3"
+                      >
+                        <div
+                          className={`shrink-0 flex items-center justify-center w-9 h-9 rounded-full mt-0.5 ${
+                            r.type === "positive"
+                              ? "bg-[var(--success)]/[0.12]"
+                              : "bg-[var(--danger)]/[0.12]"
+                          }`}
+                        >
+                          {r.type === "positive" ? (
+                            <CheckCircle2 className="h-4 w-4 text-[var(--success)]" />
+                          ) : (
+                            <AlertCircle className="h-4 w-4 text-[var(--danger)]" />
+                          )}
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm font-medium text-[var(--text-primary)]">
+                            {r.reason ?? t("بدون سبب", "No reason")}
+                          </p>
+                          <div className="flex flex-wrap items-center gap-x-2 gap-y-1 mt-1">
+                            <span className="text-xs text-[var(--text-muted)]">
+                              {r.date}
+                            </span>
+                            {r.teacher_name && (
+                              <>
+                                <span className="text-xs text-[var(--text-muted)]">
+                                  ·
+                                </span>
+                                <span className="text-xs text-[var(--text-muted)]">
+                                  {r.teacher_name}
+                                </span>
+                              </>
+                            )}
+                          </div>
+                        </div>
+                        <Badge
+                          variant={
+                            r.type === "positive" ? "success" : "danger"
+                          }
+                          size="sm"
+                          className="shrink-0 mt-0.5"
+                        >
+                          {r.type === "positive"
+                            ? `+${r.points}`
+                            : `-${r.points}`}
+                        </Badge>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          </>
+        )}
+      </div>
+    </StudentShell>
+  );
+}

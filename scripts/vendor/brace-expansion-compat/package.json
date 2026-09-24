@@ -1,0 +1,17 @@
+{
+  "name": "brace-expansion",
+  "version": "5.0.8",
+  "private": true,
+  "description": "Compatibility shim: brace-expansion 5.0.8 behaviour behind the callable CommonJS API that minimatch@3 still expects. See README.md.",
+  "license": "MIT",
+  "main": "./index.js",
+  "types": "./index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./index.mjs",
+      "require": "./index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "comment": "brace-expansion-upstream (npm:brace-expansion@5.0.8) is declared in the ROOT package.json devDependencies, not here. Declaring it here would make this package depend on the very name the root `overrides` block redirects to this package, which npm resolves as a cycle and silently skips. This directory lives inside the repo, so Node resolves brace-expansion-upstream by walking up to the root node_modules."
+}

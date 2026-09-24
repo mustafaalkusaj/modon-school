@@ -1,0 +1,7 @@
+{
+  "tool_name": "mcp__Claude_Browser__computer",
+  "tool_input_preview": "{\"action\":\"left_click\",\"ref\":\"ref_29\"}",
+  "error": "ref ref_29 is entirely outside the viewport (center (0, 0)) — likely hidden or off-canvas, so a click cannot reach it. Interact with what opens it first, or re-run read_page and pick a visible element.",
+  "timestamp": "2026-09-13T06:16:00.508Z",
+  "retry_count": 1
+}

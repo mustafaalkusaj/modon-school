@@ -1,0 +1,3 @@
+throw new Error(
+  "This plugin template uses TypeScript. Follow the instructions in `README.md` to generate `code.js`.",
+);

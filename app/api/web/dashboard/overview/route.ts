@@ -1,0 +1,730 @@
+import { NextRequest, NextResponse } from "next/server";
+
+import { dashboardOverviewQuerySchema } from "@/lib/api-schemas";
+import { resolveBranchScope } from "@/lib/branch-scope";
+import { resolveSchoolScopedActorContext, tableHasColumn } from "@/lib/managed-users-server";
+import { enforceRateLimit } from "@/lib/rate-limit";
+import { jsonError, jsonValidationError, logRouteError } from "@/lib/route-utils";
+import { buildSchoolCacheTag, rememberWithTtl } from "@/lib/server-cache";
+import { getCacheHeaders, CACHE_STRATEGIES } from "@/lib/cache-strategies";
+import { buildResolvedStudentFinancials, calculateStudentPaidPercentage } from "@/lib/students/financials";
+import { createServiceSupabaseClient } from "@/lib/supabase-server";
+import { addMonthsBaghdadIsoMonth, baghdadIsoMonth, todayBaghdadIso } from "@/lib/tz";
+
+// Server-side cache for schema column detection (10-minute TTL)
+let schemaColumnsCache: {
+  value: {
+    studentsStatusScope: boolean;
+    studentsBranchScope: boolean;
+    paymentsBranchScope: boolean;
+    salariesBranchScope: boolean;
+    classFeesTableExists: boolean;
+    classFeesSchoolScope: boolean;
+    classFeesBranchScope: boolean;
+  };
+  timestamp: number;
+} | null = null;
+
+const SCHEMA_CACHE_TTL_MS = 10 * 60 * 1000; // 10 minutes
+
+async function getSchemaColumns(
+  serviceSupabase: ReturnType<typeof createServiceSupabaseClient>,
+) {
+  const now = Date.now();
+  if (schemaColumnsCache && now - schemaColumnsCache.timestamp < SCHEMA_CACHE_TTL_MS) {
+    return schemaColumnsCache.value;
+  }
+
+  const [
+    studentsStatusScope,
+    studentsBranchScope,
+    paymentsBranchScope,
+    salariesBranchScope,
+    classFeesTableExists,
+    classFeesSchoolScope,
+    classFeesBranchScope,
+  ] = await Promise.all([
+    tableHasColumn(serviceSupabase as never, "students", "status").catch(() => false),
+    tableHasColumn(serviceSupabase as never, "students", "branch_id").catch(() => false),
+    tableHasColumn(serviceSupabase as never, "payments", "branch_id").catch(() => false),
+    tableHasColumn(serviceSupabase as never, "salaries", "branch_id").catch(() => false),
+    tableHasColumn(serviceSupabase as never, "class_fees", "id").catch(() => false),
+    tableHasColumn(serviceSupabase as never, "class_fees", "school_id").catch(() => false),
+    tableHasColumn(serviceSupabase as never, "class_fees", "branch_id").catch(() => false),
+  ]);
+
+  const result = {
+    studentsStatusScope,
+    studentsBranchScope,
+    paymentsBranchScope,
+    salariesBranchScope,
+    classFeesTableExists,
+    classFeesSchoolScope,
+    classFeesBranchScope,
+  };
+
+  schemaColumnsCache = { value: result, timestamp: now };
+  return result;
+}
+
+type DashboardStudentRow = {
+  id: string;
+  full_name: string | null;
+  class_name: string | null;
+  total_fee: number | null;
+  paid_fee: number | null;
+  remaining_fee: number | null;
+  discount_value: number | null;
+  status: string | null;
+  branch_id: string | null;
+};
+
+type ResolvedDashboardStudentRow = DashboardStudentRow & {
+  resolved_total_fee: number;
+};
+
+function normalizeDashboardOverviewName(value: string | null | undefined) {
+  if (typeof value !== "string") return "";
+  return value.trim().replace(/\s+/g, " ");
+}
+
+function normalizeDashboardOverviewKey(value: string | null | undefined) {
+  return normalizeDashboardOverviewName(value)
+    .normalize("NFKD")
+    .replace(/[\u064B-\u065F\u0670]/g, "")
+    .replace(/ـ/g, "")
+    .replace(/[أإآٱ]/g, "ا")
+    .replace(/ى/g, "ي")
+    .replace(/ؤ/g, "و")
+    .replace(/ئ/g, "ي")
+    .toLocaleLowerCase();
+}
+
+function buildEmptyDashboardOverviewPayload(warning?: string | null) {
+  return {
+    totals: {
+      studentsCount: 0,
+      transferredCount: 0,
+      totalFees: 0,
+      totalPaid: 0,
+      totalDiscount: 0,
+      totalRemaining: 0,
+      monthlySalaries: 0,
+      totalIncomes: 0,
+      todayIncomes: 0,
+      todayExpenses: 0,
+      afterDiscount: 0,
+      paidPct: 0,
+      remainingPct: 0,
+    },
+    recentPayments: [],
+    overdueStudents: [],
+    classFees: [],
+    studentCountByClass: {},
+    ...(warning ? { warning } : {}),
+  };
+}
+
+export async function GET(req: NextRequest) {
+  const parsed = dashboardOverviewQuerySchema.safeParse({
+    schoolId: req.nextUrl.searchParams.get("schoolId"),
+    branchId: req.nextUrl.searchParams.get("branchId") ?? req.nextUrl.searchParams.get("branch_id"),
+  });
+  if (!parsed.success) {
+    return jsonValidationError(parsed.error, "معرّف المدرسة غير صالح.");
+  }
+
+  const { schoolId, branchId } = parsed.data;
+  const bypassCache = req.nextUrl.searchParams.get("fresh") === "1";
+  const context = await resolveSchoolScopedActorContext(
+    schoolId,
+    {
+      allowedRoles: ["super_admin", "admin", "employee"],
+      roleDeniedMessage: "لوحة التحكم متاحة ضمن نطاق المدرسة الحالية فقط.",
+    },
+    req.headers.get("authorization"),
+  );
+
+  if (!context.ok) {
+    return jsonError(
+      "message" in context ? context.message : "تعذر التحقق من صلاحيات المستخدم.",
+      "status" in context ? context.status : 500,
+    );
+  }
+
+  const { actorUserId, targetSchoolId } = context.value;
+  // Resolve branch access via resolveBranchScope — handles all cases: school-level, branch-level, multi-branch
+  const branchScope = resolveBranchScope(context.value, branchId ?? null);
+  if (!branchScope.ok) {
+    return jsonError(branchScope.message, branchScope.status);
+  }
+  const effectiveBranchId = branchScope.value.branchId;
+
+  const rateLimited = await enforceRateLimit(req, {
+    namespace: "dashboard-overview",
+    windowMs: 60_000,
+    maxHits: 120,
+    identifier: actorUserId,
+  });
+  if (rateLimited) {
+    return rateLimited;
+  }
+
+  try {
+    const serviceSupabase = createServiceSupabaseClient();
+    const loadDashboardOverview = async () => {
+      const {
+        studentsStatusScope,
+        studentsBranchScope,
+        paymentsBranchScope,
+        salariesBranchScope,
+        classFeesTableExists,
+        classFeesSchoolScope,
+        classFeesBranchScope,
+      } = await getSchemaColumns(serviceSupabase);
+
+      const todayDate = todayBaghdadIso(); // "YYYY-MM-DD"
+      const currentMonth = todayDate.slice(0, 7); // "YYYY-MM"
+
+      let studentsPromise = serviceSupabase
+        .from("students")
+        .select("id, full_name, class_name, total_fee, paid_fee, remaining_fee, discount_value, status, branch_id")
+        .eq("school_id", targetSchoolId);
+      if (studentsStatusScope) {
+        studentsPromise = studentsPromise.or("status.neq.deleted,status.is.null");
+      }
+      // Apply branch_id filter if branchId is requested and column detection says it exists
+      // If detection is wrong (false positive/negative), the query will fail and return degraded
+      if (effectiveBranchId && studentsBranchScope) {
+        studentsPromise = studentsPromise.eq("branch_id", effectiveBranchId);
+      }
+
+      let recentPaymentsPromise = serviceSupabase
+        .from("payments")
+        .select("id, amount, created_at, student_id, students(full_name,class_name)")
+        .eq("school_id", targetSchoolId)
+        .is("deleted_at", null)
+        .order("created_at", { ascending: false })
+        .limit(5);
+      if (effectiveBranchId && paymentsBranchScope) {
+        recentPaymentsPromise = recentPaymentsPromise.eq("branch_id", effectiveBranchId);
+      }
+
+      const classFeesPromise = classFeesTableExists
+        ? (() => {
+            let classFeesQuery = serviceSupabase
+              .from("class_fees")
+              .select("id, class_name, total_fee, installments, installment_amount, notes, created_at")
+              .order("class_name", { ascending: true });
+            if (classFeesSchoolScope) {
+              classFeesQuery = classFeesQuery.eq("school_id", targetSchoolId);
+            }
+            if (effectiveBranchId && classFeesBranchScope) {
+              classFeesQuery = classFeesQuery.eq("branch_id", effectiveBranchId);
+            }
+            return classFeesQuery;
+          })()
+        : Promise.resolve({ data: [], error: null });
+
+      let monthlySalariesPromise = serviceSupabase
+        .from("salaries")
+        .select("gross_salary, deductions")
+        .eq("school_id", targetSchoolId)
+        .eq("month", currentMonth);
+      if (effectiveBranchId && salariesBranchScope) {
+        monthlySalariesPromise = monthlySalariesPromise.eq("branch_id", effectiveBranchId);
+      }
+
+      let incomesPromise = serviceSupabase
+        .from("incomes")
+        .select("amount, income_date")
+        .eq("school_id", targetSchoolId)
+        .is("deleted_at", null);
+      if (effectiveBranchId) {
+        incomesPromise = incomesPromise.eq("branch_id", effectiveBranchId);
+      }
+
+      let expensesPromise = serviceSupabase
+        .from("expenses")
+        .select("amount, expense_date")
+        .eq("school_id", targetSchoolId)
+        .is("deleted_at", null);
+      if (effectiveBranchId) {
+        expensesPromise = expensesPromise.eq("branch_id", effectiveBranchId);
+      }
+
+      const branchesPromise = serviceSupabase
+        .from("branches")
+        .select("id, name_ar, name_en, is_active, principal_name")
+        .eq("school_id", targetSchoolId)
+        .eq("is_active", true);
+
+      const employeesPromise = (serviceSupabase as unknown as { from: (table: string) => any })
+        .from("employees")
+        .select("id, branch_id, position, full_name_ar")
+        .eq("school_id", targetSchoolId)
+        .eq("is_active", true)
+        .is("deleted_at", null);
+
+      const attendancePromise = serviceSupabase
+        .from("attendance_records")
+        .select("status")
+        .eq("school_id", targetSchoolId)
+        .eq("attendance_date", todayDate);
+
+      const sixMonthsAgoMonth = addMonthsBaghdadIsoMonth(-6);
+      let paymentsMonthlyPromise = serviceSupabase
+        .from("payments")
+        .select("amount, created_at, branch_id")
+        .eq("school_id", targetSchoolId)
+        .is("deleted_at", null)
+        .gte("created_at", `${sixMonthsAgoMonth}-01`);
+      if (effectiveBranchId && paymentsBranchScope) {
+        paymentsMonthlyPromise = paymentsMonthlyPromise.eq("branch_id", effectiveBranchId);
+      }
+
+      const subjectsPromise = serviceSupabase
+        .from("subjects")
+        .select("id, name, is_active")
+        .eq("school_id", targetSchoolId);
+
+      const gradesTeacherPromise = serviceSupabase
+        .from("grades")
+        .select("teacher_id, subject")
+        .eq("school_id", targetSchoolId)
+        .not("teacher_id", "is", null)
+        .not("subject", "is", null)
+        .limit(5000);
+
+      const [
+        studentsResult, recentPaymentsResult, classFeesResult, monthlySalariesResult, incomesResult, expensesResult,
+        branchesResult, employeesResult, attendanceResult, paymentsMonthlyResult, subjectsResult, gradesTeacherResult,
+      ] = await Promise.allSettled([
+        studentsPromise,
+        recentPaymentsPromise,
+        classFeesPromise,
+        monthlySalariesPromise,
+        incomesPromise,
+        expensesPromise,
+        branchesPromise,
+        employeesPromise,
+        attendancePromise,
+        paymentsMonthlyPromise,
+        subjectsPromise,
+        gradesTeacherPromise,
+      ]);
+
+      const studentsFailed = studentsResult.status !== "fulfilled" || Boolean(studentsResult.value?.error);
+      const recentPaymentsFailed = recentPaymentsResult.status !== "fulfilled" || Boolean(recentPaymentsResult.value?.error);
+      const classFeesFailed = classFeesResult.status !== "fulfilled" || Boolean(classFeesResult.value?.error);
+      const monthlySalariesFailed =
+        monthlySalariesResult.status !== "fulfilled" || Boolean(monthlySalariesResult.value?.error);
+
+      const warning =
+        studentsFailed || recentPaymentsFailed || classFeesFailed || monthlySalariesFailed
+          ? "degraded_dashboard_overview"
+          : undefined;
+
+      const students =
+        studentsResult.status === "fulfilled" && !studentsResult.value.error
+          ? ((studentsResult.value.data ?? []) as DashboardStudentRow[])
+          : [];
+
+      // SAFETY: If branch scope was requested but schema detection failed for any table,
+      // we cannot safely apply branch filtering. Return degraded to prevent data leakage.
+      if (effectiveBranchId) {
+        const missingBranchScopes = [];
+        if (!studentsBranchScope) missingBranchScopes.push("students");
+        if (!paymentsBranchScope) missingBranchScopes.push("payments");
+        if (!salariesBranchScope) missingBranchScopes.push("salaries");
+        if (missingBranchScopes.length > 0) {
+          console.warn(
+            `[dashboard-overview] Branch requested but columns not found in: ${missingBranchScopes.join(", ")}. Returning degraded.`
+          );
+          return buildEmptyDashboardOverviewPayload("degraded_dashboard_overview");
+        }
+      }
+      const classFeeMap = new Map<string, number>();
+      (classFeesResult.status === "fulfilled" && !classFeesResult.value.error
+        ? (classFeesResult.value.data ?? [])
+        : []
+      ).forEach((fee: Record<string, unknown>) => {
+        const className = normalizeDashboardOverviewName(String(fee.class_name ?? ""));
+        const totalFee = Number(fee.total_fee ?? 0);
+        if (className && Number.isFinite(totalFee) && totalFee > 0) {
+          classFeeMap.set(className, totalFee);
+        }
+      });
+
+      const resolvedStudents: ResolvedDashboardStudentRow[] = students.map((student) => {
+        const className = normalizeDashboardOverviewName(student.class_name);
+        const classFeeTotal = classFeeMap.get(className);
+        const resolved = buildResolvedStudentFinancials(
+          {
+            total_fee: student.total_fee,
+            paid_fee: student.paid_fee,
+            discount_value: student.discount_value,
+          },
+          classFeeTotal,
+        );
+
+        return {
+          ...student,
+          total_fee: resolved.total_fee,
+          paid_fee: resolved.paid_fee,
+          discount_value: resolved.discount_value,
+          remaining_fee: resolved.remaining_fee,
+          resolved_total_fee: resolved.resolved_total_fee,
+        };
+      });
+      const studentsById = new Map(resolvedStudents.map((student) => [student.id, student]));
+      const classStatsByKey = Object.fromEntries(
+        Object.entries(
+          resolvedStudents.reduce<Record<string, { className: string; activeCount: number; transferredCount: number; count: number; totalPaid: number; totalRemaining: number; transferredPaid: number }>>((acc, student) => {
+            const className = normalizeDashboardOverviewName(student.class_name);
+            const classKey = normalizeDashboardOverviewKey(className);
+            if (!classKey) return acc;
+            const current = acc[classKey] ?? { className, activeCount: 0, transferredCount: 0, count: 0, totalPaid: 0, totalRemaining: 0, transferredPaid: 0 };
+            if (student.status === "transferred") {
+              current.transferredCount += 1;
+              current.transferredPaid += Number(student.paid_fee ?? 0);
+            } else {
+              current.activeCount += 1;
+              current.totalPaid += Number(student.paid_fee ?? 0);
+              current.totalRemaining += Number(student.remaining_fee ?? 0);
+            }
+            current.count = current.activeCount + current.transferredCount;
+            acc[classKey] = current;
+            return acc;
+          }, {}),
+        ).map(([className, stats]) => [className, stats]),
+      );
+
+      const recentPayments =
+        recentPaymentsResult.status === "fulfilled" && !recentPaymentsResult.value.error
+          ? (recentPaymentsResult.value.data ?? []).map((payment) => {
+              const relation = Array.isArray(payment.students) ? payment.students[0] ?? null : payment.students ?? null;
+              const student = studentsById.get(String(payment.student_id)) ?? null;
+              return {
+                id: payment.id,
+                amount: payment.amount ?? 0,
+                created_at: payment.created_at,
+                student_id: payment.student_id,
+                student_name:
+                  (relation && typeof relation.full_name === "string" ? relation.full_name : null) ??
+                  student?.full_name ??
+                  "—",
+                class_name:
+                  (relation && typeof relation.class_name === "string" ? relation.class_name : null) ??
+                  student?.class_name ??
+                  "—",
+              };
+            })
+          : [];
+
+      const classFees =
+        classFeesResult.status === "fulfilled" && !classFeesResult.value.error
+          ? (classFeesResult.value.data ?? []).map((fee) => {
+                const className = normalizeDashboardOverviewName(String(fee.class_name ?? ""));
+                const studentStats =
+                  classStatsByKey[normalizeDashboardOverviewKey(className)] ?? {
+                  className,
+                  activeCount: 0,
+                  transferredCount: 0,
+                  count: 0,
+                  totalPaid: 0,
+                  totalRemaining: 0,
+                  transferredPaid: 0,
+                };
+              const feeTotal = Number(fee.total_fee ?? 0);
+              const totalExpected = studentStats.activeCount * feeTotal;
+              const paidPct = totalExpected > 0 ? Math.min(100, Math.round((studentStats.totalPaid / totalExpected) * 100)) : 0;
+
+              return {
+                ...fee,
+                class_name: className,
+                total_fee: feeTotal,
+                installments: Number(fee.installments ?? 0),
+                installment_amount: Number(fee.installment_amount ?? 0),
+                stats: {
+                  count: studentStats.activeCount,
+                  activeCount: studentStats.activeCount,
+                  transferredCount: studentStats.transferredCount,
+                  totalExpected,
+                  totalPaid: studentStats.totalPaid,
+                  totalRemaining: studentStats.totalRemaining,
+                  transferredPaid: studentStats.transferredPaid,
+                  paidPct,
+                },
+              };
+            })
+          : [];
+
+      const monthlySalaryRows =
+        monthlySalariesResult.status === "fulfilled" && !monthlySalariesResult.value.error
+          ? (monthlySalariesResult.value.data ?? [])
+          : [];
+
+      const monthlySalaries = monthlySalaryRows.reduce(
+        (sum, row) => sum + Math.max(0, Number(row.gross_salary ?? 0) - Number(row.deductions ?? 0)),
+        0,
+      );
+
+      const incomeRows =
+        incomesResult.status === "fulfilled" && !incomesResult.value?.error
+          ? (incomesResult.value.data ?? [])
+          : [];
+
+      const totalIncomes = incomeRows.reduce(
+        (sum, row) => sum + Number((row as Record<string, unknown>).amount ?? 0),
+        0,
+      );
+
+      const todayIncomes = incomeRows.reduce(
+        (sum, row) =>
+          (row as Record<string, unknown>).income_date === todayDate
+            ? sum + Number((row as Record<string, unknown>).amount ?? 0)
+            : sum,
+        0,
+      );
+
+      const expenseRows =
+        expensesResult.status === "fulfilled" && !expensesResult.value?.error
+          ? (expensesResult.value.data ?? [])
+          : [];
+
+      const todayExpenses = expenseRows.reduce(
+        (sum, row) =>
+          (row as Record<string, unknown>).expense_date === todayDate
+            ? sum + Number((row as Record<string, unknown>).amount ?? 0)
+            : sum,
+        0,
+      );
+
+      // Split into current vs transferred so transferred fees don't inflate global totals
+      const currentStudents = resolvedStudents.filter((s) => s.status !== "transferred");
+      const transferredStudents = resolvedStudents.filter((s) => s.status === "transferred");
+
+      const totals = {
+        studentsCount: resolvedStudents.length,
+        transferredCount: transferredStudents.length,
+        // totalFees and totalRemaining reflect current students only (transferred are written off)
+        totalFees: currentStudents.reduce((sum, s) => sum + Number(s.resolved_total_fee ?? 0), 0),
+        // totalPaid reflects current students only — transferred students are completely isolated
+        totalPaid: currentStudents.reduce((sum, s) => sum + Number(s.paid_fee ?? 0), 0),
+        totalDiscount: currentStudents.reduce((sum, s) => sum + Number(s.discount_value ?? 0), 0),
+        totalRemaining: currentStudents.reduce((sum, s) => sum + Number(s.remaining_fee ?? 0), 0),
+        totalFeesWithTransferred:
+          currentStudents.reduce((sum, s) => sum + Number(s.resolved_total_fee ?? 0), 0) +
+          transferredStudents.reduce((sum, s) => sum + Number(s.paid_fee ?? 0), 0),
+        monthlySalaries,
+        totalIncomes,
+        todayIncomes,
+        todayExpenses,
+      };
+
+      const afterDiscount = totals.totalFees - totals.totalDiscount;
+      const paidPct = calculateStudentPaidPercentage({
+        total_fee: totals.totalFees,
+        paid_fee: totals.totalPaid,
+        discount_value: totals.totalDiscount,
+      });
+
+      // --- Branch breakdown ---
+      const branches =
+        branchesResult.status === "fulfilled" && !branchesResult.value?.error
+          ? (branchesResult.value.data ?? []) as unknown as { id: string; name_ar: string; name_en: string }[]
+          : [];
+
+      const employees =
+        employeesResult.status === "fulfilled" && !employeesResult.value?.error
+          ? (employeesResult.value.data ?? []) as unknown as { id: string; branch_id: string; position: string; full_name_ar: string }[]
+          : [];
+
+      const teachersByBranchMap = new Map<string, number>();
+      for (const emp of employees) {
+        if (emp.position === "teacher") {
+          teachersByBranchMap.set(emp.branch_id, (teachersByBranchMap.get(emp.branch_id) ?? 0) + 1);
+        }
+      }
+
+      const branchBreakdown = branches.map((branch) => {
+        const branchStudents = resolvedStudents.filter((s) => s.branch_id === branch.id && s.status !== "transferred");
+        const branchTotalFees = branchStudents.reduce((sum, s) => sum + Number(s.resolved_total_fee ?? 0), 0);
+        const branchTotalPaid = branchStudents.reduce((sum, s) => sum + Number(s.paid_fee ?? 0), 0);
+        const branchTotalRemaining = branchStudents.reduce((sum, s) => sum + Number(s.remaining_fee ?? 0), 0);
+        const branchDiscount = branchStudents.reduce((sum, s) => sum + Number(s.discount_value ?? 0), 0);
+        const branchPaidPct = branchTotalFees > branchDiscount
+          ? Math.min(100, Math.round((branchTotalPaid / (branchTotalFees - branchDiscount)) * 100))
+          : 0;
+        return {
+          id: branch.id,
+          nameAr: branch.name_ar,
+          nameEn: branch.name_en,
+          studentsCount: branchStudents.length,
+          teachersCount: teachersByBranchMap.get(branch.id) ?? 0,
+          totalFees: branchTotalFees,
+          totalPaid: branchTotalPaid,
+          totalRemaining: branchTotalRemaining,
+          paidPct: branchPaidPct,
+        };
+      });
+
+      // --- Teacher-subject mapping ---
+      const gradesRows =
+        gradesTeacherResult.status === "fulfilled" && !gradesTeacherResult.value?.error
+          ? (gradesTeacherResult.value.data ?? []) as { teacher_id: string; subject: string }[]
+          : [];
+
+      const subjectTeacherSets = new Map<string, Set<string>>();
+      for (const g of gradesRows) {
+        const subName = (g.subject ?? "").trim();
+        if (!subName || !g.teacher_id) continue;
+        if (!subjectTeacherSets.has(subName)) subjectTeacherSets.set(subName, new Set());
+        subjectTeacherSets.get(subName)!.add(g.teacher_id);
+      }
+
+      const subjectsRows =
+        subjectsResult.status === "fulfilled" && !subjectsResult.value?.error
+          ? (subjectsResult.value.data ?? []) as { id: string; name: string; is_active: boolean }[]
+          : [];
+
+      const teachersBySubject = subjectsRows
+        .filter((s) => s.is_active !== false)
+        .map((s) => ({
+          subjectName: s.name ?? "",
+          teacherCount: subjectTeacherSets.get(s.name ?? "")?.size ?? 0,
+        }))
+        .sort((a, b) => b.teacherCount - a.teacherCount);
+
+      // --- Monthly income/payments chart ---
+      const paymentRows =
+        paymentsMonthlyResult.status === "fulfilled" && !paymentsMonthlyResult.value?.error
+          ? (paymentsMonthlyResult.value.data ?? []) as { amount: number; created_at: string }[]
+          : [];
+
+      const monthlyMap = new Map<string, { income: number; payments: number }>();
+      for (let i = 5; i >= 0; i--) {
+        const key = addMonthsBaghdadIsoMonth(-i);
+        monthlyMap.set(key, { income: 0, payments: 0 });
+      }
+
+      for (const row of incomeRows) {
+        const incDate = String((row as Record<string, unknown>).income_date ?? "");
+        const monthKey = incDate.slice(0, 7);
+        if (monthlyMap.has(monthKey)) {
+          monthlyMap.get(monthKey)!.income += Number((row as Record<string, unknown>).amount ?? 0);
+        }
+      }
+
+      for (const row of paymentRows) {
+        const monthKey = baghdadIsoMonth(new Date(row.created_at));
+        if (monthlyMap.has(monthKey)) {
+          monthlyMap.get(monthKey)!.payments += Number(row.amount ?? 0);
+        }
+      }
+
+      const monthlyIncome = Array.from(monthlyMap.entries()).map(([month, data]) => ({
+        month,
+        income: data.income,
+        payments: data.payments,
+      }));
+
+      // --- Month-over-month change ---
+      const thisMonthKey = baghdadIsoMonth();
+      const lastMonthKey = addMonthsBaghdadIsoMonth(-1);
+
+      const thisMonthData = monthlyMap.get(thisMonthKey) ?? { income: 0, payments: 0 };
+      const lastMonthData = monthlyMap.get(lastMonthKey) ?? { income: 0, payments: 0 };
+
+      function pctChange(current: number, previous: number): number | null {
+        if (previous === 0) return current > 0 ? 100 : null;
+        return Math.round(((current - previous) / previous) * 1000) / 10;
+      }
+
+      const monthChange = {
+        paidChange: pctChange(thisMonthData.payments, lastMonthData.payments),
+        incomeChange: pctChange(thisMonthData.income, lastMonthData.income),
+        studentsChange: null as number | null,
+        remainingChange: null as number | null,
+        collectionChange: pctChange(paidPct, paidPct),
+      };
+
+      // --- Attendance summary ---
+      const attendanceRows =
+        attendanceResult.status === "fulfilled" && !attendanceResult.value?.error
+          ? (attendanceResult.value.data ?? []) as { status: string }[]
+          : [];
+
+      const attendanceSummary = {
+        totalToday: attendanceRows.length,
+        presentCount: attendanceRows.filter((r) => r.status === "present").length,
+        absentCount: attendanceRows.filter((r) => r.status === "absent").length,
+        lateCount: attendanceRows.filter((r) => r.status === "late").length,
+        attendancePct: attendanceRows.length > 0
+          ? Math.round((attendanceRows.filter((r) => r.status === "present" || r.status === "late").length / attendanceRows.length) * 100)
+          : 0,
+      };
+
+      return {
+        totals: {
+          ...totals,
+          afterDiscount,
+          paidPct,
+          remainingPct: Math.max(0, 100 - paidPct),
+        },
+        recentPayments,
+        overdueStudents: [...resolvedStudents]
+          .filter((student) => Number(student.remaining_fee ?? 0) > 0)
+          .sort((left, right) => Number(right.remaining_fee ?? 0) - Number(left.remaining_fee ?? 0))
+          .slice(0, 3)
+          .map((student) => ({
+            id: student.id,
+            full_name: student.full_name,
+            class_name: normalizeDashboardOverviewName(student.class_name),
+            remaining_fee: Number(student.remaining_fee ?? 0),
+          })),
+        classFees,
+        studentCountByClass: Object.fromEntries(
+          Object.values(classStatsByKey).map((stats) => [stats.className, stats.count]),
+        ),
+        branchBreakdown,
+        teachersBySubject,
+        monthlyIncome,
+        monthChange,
+        attendanceSummary,
+        ...(warning ? { warning } : {}),
+      };
+    };
+
+    const payload = bypassCache
+      ? await loadDashboardOverview()
+      : await rememberWithTtl(
+          `dashboard-overview:${targetSchoolId}:${effectiveBranchId ?? "all"}`,
+          15_000,
+          loadDashboardOverview,
+          {
+            tags: [buildSchoolCacheTag(targetSchoolId, "dashboard-overview")],
+          },
+        );
+
+    return NextResponse.json({
+      ok: true,
+      ...payload,
+    }, {
+      headers: getCacheHeaders(CACHE_STRATEGIES.DASHBOARD_OVERVIEW),
+    });
+  } catch (error) {
+    logRouteError("dashboard-overview", error, {
+      actorUserId,
+      schoolId: targetSchoolId,
+      branchId: effectiveBranchId,
+      requestId: req.headers.get("x-request-id"),
+    });
+
+    return NextResponse.json({
+      ok: true,
+      ...buildEmptyDashboardOverviewPayload("degraded_dashboard_overview"),
+    });
+  }
+}
