@@ -177,15 +177,6 @@ function rateLimitedResponse(decision: RateLimitDecision) {
   );
 }
 
-/**
- * Extract client identifier (IP or user ID)
- */
-function getClientId(req: NextRequest): string {
-  const forwarded = req.headers.get("x-forwarded-for");
-  const ip = forwarded ? forwarded.split(",")[0].trim() : "unknown";
-  const userId = req.headers.get("x-user-id") || "anonymous";
-  return `${ip}:${userId}`;
-}
 
 /**
  * Development-only token bucket implementation.
@@ -333,7 +324,7 @@ export async function rateLimitMiddleware(
   status?: number;
   message?: string;
 }> {
-  const clientId = getClientId(req);
+  const clientId = getRateLimitClientIp(req);
   let decision = await checkRateLimit("middleware", clientId, limits);
 
   if ("productionFailure" in decision) {
@@ -391,27 +382,119 @@ if (typeof setInterval !== "undefined") {
   setInterval(cleanupRateLimits, 10 * 60 * 1000).unref?.();
 }
 
+// Cloudflare edge ranges (https://www.cloudflare.com/ips/). A request that
+// really came through Cloudflare reaches nginx from one of these addresses;
+// only then is its CF-Connecting-IP header Cloudflare's, not the client's.
+const CLOUDFLARE_CIDRS = [
+  "173.245.48.0/20",
+  "103.21.244.0/22",
+  "103.22.200.0/22",
+  "103.31.4.0/22",
+  "141.101.64.0/18",
+  "108.162.192.0/18",
+  "190.93.240.0/20",
+  "188.114.96.0/20",
+  "197.234.240.0/22",
+  "198.41.128.0/17",
+  "162.158.0.0/15",
+  "104.16.0.0/13",
+  "104.24.0.0/14",
+  "172.64.0.0/13",
+  "131.0.72.0/22",
+  "2400:cb00::/32",
+  "2606:4700::/32",
+  "2803:f800::/32",
+  "2405:b500::/32",
+  "2405:8100::/32",
+  "2a06:98c0::/29",
+  "2c0f:f248::/32",
+];
+
+function parseIpv4(ip: string): bigint | null {
+  const parts = ip.split(".");
+  if (parts.length !== 4) return null;
+  let value = BigInt(0);
+  for (const part of parts) {
+    if (!/^\d{1,3}$/.test(part)) return null;
+    const octet = Number(part);
+    if (octet > 255) return null;
+    value = (value << BigInt(8)) | BigInt(octet);
+  }
+  return value;
+}
+
+function parseIpv6(ip: string): bigint | null {
+  const halves = ip.split("::");
+  if (halves.length > 2) return null;
+  const head = halves[0] ? halves[0].split(":") : [];
+  const tail = halves.length === 2 && halves[1] ? halves[1].split(":") : [];
+  const missing = 8 - head.length - tail.length;
+  if (halves.length === 1 ? missing !== 0 : missing < 1) return null;
+  const groups = [...head, ...Array<string>(halves.length === 2 ? missing : 0).fill("0"), ...tail];
+  let value = BigInt(0);
+  for (const group of groups) {
+    if (!/^[0-9a-f]{1,4}$/i.test(group)) return null;
+    value = (value << BigInt(16)) | BigInt(parseInt(group, 16));
+  }
+  return value;
+}
+
+function parseIp(raw: string): { version: 4 | 6; value: bigint } | null {
+  const ip = raw.trim().replace(/^::ffff:(?=\d+\.\d+\.\d+\.\d+$)/i, "");
+  const v4 = parseIpv4(ip);
+  if (v4 !== null) return { version: 4, value: v4 };
+  const v6 = parseIpv6(ip);
+  if (v6 !== null) return { version: 6, value: v6 };
+  return null;
+}
+
+const PARSED_CLOUDFLARE_CIDRS = CLOUDFLARE_CIDRS.map((cidr) => {
+  const [base, bits] = cidr.split("/");
+  const parsed = parseIp(base)!;
+  const width = parsed.version === 4 ? 32 : 128;
+  const shift = BigInt(width - Number(bits));
+  return { version: parsed.version, prefix: parsed.value >> shift, shift };
+});
+
+export function isCloudflareIp(ip: string): boolean {
+  const parsed = parseIp(ip);
+  if (!parsed) return false;
+  return PARSED_CLOUDFLARE_CIDRS.some(
+    (range) =>
+      range.version === parsed.version &&
+      parsed.value >> range.shift === range.prefix,
+  );
+}
+
+function normalizeIp(raw: string | null | undefined): string | null {
+  if (!raw) return null;
+  const ip = raw.trim();
+  return parseIp(ip) ? ip : null;
+}
+
 /**
- * Get client IP from request (for compatibility)
+ * Resolves the client IP without trusting headers the client can forge.
+ *
+ * nginx (deploy/hetzner) overwrites X-Real-IP with the TCP peer address, so
+ * it cannot be spoofed. When that peer is a Cloudflare edge, the real client
+ * is in CF-Connecting-IP; otherwise the peer itself is the client, and a
+ * CF-Connecting-IP header was sent by the client (e.g. by hitting the origin
+ * directly) and is ignored. X-Forwarded-For's leftmost entry is
+ * client-controlled and is only used when no proxy header exists at all
+ * (local development).
  */
 export function getRateLimitClientIp(req: NextRequest): string {
-  // Trust X-Forwarded-For only if behind Vercel or configured proxy
-  // Vercel always sends CF-Connecting-IP or x-forwarded-for
-  const cfIp = req.headers.get("cf-connecting-ip");
-  if (cfIp) return cfIp.trim();
+  const peerIp = normalizeIp(req.headers.get("x-real-ip"));
+  if (peerIp) {
+    if (isCloudflareIp(peerIp)) {
+      return normalizeIp(req.headers.get("cf-connecting-ip")) ?? peerIp;
+    }
+    return peerIp;
+  }
 
   const forwarded = req.headers.get("x-forwarded-for");
   if (!forwarded) return "unknown";
-
-  // Extract first IP from comma-separated list (leftmost = client IP)
-  const clientIp = forwarded.split(",")[0]?.trim();
-
-  // Validate IP format (basic check)
-  if (!clientIp || !/^[\d.a-f:]+$/i.test(clientIp)) {
-    return "unknown";
-  }
-
-  return clientIp;
+  return normalizeIp(forwarded.split(",")[0]) ?? "unknown";
 }
 
 export function normalizeRateLimitEmail(email: string | null | undefined) {
@@ -433,6 +516,21 @@ export function buildAuthRateLimitIdentifier(
     : "anon";
   return `${ip}:${emailHash}`;
 }
+
+// Keyed on the account alone, so rotating IPs cannot multiply the number of
+// password guesses against one account. Shared by every login endpoint.
+export function buildAccountRateLimitIdentifier(
+  account: string | null | undefined,
+): string | null {
+  const normalized = normalizeRateLimitEmail(account)?.replace(/@schoolapp\.local$/, "");
+  return normalized ? hashRateLimitValue(normalized).slice(0, 24) : null;
+}
+
+export const ACCOUNT_LOGIN_RATE_LIMIT = {
+  namespace: "auth-login-account",
+  windowMs: 15 * 60_000,
+  maxHits: 30,
+} as const;
 
 export function getRateLimitOpsSnapshot() {
   return {

@@ -7,6 +7,7 @@ import { enforceRateLimit } from "@/lib/rate-limit";
 import { jsonError, jsonValidationError, logRouteError } from "@/lib/route-utils";
 import { routeUserHasPermission } from "@/lib/route-permissions";
 import { invalidateSchoolCacheDomains } from "@/lib/server-cache";
+import { createServiceSupabaseClient } from "@/lib/supabase-server";
 
 export async function POST(req: NextRequest) {
   const body = await req.json().catch(() => null);
@@ -79,7 +80,9 @@ export async function POST(req: NextRequest) {
 
   const paymentTimestamp = receiptDate ?? new Date().toISOString();
 
-  const { data: rpcRows, error: rpcError } = await actorSupabase.rpc("create_payment_atomic", {
+  // create_payment_atomic is SECURITY DEFINER and trusts p_school_id, so it is
+  // executable by service_role only; the actor was authorized above.
+  const { data: rpcRows, error: rpcError } = await createServiceSupabaseClient().rpc("create_payment_atomic", {
     p_school_id: targetSchoolId,
     p_student_id: studentId,
     p_branch_id: finalBranchId,

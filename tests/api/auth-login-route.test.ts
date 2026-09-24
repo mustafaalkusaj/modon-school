@@ -35,6 +35,9 @@ const mockState = vi.hoisted(() => ({
 vi.mock("@/lib/rate-limit", () => ({
   enforceRateLimit: mockState.enforceRateLimit,
   buildAuthRateLimitIdentifier: mockState.buildAuthRateLimitIdentifier,
+  buildAccountRateLimitIdentifier: (account: string | null | undefined) =>
+    account ? `acct:${account}` : null,
+  ACCOUNT_LOGIN_RATE_LIMIT: { namespace: "auth-login-account", windowMs: 900_000, maxHits: 30 },
   normalizeRateLimitEmail: mockState.normalizeRateLimitEmail,
 }));
 
