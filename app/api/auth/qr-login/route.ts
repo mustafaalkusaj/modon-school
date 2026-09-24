@@ -107,6 +107,14 @@ export async function POST(req: NextRequest) {
 
     const { profile, snapshot } = resolved;
     console.log("[qr-login] profile.is_active:", profile.is_active, "role:", snapshot.role);
+    // Platform-wide accounts must never be reachable through a QR token.
+    if (snapshot.role === "super_admin") {
+      return NextResponse.json(
+        { error: "invalid_token", code: "QR_LOGIN_INVALID_TOKEN" },
+        { status: 401, headers: { "Cache-Control": "no-store" } },
+      );
+    }
+
     if (!profile.is_active) {
       return NextResponse.json(
         { error: "inactive_account", code: "QR_LOGIN_PROFILE_INACTIVE" },

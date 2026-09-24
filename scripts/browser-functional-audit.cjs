@@ -3,6 +3,15 @@ const path = require("node:path");
 const { chromium } = require("playwright");
 
 const BASE_URL = process.env.AUDIT_BASE_URL || "http://127.0.0.1:3031";
+
+function requireEnv(name) {
+  const value = process.env[name];
+  if (!value) {
+    console.error(`Missing ${name} in the environment.`);
+    process.exit(1);
+  }
+  return value;
+}
 const OUTPUT_DIR = path.join(process.cwd(), "artifacts", "reliability-audit");
 
 async function loginAndSaveState(browser, options) {
@@ -39,12 +48,12 @@ async function main() {
     const admin = await loginAndSaveState(browser, {
       label: "admin",
       email: "admin@schoolapp.com",
-      password: "Admin@12345",
+      password: requireEnv("PW_ADMIN_PASSWORD"),
     });
     const superAdmin = await loginAndSaveState(browser, {
       label: "super-admin",
       email: "super.admin@schoolapp.com",
-      password: "Owner@12345",
+      password: requireEnv("PW_SUPER_ADMIN_PASSWORD"),
     });
 
     const result = {

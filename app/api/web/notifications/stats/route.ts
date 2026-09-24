@@ -35,13 +35,13 @@ export async function GET(request: NextRequest) {
 
     actorSupabase
       .from("notifications")
-      .select("status")
+      .select("is_read")
       .eq("school_id", targetSchoolId)
       .gte("created_at", since),
 
     actorSupabase
       .from("notifications")
-      .select("id, title, type, status, created_at")
+      .select("id, title, type, is_read, created_at")
       .eq("school_id", targetSchoolId)
       .order("created_at", { ascending: false })
       .limit(10),
@@ -56,8 +56,9 @@ export async function GET(request: NextRequest) {
   }
 
   const byStatus: Record<string, number> = {};
-  for (const row of (byStatusRes.data ?? []) as Array<{ status: string | null }>) {
-    const s = row.status ?? "unknown";
+  // notifications has no status column; read state is the only lifecycle.
+  for (const row of byStatusRes.data ?? []) {
+    const s = row.is_read ? "read" : "unread";
     byStatus[s] = (byStatus[s] ?? 0) + 1;
   }
 

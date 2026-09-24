@@ -8,7 +8,7 @@ const SCREENSHOT_DIR = path.join(OUTPUT_DIR, "screenshots");
 const REPORT_PATH = path.join(OUTPUT_DIR, "print-audit.json");
 
 const ADMIN_EMAIL = process.env.PW_ADMIN_EMAIL ?? "admin@schoolapp.com";
-const ADMIN_PASSWORD = process.env.PW_ADMIN_PASSWORD ?? "Admin@12345";
+const ADMIN_PASSWORD = process.env.PW_ADMIN_PASSWORD ?? "";
 
 function delay(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));

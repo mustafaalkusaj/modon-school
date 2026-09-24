@@ -1,5 +1,12 @@
 import { test, expect } from "@playwright/test";
 
+import { e2ePassword, hasE2EPasswords } from "./_credentials";
+
+test.skip(
+  !hasE2EPasswords("TEACHER_PRIMARY", "TEACHER_BOYS", "TEACHER_GIRLS", "SCHOOL_ADMIN", "SUPER_ADMIN"),
+  "Set the E2E_*_PASSWORD env vars (see tests/e2e/_credentials.ts)",
+);
+
 const PROD_URL = "https://app.modon-school.com"; // fallback
 
 // Test accounts with real credentials
@@ -7,31 +14,31 @@ const accounts = [
   {
     name: "ابتدائية (Teacher)",
     email: "zena3@modon-school.com",
-    password: "zena102030",
+    password: e2ePassword("TEACHER_PRIMARY"),
     type: "teacher",
   },
   {
     name: "ثانوية بنين (Teacher)",
     email: "saif1@modon-school.com",
-    password: "saif102030",
+    password: e2ePassword("TEACHER_BOYS"),
     type: "teacher",
   },
   {
     name: "ثانوية بنات (Teacher)",
     email: "zena1@modon-school.com",
-    password: "zena102030",
+    password: e2ePassword("TEACHER_GIRLS"),
     type: "teacher",
   },
   {
     name: "مدير مدرسة (Admin)",
     email: "dr.anmar@modon-school.com",
-    password: "anmar12345",
+    password: e2ePassword("SCHOOL_ADMIN"),
     type: "admin",
   },
   {
     name: "super admin",
     email: "super.admin@modon-school.com",
-    password: "Admin@School2026",
+    password: e2ePassword("SUPER_ADMIN"),
     type: "super_admin",
   },
 ];
@@ -184,7 +191,7 @@ test.describe("API & Authentication Tests", () => {
       await request.post(`${PROD_URL}/api/auth/login`, {
         data: {
           email: "zena3@modon-school.com",
-          password: "zena102030",
+          password: e2ePassword("TEACHER_PRIMARY"),
         },
       });
       const duration = Date.now() - start;
@@ -195,7 +202,7 @@ test.describe("API & Authentication Tests", () => {
       const loginRes = await request.post(`${PROD_URL}/api/auth/login`, {
         data: {
           email: "zena3@modon-school.com",
-          password: "zena102030",
+          password: e2ePassword("TEACHER_PRIMARY"),
         },
       });
 

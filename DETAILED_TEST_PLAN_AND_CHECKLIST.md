@@ -9,7 +9,7 @@
 ### Account 1: Branch Admin - Primary School (ابتدائية)
 ```
 Email: zena3@modon-school.com
-Password: zena102030
+Password: <redacted>
 Role: branch_admin (Branch Manager)
 School: النخيل الأهلية (Al-Nakheel Private School)
 Branch: ابتدائية (Primary)
@@ -19,7 +19,7 @@ Expected Behavior: Can ONLY see/manage primary school data
 ### Account 2: Branch Admin - Boys Secondary (ثانوية بنين)
 ```
 Email: saif1@modon-school.com
-Password: saif102030
+Password: <redacted>
 Role: branch_admin
 School: النخيل الأهلية
 Branch: ثانوية بنين (Boys Secondary)
@@ -29,7 +29,7 @@ Expected Behavior: Can ONLY see/manage boys secondary branch data
 ### Account 3: Branch Admin - Girls Secondary (ثانوية بنات)
 ```
 Email: zena1@modon-school.com
-Password: zena102030
+Password: <redacted>
 Role: branch_admin
 School: النخيل الأهلية
 Branch: ثانوية بنات (Girls Secondary)
@@ -39,7 +39,7 @@ Expected Behavior: Can ONLY see/manage girls secondary branch data
 ### Account 4: School Manager (Group Admin)
 ```
 Email: dr.anmar@modon-school.com
-Password: anmar12345
+Password: <redacted>
 Role: group_admin
 School: النخيل الأهلية
 Expected Behavior: Can see/manage ALL branches in the school
@@ -48,7 +48,7 @@ Expected Behavior: Can see/manage ALL branches in the school
 ### Account 5: Super Admin
 ```
 Email: super.admin@modon-school.com
-Password: Admin@School2026
+Password: <redacted>
 Role: super_admin
 Expected Behavior: Can access ALL schools and branches
 ```

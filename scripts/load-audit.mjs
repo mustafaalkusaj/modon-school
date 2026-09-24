@@ -4,6 +4,15 @@ import process from "node:process";
 import { createClient } from "@supabase/supabase-js";
 
 const BASE_URL = process.env.AUDIT_BASE_URL || "http://127.0.0.1:3030";
+
+function requireEnv(name) {
+  const value = process.env[name];
+  if (!value) {
+    console.error(`Missing ${name} in the environment.`);
+    process.exit(1);
+  }
+  return value;
+}
 const OUTPUT_DIR = path.join(process.cwd(), "artifacts", "reliability-audit");
 const ADMIN_STORAGE_STATE = path.join(OUTPUT_DIR, "admin-storage-state.json");
 const SUPER_ADMIN_STORAGE_STATE = path.join(OUTPUT_DIR, "super-admin-storage-state.json");
@@ -157,7 +166,7 @@ async function main() {
   const env = parseEnv(await fs.readFile(path.join(process.cwd(), ".env.local"), "utf8"));
   const adminCookies = await readStorageStateCookies(ADMIN_STORAGE_STATE);
   const superAdminCookies = await readStorageStateCookies(SUPER_ADMIN_STORAGE_STATE);
-  const adminAuth = await createAuthedSupabaseClient(env, "admin@schoolapp.com", "Admin@12345");
+  const adminAuth = await createAuthedSupabaseClient(env, "admin@schoolapp.com", requireEnv("PW_ADMIN_PASSWORD"));
   const compat = {
     classFeesSchoolScope: await hasColumn(adminAuth.client, "class_fees", "school_id"),
   };

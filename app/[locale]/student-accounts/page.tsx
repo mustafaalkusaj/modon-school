@@ -164,11 +164,11 @@ function StudentAccountsContent() {
         const res = await fetchWithAuthorizedSession("/api/admin/qr-tokens", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ user_id: student.authUserId }),
+          body: JSON.stringify({ action: "generate_qr", auth_user_id: student.authUserId, school_id: schoolId }),
         });
         const data = await res.json();
-        if (data?.ok && data.token) {
-          qrPayload = `https://modon-school.com/ar/qr-login?t=${encodeURIComponent(data.token)}`;
+        if (data?.ok && data.token?.token) {
+          qrPayload = `https://modon-school.com/ar/qr-login?t=${encodeURIComponent(data.token.token)}`;
         } else {
           qrPayload = student.password
             ? `https://modon-school.com/ar/qr-login?u=${encodeURIComponent(student.username)}&p=${encodeURIComponent(student.password)}`
@@ -433,11 +433,11 @@ function StudentAccountsContent() {
             const res = await fetchWithAuthorizedSession("/api/admin/qr-tokens", {
               method: "POST",
               headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ user_id: s.authUserId }),
+              body: JSON.stringify({ action: "generate_qr", auth_user_id: s.authUserId, school_id: schoolId }),
             });
             const data = await res.json();
-            if (data?.ok && data.token) {
-              qrPayload = `${siteUrl}/ar/qr-login?t=${encodeURIComponent(data.token)}`;
+            if (data?.ok && data.token?.token) {
+              qrPayload = `${siteUrl}/ar/qr-login?t=${encodeURIComponent(data.token.token)}`;
             }
           }
           const qr = await QRCode.toDataURL(qrPayload, {

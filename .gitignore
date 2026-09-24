@@ -70,8 +70,8 @@ next-env.d.ts
 # Added by code-review-graph
 .code-review-graph/
 
-audit/
-logs/
+/audit/
+/logs/
 
 # leftover scripts / backups (do not rsync to prod)
 .tmp-*

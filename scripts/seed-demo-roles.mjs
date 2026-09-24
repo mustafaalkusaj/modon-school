@@ -29,7 +29,11 @@ const supabase = createClient(SUPABASE_URL, SERVICE_KEY, {
   auth: { autoRefreshToken: false, persistSession: false },
 });
 
-const DEMO_PASSWORD = "DemoPass!9001";
+const DEMO_PASSWORD = process.env.SEED_DEMO_PASSWORD ?? "";
+if (!DEMO_PASSWORD) {
+  console.error("Missing SEED_DEMO_PASSWORD.");
+  process.exit(1);
+}
 
 const USERS = [
   {
