@@ -164,6 +164,14 @@ describe("POST /api/mobile/admin/payments", () => {
     expect(payload.ok).toBe(false);
   });
 
+  it("tells the admin when the payment exceeds the remaining fee", async () => {
+    setup({ rpc: { data: [{ ...RPC_ROW, error_code: "PAYMENT_EXCEEDS_REMAINING" }] } });
+
+    const { payload } = await post(validBody);
+
+    expect(payload.error).toBe("قيمة الدفعة أكبر من المبلغ المتبقي.");
+  });
+
   it("maps a unique violation (23505) to 409", async () => {
     setup({ rpc: { data: null, error: { code: "23505" } } });
 
