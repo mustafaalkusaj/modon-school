@@ -225,6 +225,15 @@ describe("DELETE /api/web/payments/records/[paymentId]", () => {
       expect(invalidateSchoolCacheDomains).not.toHaveBeenCalled();
     });
 
+    it("never returns the raw database error to the client", async () => {
+      setup({ update: { error: { code: "XX000", message: "column payments.secret_col does not exist" } } });
+
+      const { response, payload } = await del(PAYMENT_ID);
+
+      expect(response.status).toBe(500);
+      expect(JSON.stringify(payload)).not.toContain("secret_col");
+    });
+
     it("returns 202 with a warning when the balance reload fails after deleting", async () => {
       setup({ student: { data: null, error: { message: "timeout" } } });
 
