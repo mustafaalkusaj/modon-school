@@ -19,7 +19,7 @@ A complete, production-ready school management system featuring:
 Start here based on your role:
 
 - **Frontend Developers** → [CORE_API_DOCUMENTATION.md](./CORE_API_DOCUMENTATION.md)
-- **Backend Developers** → [SYSTEM_DESIGN.md](./SYSTEM_DESIGN.md)
+- **Backend Developers** → [docs/SYSTEM_DESIGN.md](./docs/SYSTEM_DESIGN.md)
 - **DevOps/Deployment** → [IMPLEMENTATION_GUIDE.md](./IMPLEMENTATION_GUIDE.md)
 - **Project Overview** → [PROJECT_COMPLETION_SUMMARY.md](./PROJECT_COMPLETION_SUMMARY.md)
 
@@ -27,7 +27,7 @@ Start here based on your role:
 
 This repository features:
 
-- Multi-tenant branch isolation (Prisma proxy pattern)
+- Multi-tenant isolation enforced by Supabase RLS (see supabase/migrations)
 - JWT-based authentication (24-hour tokens)
 - Role-based access control (8-level hierarchy)
 - Automatic data filtering on all queries
@@ -60,11 +60,8 @@ npm install
 cp .env.example .env
 # Edit .env with your database and JWT settings
 
-# Generate Prisma client
-npm run prisma:generate
-
-# Run database migrations
-npm run prisma:migrate
+# Apply database migrations (Supabase CLI; checks the target project first)
+npm run db:push:safe
 ```
 
 ### Development

@@ -106,7 +106,7 @@ export function AppsTab({ schools }: AppsTabProps) {
       <SectionCard title="التطبيقات" description="إدارة تطبيقات المدارس المنشورة">
         <div className="rounded-2xl border border-amber-200 bg-amber-50 p-6 text-center">
           <p className="text-sm font-bold text-amber-800">جدول school_apps غير موجود. شغّل migration أولاً.</p>
-          <code className="mt-2 block text-xs text-amber-600">migrations/20260602_000000_super_admin_app_management.sql</code>
+          <code className="mt-2 block text-xs text-amber-600">docs/archive/legacy-migrations/20260602_000000_super_admin_app_management.sql</code>
         </div>
       </SectionCard>
     );

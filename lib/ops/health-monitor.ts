@@ -137,7 +137,7 @@ async function readStoragePolicyHints() {
     const sql = await fs.readFile(filePath, "utf8");
 
     return {
-      source: "migrations/20260424_000000_logo_storage_policies.sql",
+      source: "docs/archive/legacy-migrations/20260424_000000_logo_storage_policies.sql",
       reviewed: true,
       normalUserRandomWriteDenied:
         sql.includes("TO authenticated") &&

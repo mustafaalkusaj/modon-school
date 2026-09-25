@@ -68,7 +68,7 @@ export default function FeaturesPage() {
   }, [pending, load, toast]);
 
   if (tableMissing) return (
-    <SectionCard title="الميزات"><div className="rounded-2xl border border-amber-500/20 bg-amber-500/10 p-6 text-center"><p className="text-sm font-bold text-amber-300">جدول school_feature_flags غير موجود. شغّل migration أولاً.</p><code className="mt-2 block text-xs text-amber-400">migrations/20260602_000000_super_admin_app_management.sql</code></div></SectionCard>
+    <SectionCard title="الميزات"><div className="rounded-2xl border border-amber-500/20 bg-amber-500/10 p-6 text-center"><p className="text-sm font-bold text-amber-300">جدول school_feature_flags غير موجود. شغّل migration أولاً.</p><code className="mt-2 block text-xs text-amber-400">docs/archive/legacy-migrations/20260602_000000_super_admin_app_management.sql</code></div></SectionCard>
   );
 
   return (

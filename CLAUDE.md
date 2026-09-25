@@ -14,4 +14,4 @@
 1. Supabase منفصل عن باقي المشاريع
 2. نفس الكود الأساسي (منسوخ من modon-school) مع تعديلات البراندنق
 3. اللغة — عربي (RTL)
-4. Deploy branch: production
+4. Deploy: من فرع main يدوياً عبر `deploy.sh` (PM2 على السيرفر). ماكو فرع production.

@@ -51,7 +51,6 @@
     "00990090",
     "app/____",
     "lib/__tests__",
-    "tests",
-    "lib/prisma.ts"
+    "tests"
   ]
 }
