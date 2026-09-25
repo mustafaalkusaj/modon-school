@@ -178,7 +178,6 @@ export async function POST(
     // 3. Update teacher record with username, auth_user_id (NOT the plaintext
     // password). The password is returned once in the HTTP response below.
     // The hashed credential lives in managed_user_credentials (step 2).
-    // TODO(C1-MIGRATION): drop the unused app_password_plain DB column.
     const { data, error } = await applyBranchScopeToQuery(
       actorSupabase
         .from("teachers")

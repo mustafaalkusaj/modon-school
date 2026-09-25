@@ -114,7 +114,6 @@ export async function GET(
 
     // C1: Never send the plaintext password in GET responses.
     // The AppAccountTab reads it from state set at account-creation time.
-    // TODO(C1-MIGRATION): drop app_password_plain from the DB schema.
     const { app_password_plain: _pwd, ...teacher } = data as typeof data & { app_password_plain?: string | null };
 
     return NextResponse.json({ ok: true, teacher });

@@ -5,9 +5,9 @@ import { cronMatches, parseCron, type CronSchedule } from "./schedule";
 // the same routes on the same schedules (UTC), authenticated with
 // CRON_SECRET exactly like Vercel Cron does.
 //
-// /api/cron/account-deletion is intentionally absent: its
-// account_deletion_requests table does not exist in the database yet, so the
-// job could only fail.
+// /api/cron/account-deletion is intentionally absent: the erasure it runs
+// calls public.execute_account_deletion_erasure(), which no migration
+// creates yet, so every due request would be claimed and marked failed.
 export const INTERNAL_CRON_JOBS = [
   { path: "/api/cron/scheduled-notifications", schedule: "*/5 * * * *" },
   { path: "/api/ops/warm", schedule: "0 6 * * *" },

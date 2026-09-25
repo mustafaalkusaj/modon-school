@@ -157,8 +157,7 @@ export async function GET(req: NextRequest) {
 
     // C1: Strip plaintext password from list responses. The field must not be
     // sent to the client in bulk — it is only needed transiently at account
-    // creation time. TODO(C1-MIGRATION): drop app_password_plain from the DB
-    // schema once managed_user_credentials is the canonical credential store.
+    // creation time. (The DB column has been dropped; this stays as a guard.)
     const teachers = (data ?? []).map((row) => {
       const { app_password_plain: _pwd, ...t } = row as typeof row & { app_password_plain?: unknown };
       return t;
@@ -310,7 +309,6 @@ export async function POST(req: NextRequest) {
 
     // C1: Strip app_password_plain from the DB row before spreading — the
     // password is carried explicitly via accountInfo so the admin sees it once.
-    // TODO(C1-MIGRATION): drop app_password_plain from the DB schema.
     const { app_password_plain: _pwd, ...teacherRow } = data as typeof data & { app_password_plain?: string | null };
 
     return NextResponse.json({

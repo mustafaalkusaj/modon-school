@@ -71,6 +71,77 @@ export type Database = {
           },
         ]
       }
+      account_deletion_requests: {
+        Row: {
+          auth_user_id: string | null
+          cancelled_at: string | null
+          completed_at: string | null
+          created_at: string
+          erasure_summary: Json | null
+          failure_reason: string | null
+          handled_by: string | null
+          id: string
+          metadata: Json
+          processing_started_at: string | null
+          reason: string | null
+          requested_at: string
+          resolution_note: string | null
+          retention_deadline: string | null
+          school_id: string
+          status: string
+          updated_at: string
+          verified_at: string | null
+        }
+        Insert: {
+          auth_user_id?: string | null
+          cancelled_at?: string | null
+          completed_at?: string | null
+          created_at?: string
+          erasure_summary?: Json | null
+          failure_reason?: string | null
+          handled_by?: string | null
+          id?: string
+          metadata?: Json
+          processing_started_at?: string | null
+          reason?: string | null
+          requested_at?: string
+          resolution_note?: string | null
+          retention_deadline?: string | null
+          school_id: string
+          status?: string
+          updated_at?: string
+          verified_at?: string | null
+        }
+        Update: {
+          auth_user_id?: string | null
+          cancelled_at?: string | null
+          completed_at?: string | null
+          created_at?: string
+          erasure_summary?: Json | null
+          failure_reason?: string | null
+          handled_by?: string | null
+          id?: string
+          metadata?: Json
+          processing_started_at?: string | null
+          reason?: string | null
+          requested_at?: string
+          resolution_note?: string | null
+          retention_deadline?: string | null
+          school_id?: string
+          status?: string
+          updated_at?: string
+          verified_at?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "account_deletion_requests_school_id_fkey"
+            columns: ["school_id"]
+            isOneToOne: false
+            referencedRelation: "schools"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       activity_attachments: {
         Row: {
           activity_id: string
@@ -8445,7 +8516,6 @@ export type Database = {
           address: string | null
           app_last_login: string | null
           app_password_hash: string | null
-          app_password_plain: string | null
           app_status: string | null
           app_username: string | null
           auth_user_id: string | null
@@ -8515,7 +8585,6 @@ export type Database = {
           address?: string | null
           app_last_login?: string | null
           app_password_hash?: string | null
-          app_password_plain?: string | null
           app_status?: string | null
           app_username?: string | null
           auth_user_id?: string | null
@@ -8585,7 +8654,6 @@ export type Database = {
           address?: string | null
           app_last_login?: string | null
           app_password_hash?: string | null
-          app_password_plain?: string | null
           app_status?: string | null
           app_username?: string | null
           auth_user_id?: string | null

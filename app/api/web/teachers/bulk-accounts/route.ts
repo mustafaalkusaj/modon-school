@@ -109,7 +109,6 @@ export async function POST(req: NextRequest) {
 
       // C1: The plaintext password is NOT persisted. It is returned once to the
       // caller in `results` so the bulk-print flow can display it a single time.
-      // TODO(C1-MIGRATION): drop the unused app_password_plain DB column.
       const { error: updateError } = await actorSupabase
         .from("teachers")
         .update({
