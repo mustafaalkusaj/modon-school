@@ -57,6 +57,9 @@ async function autoCreateTeacherAppAccount(supabase: any, teacherId: string, sch
       school_id: schoolId,
       login_identifier: username,
       temporary_password_hash: hashPassword(password),
+      // Keep the plaintext so the teacher-accounts page can show/print it,
+      // matching upsertManagedUserCredential and the ensure-all path.
+      temporary_password_plain: password,
       has_pending_setup: true,
       password_last_reset_at: new Date().toISOString(),
     });
