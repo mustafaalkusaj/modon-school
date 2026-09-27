@@ -301,10 +301,12 @@ export async function POST(req: NextRequest) {
     }
 
     let accountInfo: { app_username: string; app_password_plain: string } | null = null;
+    let accountCreationError: string | null = null;
     try {
       accountInfo = await autoCreateTeacherAppAccount(actorSupabase, data.id, targetSchoolId, fullName, actorUserId);
-    } catch {
-      // Don't fail teacher creation if account creation fails
+    } catch (err) {
+      console.error("[teacher-create] auto account creation failed for teacher", data.id, err);
+      accountCreationError = err instanceof Error ? err.message : String(err);
     }
 
     // C1: Strip app_password_plain from the DB row before spreading — the
@@ -314,6 +316,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({
       ok: true,
       teacher: accountInfo ? { ...teacherRow, ...accountInfo, app_status: "active" } : teacherRow,
+      ...(accountCreationError && { accountWarning: "تعذر إنشاء حساب الدخول تلقائياً، يمكنك إعادة المحاولة من صفحة حسابات المعلمين.", accountError: accountCreationError }),
     }, { status: 201 });
   } catch (error) {
     logRouteError("teachers-create", error, { actorUserId, schoolId: targetSchoolId });
