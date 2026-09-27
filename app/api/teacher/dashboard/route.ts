@@ -86,26 +86,51 @@ export async function GET(req: NextRequest) {
     Record<string, unknown>
   >;
 
+  const classNames = Array.from(uniqueClasses);
+  const [teacherRes, studentsRes] = await Promise.all([
+    supabase
+      .from("teachers")
+      .select("full_name")
+      .eq("id", teacherId)
+      .eq("school_id", schoolId)
+      .maybeSingle(),
+    classNames.length > 0
+      ? supabase
+          .from("students")
+          .select("id", { count: "exact", head: true })
+          .eq("school_id", schoolId)
+          .in("class_name", classNames)
+          .neq("status", "deleted")
+      : Promise.resolve({ count: 0 }),
+  ]);
+
+  // Shape must match DashboardData in app/[locale]/teacher/page.tsx.
   return NextResponse.json({
     ok: true,
     data: {
-      todaySchedule,
-      stats: {
-        classCount: uniqueClasses.size,
-        upcomingExams: exams.length,
-      },
-      recentAssignments: assignments.map((a) => ({
+      teacher_name: (teacherRes.data?.full_name as string | undefined) ?? null,
+      classes_count: uniqueClasses.size,
+      students_count: studentsRes.count ?? 0,
+      upcoming_exams_count: exams.length,
+      today_schedule: todaySchedule,
+      upcoming_exams: exams.map((e) => ({
+        id: e.id as string,
+        subject_name: (e.subject as string) ?? (e.title as string) ?? "",
+        exam_date: (e.starts_at as string) ?? "",
+        class_name: (e.class_name as string) ?? null,
+      })),
+      recent_assignments: assignments.map((a) => ({
         id: a.id as string,
         title: (a.title as string) ?? "",
-        due_date: (a.due_at as string) ?? null,
-        class_name: (a.class_name as string) ?? "",
-        subject_name: (a.subject as string) ?? null,
+        subject: (a.subject as string) ?? null,
+        due_at: (a.due_at as string) ?? "",
+        class_name: (a.class_name as string) ?? null,
       })),
       announcements: announcements.map((a) => ({
         id: a.id as string,
         title: (a.title as string) ?? "",
-        content: (a.body as string) ?? "",
-        created_at: (a.created_at as string) ?? null,
+        body: (a.body as string) ?? "",
+        created_at: (a.created_at as string) ?? "",
       })),
     },
   });

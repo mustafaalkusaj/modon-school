@@ -210,7 +210,7 @@ export default function TeacherDashboardPage() {
                   {t("عرض الكل", "View All")}
                 </button>
               </div>
-              {data.today_schedule.length === 0 ? (
+              {(data.today_schedule ?? []).length === 0 ? (
                 <div className="rounded-2xl border border-dashed border-[var(--card-border)] p-8 text-center">
                   <CalendarDays className="h-8 w-8 text-[var(--text-tertiary)] mx-auto mb-2" />
                   <p className="text-sm text-[var(--text-muted)]">
@@ -219,7 +219,7 @@ export default function TeacherDashboardPage() {
                 </div>
               ) : (
                 <div className="flex gap-2 sm:gap-3 overflow-x-auto pb-1 scrollbar-hide -mx-1 px-1 snap-x snap-mandatory">
-                  {data.today_schedule.map((slot) => {
+                  {(data.today_schedule ?? []).map((slot) => {
                     const startMin = slotMinutes(slot.start_time);
                     const endMin = slotMinutes(slot.end_time);
                     const isActive = nowMinutes >= startMin && nowMinutes < endMin;
@@ -279,7 +279,7 @@ export default function TeacherDashboardPage() {
                 </div>
               </CardHeader>
               <CardContent>
-                {data.recent_assignments.length === 0 ? (
+                {(data.recent_assignments ?? []).length === 0 ? (
                   <EmptyState
                     icon={<FileText className="h-10 w-10 text-[var(--text-tertiary)]" />}
                     title={t("لا توجد واجبات", "No assignments")}
@@ -287,7 +287,7 @@ export default function TeacherDashboardPage() {
                   />
                 ) : (
                   <div className="space-y-2">
-                    {data.recent_assignments.map((a) => (
+                    {(data.recent_assignments ?? []).map((a) => (
                       <div
                         key={a.id}
                         className="flex items-center gap-2 sm:gap-3 rounded-xl border border-[var(--card-border)] p-2.5 sm:p-3 hover:bg-[var(--surface-strong)] transition-all"
@@ -309,7 +309,7 @@ export default function TeacherDashboardPage() {
             </Card>
 
             {/* Announcements */}
-            {data.announcements.length > 0 && (
+            {(data.announcements ?? []).length > 0 && (
               <div>
                 <div className="flex items-center gap-2 mb-3">
                   <Megaphone className="h-5 w-5 text-[var(--warning)]" />
@@ -318,7 +318,7 @@ export default function TeacherDashboardPage() {
                   </h2>
                 </div>
                 <div className="space-y-2 sm:space-y-3">
-                  {data.announcements.map((a) => (
+                  {(data.announcements ?? []).map((a) => (
                     <div
                       key={a.id}
                       className="rounded-xl sm:rounded-2xl border border-[var(--card-border)] bg-[var(--card-bg)] p-3 sm:p-4"
