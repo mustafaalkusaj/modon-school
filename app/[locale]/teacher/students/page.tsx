@@ -18,6 +18,7 @@ interface Student {
   id: string;
   full_name: string;
   class_name: string | null;
+  section: string | null;
   phone: string | null;
 }
 
@@ -149,6 +150,7 @@ export default function TeacherStudentsPage() {
                       {student.class_name && (
                         <p className="text-xs text-[var(--text-muted)]">
                           {student.class_name}
+                          {student.section ? ` - ${t("شعبة", "Section")} ${student.section}` : ""}
                         </p>
                       )}
                     </div>

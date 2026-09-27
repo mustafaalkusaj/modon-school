@@ -2,36 +2,53 @@
 
 import { useEffect, useState } from "react";
 import { usePathname } from "next/navigation";
-import {
-  BarChart3,
-  Filter,
-  Save,
-  Loader2,
-} from "lucide-react";
+import { BarChart3, Save, Loader2, Users } from "lucide-react";
 import { TeacherShell } from "@/components/TeacherShell";
 import { getLocaleFromPath } from "@/lib/locale-routing";
 import { fetchJsonWithAuthorizedSession } from "@/lib/authorized-api";
-import {
-  Card,
-  CardHeader,
-  CardTitle,
-  CardContent,
-} from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
 import { EmptyState } from "@/components/ui/empty-state";
 
-interface StudentGrade {
-  student_id: string;
-  full_name: string;
-  score: number | null;
-  max_score: number;
+interface ClassOption {
+  class_name: string;
+  sections: string[];
+  subjects: string[];
+  student_count: number;
 }
 
-interface GradeData {
-  students: StudentGrade[];
-  class_names: string[];
-  subjects: string[];
+interface RosterStudent {
+  student_id: string;
+  full_name: string;
+  section: string | null;
 }
+
+interface RecentGrade {
+  id: string;
+  student_name: string;
+  subject: string;
+  exam_type: string | null;
+  score: number;
+  max_score: number;
+  percentage: number | null;
+  date: string | null;
+}
+
+interface GradesPayload {
+  classes: ClassOption[];
+  class_name: string;
+  students: RosterStudent[];
+  recent_grades: RecentGrade[];
+}
+
+const EXAM_TYPES = [
+  { ar: "يومي", en: "Daily" },
+  { ar: "شهري أول", en: "Monthly 1" },
+  { ar: "شهري ثاني", en: "Monthly 2" },
+  { ar: "نصف السنة", en: "Midterm" },
+  { ar: "نهائي", en: "Final" },
+];
+
+const fieldClass =
+  "w-full rounded-xl border border-[var(--card-border)] bg-[var(--surface-soft)] px-3 py-2.5 text-sm text-[var(--text-primary)] outline-none focus:border-[var(--primary)] focus:ring-2 focus:ring-[var(--primary)]/20 transition-all";
 
 export default function TeacherGradesPage() {
   const pathname = usePathname();
@@ -39,84 +56,73 @@ export default function TeacherGradesPage() {
   const isAr = locale === "ar";
   const t = (ar: string, en: string) => (isAr ? ar : en);
 
-  const [data, setData] = useState<GradeData | null>(null);
-  const [selectedClass, setSelectedClass] = useState("");
-  const [selectedSubject, setSelectedSubject] = useState("");
-  const [students, setStudents] = useState<StudentGrade[]>([]);
+  const [classes, setClasses] = useState<ClassOption[]>([]);
+  const [className, setClassName] = useState("");
+  const [subject, setSubject] = useState("");
+  const [examType, setExamType] = useState(EXAM_TYPES[0].ar);
+  const [maxScore, setMaxScore] = useState("100");
+  const [students, setStudents] = useState<RosterStudent[]>([]);
+  const [scores, setScores] = useState<Record<string, string>>({});
+  const [recent, setRecent] = useState<RecentGrade[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [saveMsg, setSaveMsg] = useState<{ type: "success" | "error"; text: string } | null>(null);
+  const [reloadKey, setReloadKey] = useState(0);
 
-  // Initial load to get class names and subjects
   useEffect(() => {
-    fetchJsonWithAuthorizedSession("/api/teacher/grades")
-      .then((res) => {
-        if (res.response.ok) {
-          const d = (res.payload as any)?.data as GradeData | undefined;
-          if (d) {
-            setData(d);
-            setStudents(d.students ?? []);
-            if (d.class_names.length > 0 && !selectedClass) setSelectedClass(d.class_names[0]);
-            if (d.subjects.length > 0 && !selectedSubject) setSelectedSubject(d.subjects[0]);
-          }
-        }
-      })
-      .catch(() => {})
-      .finally(() => setLoading(false));
-  }, []);
-
-  // Refetch when filters change
-  useEffect(() => {
-    if (!selectedClass && !selectedSubject) return;
     setLoading(true);
-    setSaveMsg(null);
     const params = new URLSearchParams();
-    if (selectedClass) params.set("class_name", selectedClass);
-    if (selectedSubject) params.set("subject", selectedSubject);
+    if (className) params.set("class_name", className);
+    if (subject) params.set("subject", subject);
     fetchJsonWithAuthorizedSession(`/api/teacher/grades?${params.toString()}`)
       .then((res) => {
-        if (res.response.ok) {
-          const d = (res.payload as any)?.data;
-          setStudents(d?.students ?? []);
-        }
+        const d = (res.payload as { data?: GradesPayload })?.data;
+        if (!d) return;
+        setClasses(d.classes);
+        setStudents(d.students);
+        setRecent(d.recent_grades);
+        if (!className && d.class_name) setClassName(d.class_name);
+        const cls = d.classes.find((c) => c.class_name === (className || d.class_name));
+        if (cls && (!subject || !cls.subjects.includes(subject))) setSubject(cls.subjects[0] ?? "");
       })
       .catch(() => {})
       .finally(() => setLoading(false));
-  }, [selectedClass, selectedSubject]);
+  }, [className, subject, reloadKey]);
 
-  function updateScore(studentId: string, score: number | null) {
-    setStudents((prev) =>
-      prev.map((s) =>
-        s.student_id === studentId ? { ...s, score } : s,
-      ),
-    );
-  }
+  const currentClass = classes.find((c) => c.class_name === className);
 
   async function handleSave() {
-    if (students.length === 0) return;
+    const max = Number(maxScore);
+    const entries = students
+      .filter((s) => scores[s.student_id]?.trim())
+      .map((s) => ({ student_id: s.student_id, score: Number(scores[s.student_id]) }));
+
+    if (entries.length === 0) {
+      setSaveMsg({ type: "error", text: t("أدخل درجة طالب واحد على الأقل.", "Enter at least one score.") });
+      return;
+    }
+    if (entries.some((e) => Number.isNaN(e.score) || e.score < 0 || (max > 0 && e.score > max))) {
+      setSaveMsg({ type: "error", text: t("توجد درجة غير صحيحة أو أكبر من الدرجة الكاملة.", "A score is invalid or above the max.") });
+      return;
+    }
+
     setSaving(true);
     setSaveMsg(null);
     try {
-      const res = await fetch("/api/teacher/grades", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          class_name: selectedClass,
-          subject: selectedSubject,
-          grades: students
-            .filter((s) => s.score != null)
-            .map((s) => ({
-              student_id: s.student_id,
-              score: s.score,
-              max_score: s.max_score,
-            })),
-        }),
-      });
-      const payload = await res.json();
-      if (res.ok && payload.ok) {
-        setSaveMsg({ type: "success", text: t("تم حفظ الدرجات بنجاح", "Grades saved successfully") });
+      const res = await fetchJsonWithAuthorizedSession<{ ok?: boolean; message?: string; error?: string }>(
+        "/api/teacher/grades",
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ subject, exam_type: examType, max_score: max, grades: entries }),
+        },
+      );
+      if (res.response.ok && res.payload?.ok) {
+        setSaveMsg({ type: "success", text: res.payload.message ?? t("تم حفظ الدرجات", "Grades saved") });
+        setScores({});
+        setReloadKey((k) => k + 1);
       } else {
-        setSaveMsg({ type: "error", text: payload.error ?? t("حدث خطأ", "Something went wrong") });
+        setSaveMsg({ type: "error", text: res.payload?.error ?? t("حدث خطأ", "Something went wrong") });
       }
     } catch {
       setSaveMsg({ type: "error", text: t("خطأ في الاتصال", "Connection error") });
@@ -126,165 +132,116 @@ export default function TeacherGradesPage() {
   }
 
   return (
-    <TeacherShell
-      currentPath="/teacher/grades"
-      titleAr="الدرجات"
-      titleEn="Grades"
-    >
+    <TeacherShell currentPath="/teacher/grades" titleAr="الدرجات" titleEn="Grades">
       <div className="space-y-4 max-w-3xl mx-auto">
-        {/* Filters */}
-        <div className="flex flex-col sm:flex-row gap-2 sm:gap-3">
-          <div className="relative flex-1">
-            <Filter className="absolute start-3 top-1/2 -translate-y-1/2 h-4 w-4 text-[var(--text-muted)]" />
-            <select
-              value={selectedClass}
-              onChange={(e) => setSelectedClass(e.target.value)}
-              className="w-full rounded-xl border border-[var(--card-border)] bg-[var(--surface-soft)] ps-9 pe-8 py-2.5 text-sm text-[var(--text-primary)] outline-none focus:border-[var(--primary)] focus:ring-2 focus:ring-[var(--primary)]/20 transition-all appearance-none"
-            >
-              <option value="">{t("اختر الصف", "Select Class")}</option>
-              {(data?.class_names ?? []).map((cn) => (
-                <option key={cn} value={cn}>
-                  {cn}
-                </option>
-              ))}
-            </select>
-          </div>
-          <div className="relative flex-1">
-            <BarChart3 className="absolute start-3 top-1/2 -translate-y-1/2 h-4 w-4 text-[var(--text-muted)]" />
-            <select
-              value={selectedSubject}
-              onChange={(e) => setSelectedSubject(e.target.value)}
-              className="w-full rounded-xl border border-[var(--card-border)] bg-[var(--surface-soft)] ps-9 pe-8 py-2.5 text-sm text-[var(--text-primary)] outline-none focus:border-[var(--primary)] focus:ring-2 focus:ring-[var(--primary)]/20 transition-all appearance-none"
-            >
-              <option value="">{t("اختر المادة", "Select Subject")}</option>
-              {(data?.subjects ?? []).map((s) => (
-                <option key={s} value={s}>
-                  {s}
-                </option>
-              ))}
-            </select>
-          </div>
-        </div>
-
-        {/* Grades table */}
-        {loading ? (
-          <div className="space-y-2">
-            {Array.from({ length: 6 }).map((_, i) => (
-              <div
-                key={i}
-                className="h-[56px] rounded-[var(--card-radius)] bg-[var(--card-bg)] border border-[var(--card-border)] animate-pulse"
-              />
-            ))}
-          </div>
-        ) : students.length === 0 ? (
+        {!loading && classes.length === 0 ? (
           <EmptyState
             icon={<BarChart3 className="h-12 w-12 text-[var(--text-tertiary)]" />}
-            title={t("لا يوجد طلاب لعرض الدرجات", "No students to show grades")}
+            title={t("لا توجد صفوف مسندة إليك", "No classes assigned to you")}
           />
         ) : (
           <>
-            <Card>
-              <CardHeader>
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <BarChart3 className="h-5 w-5 text-[var(--primary)]" />
-                    <CardTitle className="text-sm sm:text-base">
-                      {t("درجات الطلاب", "Student Grades")}
-                    </CardTitle>
-                  </div>
-                  <span className="text-xs text-[var(--text-muted)]">
-                    {students.length} {t("طالب", "students")}
-                  </span>
-                </div>
-              </CardHeader>
-              <CardContent>
-                <div className="space-y-2">
-                  {students.map((student) => {
-                    const pct =
-                      student.score != null && student.max_score > 0
-                        ? Math.round((student.score / student.max_score) * 100)
-                        : null;
-                    return (
-                      <div
-                        key={student.student_id}
-                        className="flex items-center gap-2 sm:gap-3 rounded-lg border border-[var(--card-border)] p-2.5 sm:p-3"
-                      >
-                        <div className="shrink-0 flex items-center justify-center w-8 h-8 rounded-full bg-[var(--primary)]/[0.1]">
-                          <span className="text-[10px] font-bold text-[var(--primary)]">
-                            {student.full_name
-                              .split(" ")
-                              .slice(0, 2)
-                              .map((w) => w[0])
-                              .join("")}
-                          </span>
-                        </div>
-                        <p className="flex-1 min-w-0 text-xs sm:text-sm font-medium text-[var(--text-primary)] truncate">
-                          {student.full_name}
-                        </p>
-                        <div className="flex items-center gap-2 shrink-0">
-                          <input
-                            type="number"
-                            min={0}
-                            max={student.max_score}
-                            value={student.score ?? ""}
-                            onChange={(e) => {
-                              const val = e.target.value === "" ? null : Number(e.target.value);
-                              updateScore(student.student_id, val);
-                            }}
-                            placeholder="—"
-                            className="w-16 rounded-lg border border-[var(--card-border)] bg-[var(--surface-soft)] px-2 py-1.5 text-center text-sm text-[var(--text-primary)] outline-none focus:border-[var(--primary)] focus:ring-2 focus:ring-[var(--primary)]/20 transition-all"
-                          />
-                          <span className="text-xs text-[var(--text-muted)]">
-                            / {student.max_score}
-                          </span>
-                          {pct != null && (
-                            <Badge
-                              variant={
-                                pct >= 80
-                                  ? "success"
-                                  : pct >= 50
-                                    ? "warning"
-                                    : "danger"
-                              }
-                              size="sm"
-                            >
-                              {pct}%
-                            </Badge>
-                          )}
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              </CardContent>
-            </Card>
+            <div className="rounded-2xl border border-[var(--card-border)] bg-[var(--card-bg)] p-4 grid gap-3 sm:grid-cols-2">
+              <label className="text-xs font-semibold text-[var(--text-muted)] space-y-1">
+                <span>{t("الصف", "Class")}</span>
+                <select value={className} onChange={(e) => { setClassName(e.target.value); setScores({}); }} className={fieldClass}>
+                  {classes.map((c) => (
+                    <option key={c.class_name} value={c.class_name}>{c.class_name}</option>
+                  ))}
+                </select>
+              </label>
+              <label className="text-xs font-semibold text-[var(--text-muted)] space-y-1">
+                <span>{t("المادة", "Subject")}</span>
+                <select value={subject} onChange={(e) => setSubject(e.target.value)} className={fieldClass}>
+                  {(currentClass?.subjects ?? []).map((s) => (
+                    <option key={s} value={s}>{s}</option>
+                  ))}
+                </select>
+              </label>
+              <label className="text-xs font-semibold text-[var(--text-muted)] space-y-1">
+                <span>{t("نوع التقييم", "Assessment")}</span>
+                <select value={examType} onChange={(e) => setExamType(e.target.value)} className={fieldClass}>
+                  {EXAM_TYPES.map((type) => (
+                    <option key={type.ar} value={type.ar}>{isAr ? type.ar : type.en}</option>
+                  ))}
+                </select>
+              </label>
+              <label className="text-xs font-semibold text-[var(--text-muted)] space-y-1">
+                <span>{t("الدرجة الكاملة", "Max score")}</span>
+                <input type="number" min={1} value={maxScore} onChange={(e) => setMaxScore(e.target.value)} className={fieldClass} />
+              </label>
+            </div>
 
-            {saveMsg && (
-              <p
-                className={`text-xs rounded-lg px-3 py-2 ${
-                  saveMsg.type === "success"
-                    ? "text-[var(--success)] bg-[var(--success)]/[0.08]"
-                    : "text-[var(--danger)] bg-[var(--danger)]/[0.08]"
-                }`}
-              >
-                {saveMsg.text}
-              </p>
-            )}
-            <button
-              type="button"
-              onClick={handleSave}
-              disabled={saving}
-              className="w-full flex items-center justify-center gap-2 rounded-xl bg-[var(--primary)] px-4 py-2.5 text-sm font-semibold text-white hover:opacity-90 active:scale-[0.98] transition-all disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              {saving ? (
-                <Loader2 className="h-4 w-4 animate-spin" />
+            <div className="rounded-2xl border border-[var(--card-border)] bg-[var(--card-bg)]">
+              <div className="flex items-center justify-between px-4 py-3 border-b border-[var(--card-border)]">
+                <h2 className="flex items-center gap-2 text-sm font-bold text-[var(--text-primary)]">
+                  <Users className="h-4 w-4 text-[var(--primary)]" />
+                  {t("إدخال الدرجات", "Enter scores")}
+                </h2>
+                <span className="text-xs text-[var(--text-muted)]">{students.length} {t("طالب", "students")}</span>
+              </div>
+              {loading ? (
+                <div className="py-10 flex justify-center"><Loader2 className="h-6 w-6 animate-spin text-[var(--primary)]" /></div>
+              ) : students.length === 0 ? (
+                <p className="p-6 text-center text-sm text-[var(--text-muted)]">{t("لا يوجد طلاب في هذا الصف", "No students in this class")}</p>
               ) : (
-                <Save className="h-4 w-4" />
+                <ul className="divide-y divide-[var(--card-border)]">
+                  {students.map((s, i) => (
+                    <li key={s.student_id} className="flex items-center gap-3 px-4 py-2.5">
+                      <span className="w-6 text-xs text-[var(--text-muted)]">{i + 1}</span>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-medium text-[var(--text-primary)] truncate">{s.full_name}</p>
+                        {s.section && <p className="text-[11px] text-[var(--text-muted)]">{t("شعبة", "Section")} {s.section}</p>}
+                      </div>
+                      <input
+                        type="number"
+                        inputMode="decimal"
+                        min={0}
+                        value={scores[s.student_id] ?? ""}
+                        onChange={(e) => setScores((prev) => ({ ...prev, [s.student_id]: e.target.value }))}
+                        placeholder="—"
+                        className="w-20 rounded-lg border border-[var(--card-border)] bg-[var(--surface-soft)] px-2 py-1.5 text-center text-sm outline-none focus:border-[var(--primary)]"
+                      />
+                      <span className="text-xs text-[var(--text-muted)] w-10">/ {maxScore}</span>
+                    </li>
+                  ))}
+                </ul>
               )}
-              {saving
-                ? t("جاري الحفظ...", "Saving...")
-                : t("حفظ الدرجات", "Save Grades")}
-            </button>
+              <div className="p-4 border-t border-[var(--card-border)] space-y-3">
+                {saveMsg && (
+                  <div className={`rounded-xl px-3 py-2 text-sm ${saveMsg.type === "success" ? "bg-[color-mix(in_srgb,var(--success)_12%,transparent)] text-[var(--success)]" : "bg-red-50 text-red-700"}`}>
+                    {saveMsg.text}
+                  </div>
+                )}
+                <button
+                  onClick={handleSave}
+                  disabled={saving || students.length === 0 || !subject}
+                  className="w-full inline-flex items-center justify-center gap-2 rounded-xl bg-[var(--primary)] px-6 py-2.5 text-sm font-semibold text-white disabled:opacity-50"
+                >
+                  {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+                  {t("حفظ الدرجات", "Save grades")}
+                </button>
+              </div>
+            </div>
+
+            {recent.length > 0 && (
+              <div className="rounded-2xl border border-[var(--card-border)] bg-[var(--card-bg)] p-4">
+                <h2 className="text-sm font-bold text-[var(--text-primary)] mb-3">{t("آخر الدرجات المسجلة", "Recent grades")}</h2>
+                <ul className="space-y-2">
+                  {recent.slice(0, 30).map((g) => (
+                    <li key={g.id} className="flex items-center gap-3 rounded-xl bg-[var(--surface-soft)] px-3 py-2">
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-medium text-[var(--text-primary)] truncate">{g.student_name}</p>
+                        <p className="text-[11px] text-[var(--text-muted)] truncate">
+                          {[g.subject, g.exam_type, g.date?.slice(0, 10)].filter(Boolean).join(" · ")}
+                        </p>
+                      </div>
+                      <span className="text-sm font-bold text-[var(--text-primary)]" dir="ltr">{g.score}/{g.max_score}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
           </>
         )}
       </div>

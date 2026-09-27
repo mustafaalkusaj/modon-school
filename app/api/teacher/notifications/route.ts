@@ -1,5 +1,35 @@
 import { NextRequest, NextResponse } from "next/server";
 import { resolveTeacherContext, unauthorized } from "@/lib/teacher-api";
+import { sendTeacherBroadcast } from "@/lib/mobile-api-server";
+import { enforceRateLimit } from "@/lib/rate-limit";
+
+/** POST — send a notification to the teacher's own students (class, section or one student). */
+export async function POST(req: NextRequest) {
+  const ctx = await resolveTeacherContext(req);
+  if (!ctx) return unauthorized();
+
+  const limited = await enforceRateLimit(req, {
+    namespace: "mobile-teacher-broadcast",
+    windowMs: 60 * 60_000,
+    maxHits: 30,
+    identifier: ctx.userId,
+  });
+  if (limited) return limited;
+
+  const payload = ((await req.json().catch(() => null)) ?? {}) as Record<string, unknown>;
+  const result = await sendTeacherBroadcast(ctx.mobile, {
+    title: payload.title,
+    message: payload.message,
+    class_name: payload.class_name,
+    section: payload.section,
+    student_id: payload.student_id,
+  });
+
+  return NextResponse.json(
+    { ok: result.ok, message: result.message, data: result.data ?? null },
+    { status: result.ok ? 200 : 400 },
+  );
+}
 
 export async function GET(req: NextRequest) {
   const ctx = await resolveTeacherContext(req);

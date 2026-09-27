@@ -4,6 +4,7 @@ import { usePathname } from "next/navigation";
 import { AppSidebar } from "@/components/AppSidebar";
 import { AppShellTopbar } from "@/components/AppShellTopbar";
 import { ProtectedRoute } from "@/components/ProtectedRoute";
+import { TeacherBottomNav } from "@/components/teacher/TeacherBottomNav";
 import { getLocaleFromPath } from "@/lib/locale-routing";
 
 interface TeacherShellProps {
@@ -39,9 +40,10 @@ export function TeacherShell({
             subtitle={isAr ? subtitleAr : subtitleEn}
             actions={actions}
           />
-          <main className="p-4 md:p-6">{children}</main>
+          <main className="p-4 md:p-6 pb-24 md:pb-6">{children}</main>
         </div>
       </div>
+      <TeacherBottomNav />
     </ProtectedRoute>
   );
 }

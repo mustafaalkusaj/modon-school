@@ -20,7 +20,7 @@ interface Assignment {
   title: string;
   class_name: string | null;
   subject: string | null;
-  due_date: string;
+  due_date: string | null;
   description: string | null;
   created_at: string;
   status: string | null;
@@ -48,7 +48,8 @@ export default function TeacherAssignmentsPage() {
       .finally(() => setLoading(false));
   }, []);
 
-  function daysUntil(dateStr: string) {
+  function daysUntil(dateStr: string | null) {
+    if (!dateStr) return Number.POSITIVE_INFINITY;
     return Math.ceil(
       (new Date(dateStr).getTime() - Date.now()) / 86400000,
     );
@@ -135,7 +136,7 @@ export default function TeacherAssignmentsPage() {
                                 )}
                                 {a.subject && <span>{a.subject} · </span>}
                                 {t("تاريخ التسليم:", "Due:")}{" "}
-                                {a.due_date}
+                                {a.due_date ? a.due_date.slice(0, 10) : t("بدون موعد", "No due date")}
                               </p>
                               {a.description && (
                                 <p className="text-xs text-[var(--text-secondary)] mt-2 line-clamp-2">
@@ -143,14 +144,16 @@ export default function TeacherAssignmentsPage() {
                                 </p>
                               )}
                             </div>
-                            <Badge
-                              variant={urgent ? "danger" : "warning"}
-                              size="sm"
-                            >
-                              {days <= 0
-                                ? t("اليوم", "Today")
-                                : `${days} ${t("يوم", "days")}`}
-                            </Badge>
+                            {Number.isFinite(days) && (
+                              <Badge
+                                variant={urgent ? "danger" : "warning"}
+                                size="sm"
+                              >
+                                {days <= 0
+                                  ? t("اليوم", "Today")
+                                  : `${days} ${t("يوم", "days")}`}
+                              </Badge>
+                            )}
                           </div>
                         </div>
                       );
@@ -187,7 +190,7 @@ export default function TeacherAssignmentsPage() {
                                 <span>{a.class_name} · </span>
                               )}
                               {a.subject && <span>{a.subject} · </span>}
-                              {a.due_date}
+                              {a.due_date ? a.due_date.slice(0, 10) : t("بدون موعد", "No due date")}
                             </p>
                           </div>
                           <Badge variant="info" size="sm">

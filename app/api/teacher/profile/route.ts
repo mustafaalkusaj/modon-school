@@ -5,41 +5,33 @@ export async function GET(req: NextRequest) {
   const ctx = await resolveTeacherContext(req);
   if (!ctx) return unauthorized();
 
-  const { supabase, teacherId } = ctx;
-
-  const { data, error } = await supabase
-    .from("user_profiles")
-    .select("id, full_name, email, phone, avatar_url, role, job_title")
-    .eq("id", teacherId)
+  const { data } = await ctx.supabase
+    .from("teachers")
+    .select("full_name, phone, job_title, specialization, subject")
+    .eq("id", ctx.teacherId)
+    .eq("school_id", ctx.schoolId)
     .maybeSingle();
 
-  if (error) {
-    return NextResponse.json(
-      { ok: false, error: "fetch_failed" },
-      { status: 500 },
-    );
-  }
-
-  const row = data as Record<string, unknown> | null;
-
-  if (!row) {
-    return NextResponse.json(
-      { ok: false, error: "profile_not_found" },
-      { status: 404 },
-    );
-  }
+  const teacher = (data ?? {}) as Record<string, unknown>;
+  const text = (value: unknown) =>
+    typeof value === "string" && value.trim() ? value.trim() : null;
 
   return NextResponse.json({
     ok: true,
     data: {
       profile: {
-        id: row.id as string,
-        full_name: (row.full_name as string) ?? "",
-        email: (row.email as string) ?? null,
-        phone: (row.phone as string) ?? null,
-        avatar_url: (row.avatar_url as string) ?? null,
-        role: (row.role as string) ?? "teacher",
-        job_title: (row.job_title as string) ?? null,
+        id: ctx.teacherId,
+        full_name: text(teacher.full_name) ?? ctx.account.profile.full_name,
+        email:
+          ctx.account.app_account?.login_identifier ??
+          (ctx.account.profile.email || null),
+        phone: text(teacher.phone) ?? ctx.account.profile.phone,
+        avatar_url: null,
+        role: "teacher",
+        job_title:
+          text(teacher.job_title) ??
+          text(teacher.specialization) ??
+          text(teacher.subject),
       },
     },
   });

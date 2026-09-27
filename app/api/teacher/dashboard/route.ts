@@ -1,5 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
-import { resolveTeacherContext, unauthorized } from "@/lib/teacher-api";
+import {
+  resolveTeacherContext,
+  summarizeTeacherClasses,
+  unauthorized,
+} from "@/lib/teacher-api";
 
 const DAY_MAP: Record<number, string> = {
   0: "sunday",
@@ -19,7 +23,7 @@ export async function GET(req: NextRequest) {
 
   const todayDay = DAY_MAP[new Date().getDay()] ?? "sunday";
 
-  const [scheduleRes, examsRes, assignmentsRes, announcementsRes] =
+  const [scheduleRes, examsRes, assignmentsRes, announcementsRes, unreadRes] =
     await Promise.all([
       supabase
         .from("class_schedules")
@@ -46,6 +50,7 @@ export async function GET(req: NextRequest) {
         .order("created_at", { ascending: false })
         .limit(5),
 
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       (supabase as any)
         .from("announcements")
         .select("id, title, body, created_at")
@@ -53,14 +58,14 @@ export async function GET(req: NextRequest) {
         .eq("is_active", true)
         .order("created_at", { ascending: false })
         .limit(3),
-    ]);
 
-  if (scheduleRes.error) {
-    return NextResponse.json(
-      { ok: false, error: "fetch_failed" },
-      { status: 500 },
-    );
-  }
+      supabase
+        .from("notifications")
+        .select("id", { count: "exact", head: true })
+        .eq("user_id", userId)
+        .eq("school_id", schoolId)
+        .eq("is_read", false),
+    ]);
 
   const allSlots = (scheduleRes.data ?? []) as Array<Record<string, unknown>>;
   const todaySchedule = allSlots
@@ -70,42 +75,56 @@ export async function GET(req: NextRequest) {
       start_time: (s.start_time as string) ?? "",
       end_time: (s.end_time as string) ?? "",
       subject_name: (s.subject_name as string) ?? "—",
-      class_name: (s.class_name as string) ?? "",
+      class_name: (s.class_name as string) ?? null,
       room: (s.room as string) ?? null,
-    }));
+    }))
+    .sort((a, b) => a.start_time.localeCompare(b.start_time));
 
-  const uniqueClasses = new Set(
-    allSlots.map((s) => s.class_name as string).filter(Boolean),
+  const classes = summarizeTeacherClasses(
+    ctx,
+    allSlots.map((s) => (s.class_name as string) ?? "").filter(Boolean),
   );
+  const subjects = Array.from(new Set(classes.flatMap((c) => c.subjects)));
 
   const exams = (examsRes.data ?? []) as Array<Record<string, unknown>>;
-  const assignments = (assignmentsRes.data ?? []) as Array<
-    Record<string, unknown>
-  >;
-  const announcements = (announcementsRes.data ?? []) as Array<
-    Record<string, unknown>
-  >;
+  const assignments = (assignmentsRes.data ?? []) as Array<Record<string, unknown>>;
+  const announcements = (announcementsRes.data ?? []) as Array<Record<string, unknown>>;
 
   return NextResponse.json({
     ok: true,
     data: {
-      todaySchedule,
-      stats: {
-        classCount: uniqueClasses.size,
-        upcomingExams: exams.length,
-      },
-      recentAssignments: assignments.map((a) => ({
+      teacher_name: ctx.fullName,
+      subjects,
+      classes: classes.map((c) => ({
+        class_name: c.class_name,
+        sections: c.sections,
+        subjects: c.subjects,
+        student_count: c.student_count,
+      })),
+      classes_count: classes.length,
+      students_count: ctx.students.length,
+      upcoming_exams_count: exams.length,
+      unread_notifications: unreadRes.count ?? 0,
+      today_schedule: todaySchedule,
+      upcoming_exams: exams.map((e) => ({
+        id: e.id as string,
+        title: (e.title as string) ?? "",
+        subject_name: (e.subject as string) ?? "",
+        exam_date: (e.starts_at as string) ?? "",
+        class_name: (e.class_name as string) ?? null,
+      })),
+      recent_assignments: assignments.map((a) => ({
         id: a.id as string,
         title: (a.title as string) ?? "",
-        due_date: (a.due_at as string) ?? null,
-        class_name: (a.class_name as string) ?? "",
-        subject_name: (a.subject as string) ?? null,
+        subject: (a.subject as string) ?? null,
+        due_at: (a.due_at as string) ?? null,
+        class_name: (a.class_name as string) ?? null,
       })),
       announcements: announcements.map((a) => ({
         id: a.id as string,
         title: (a.title as string) ?? "",
-        content: (a.body as string) ?? "",
-        created_at: (a.created_at as string) ?? null,
+        body: (a.body as string) ?? "",
+        created_at: (a.created_at as string) ?? "",
       })),
     },
   });

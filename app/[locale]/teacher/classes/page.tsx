@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
-import { BookOpen, Users } from "lucide-react";
+import { BookOpen, Users, Send, ClipboardCheck, PenSquare } from "lucide-react";
 import { TeacherShell } from "@/components/TeacherShell";
 import { getLocaleFromPath } from "@/lib/locale-routing";
 import { fetchJsonWithAuthorizedSession } from "@/lib/authorized-api";
@@ -17,6 +17,7 @@ interface TeacherClass {
   id: string;
   class_name: string;
   student_count: number;
+  sections: string[];
   subjects: string[];
 }
 
@@ -59,6 +60,10 @@ export default function TeacherClassesPage() {
           <EmptyState
             icon={<BookOpen className="h-12 w-12 text-[var(--text-tertiary)]" />}
             title={t("لا توجد صفوف مسندة إليك", "No classes assigned to you")}
+            description={t(
+              "تقوم إدارة المدرسة بإسناد الصفوف والمواد لك من صفحة المعلمين.",
+              "The school admin assigns classes and subjects from the Teachers page.",
+            )}
           />
         ) : (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4">
@@ -85,6 +90,11 @@ export default function TeacherClassesPage() {
                           {cls.student_count} {t("طالب", "students")}
                         </span>
                       </div>
+                      {cls.sections.length > 0 && (
+                        <p className="text-xs text-[var(--text-muted)] mt-1">
+                          {t("الشعب:", "Sections:")} {cls.sections.join("، ")}
+                        </p>
+                      )}
                       {cls.subjects.length > 0 && (
                         <div className="flex flex-wrap gap-1 mt-2">
                           {cls.subjects.map((subj) => (
@@ -95,6 +105,26 @@ export default function TeacherClassesPage() {
                         </div>
                       )}
                     </div>
+                  </div>
+                  <div className="grid grid-cols-3 gap-2 mt-4">
+                    {[
+                      { icon: ClipboardCheck, label: t("الحضور", "Attendance"), href: "/teacher/attendance" },
+                      { icon: PenSquare, label: t("واجب", "Homework"), href: "/teacher/assignments/new" },
+                      { icon: Send, label: t("إشعار", "Notify"), href: "/teacher/notifications?compose=1" },
+                    ].map((action) => (
+                      <button
+                        key={action.href}
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          router.push(`/${locale}${action.href}`);
+                        }}
+                        className="flex flex-col items-center gap-1 rounded-xl bg-[var(--surface-soft)] py-2 text-[11px] font-semibold text-[var(--text-secondary)] hover:text-[var(--primary)] hover:bg-[var(--primary)]/10 transition-colors"
+                      >
+                        <action.icon className="h-4 w-4" />
+                        {action.label}
+                      </button>
+                    ))}
                   </div>
                 </CardContent>
               </Card>

@@ -1,47 +1,50 @@
 import { NextRequest, NextResponse } from "next/server";
-import { resolveTeacherContext, unauthorized } from "@/lib/teacher-api";
+import {
+  filterTeacherStudents,
+  resolveTeacherContext,
+  summarizeTeacherClasses,
+  unauthorized,
+} from "@/lib/teacher-api";
 
 export async function GET(req: NextRequest) {
   const ctx = await resolveTeacherContext(req);
   if (!ctx) return unauthorized();
 
-  const { supabase, schoolId } = ctx;
-
   const url = new URL(req.url);
-  const className = url.searchParams.get("class_name");
+  const roster = filterTeacherStudents(
+    ctx,
+    url.searchParams.get("class_name"),
+    url.searchParams.get("section"),
+  );
 
-  if (!className) {
-    return NextResponse.json(
-      { ok: false, error: "class_name_required" },
-      { status: 400 },
-    );
+  const phoneById = new Map<string, { phone: string | null; guardian_phone: string | null }>();
+  const ids = roster.map((s) => s.student_id);
+  if (ids.length > 0) {
+    const { data } = await ctx.supabase
+      .from("students")
+      .select("id, phone, guardian_phone")
+      .eq("school_id", ctx.schoolId)
+      .in("id", ids);
+    for (const row of (data ?? []) as Array<Record<string, unknown>>) {
+      phoneById.set(String(row.id), {
+        phone: (row.phone as string) ?? null,
+        guardian_phone: (row.guardian_phone as string) ?? null,
+      });
+    }
   }
-
-  const { data, error } = await supabase
-    .from("students")
-    .select("id, full_name, class_name, phone, guardian_phone")
-    .eq("school_id", schoolId)
-    .eq("class_name", className)
-    .order("full_name", { ascending: true });
-
-  if (error) {
-    return NextResponse.json(
-      { ok: false, error: "fetch_failed" },
-      { status: 500 },
-    );
-  }
-
-  const rows = (data ?? []) as Array<Record<string, unknown>>;
 
   return NextResponse.json({
     ok: true,
     data: {
-      students: rows.map((s) => ({
-        id: s.id as string,
-        full_name: (s.full_name as string) ?? "",
-        class_name: (s.class_name as string) ?? "",
-        phone: (s.phone as string) ?? null,
-        guardian_phone: (s.guardian_phone as string) ?? null,
+      class_names: summarizeTeacherClasses(ctx).map((c) => c.class_name),
+      students: roster.map((s) => ({
+        id: s.student_id,
+        full_name: s.full_name,
+        class_name: s.class_name,
+        section: s.section,
+        has_app_account: Boolean(s.auth_user_id),
+        phone: phoneById.get(s.student_id)?.phone ?? null,
+        guardian_phone: phoneById.get(s.student_id)?.guardian_phone ?? null,
       })),
     },
   });

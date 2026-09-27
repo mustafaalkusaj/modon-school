@@ -66,5 +66,15 @@ export async function GET(req: NextRequest) {
     });
   }
 
-  return NextResponse.json({ ok: true, data: { schedule: grouped } });
+  const slots = rows.map((row) => ({
+    id: row.id as string,
+    day_of_week: ((row.day_of_week as string) ?? "sunday").toLowerCase(),
+    start_time: (row.start_time as string) ?? "",
+    end_time: (row.end_time as string) ?? "",
+    subject_name: (row.subject_name as string) ?? "—",
+    class_name: (row.class_name as string) ?? null,
+    room: (row.room as string) ?? null,
+  }));
+
+  return NextResponse.json({ ok: true, data: { schedule: grouped, slots } });
 }
