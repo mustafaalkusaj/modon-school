@@ -101,6 +101,25 @@ async function loadTargetProfiles(userIds: string[]): Promise<Map<string, Target
       profiles.set(row.id, row);
     }
   }
+
+  // Managed accounts (students/teachers created by admins) exist only in
+  // managed_user_profiles, so look those up too; otherwise every QR token for
+  // them is refused.
+  const missing = userIds.filter((id) => !profiles.has(id));
+  for (let i = 0; i < missing.length; i += CHUNK) {
+    const { data, error } = await serviceSupabase
+      .from("managed_user_profiles")
+      .select("auth_user_id, role, school_id")
+      .in("auth_user_id", missing.slice(i, i + CHUNK));
+    if (error) throw error;
+    for (const row of data ?? []) {
+      profiles.set(row.auth_user_id as string, {
+        id: row.auth_user_id as string,
+        role: (row.role as string | null) ?? null,
+        school_id: (row.school_id as string | null) ?? null,
+      });
+    }
+  }
   return profiles;
 }
 
