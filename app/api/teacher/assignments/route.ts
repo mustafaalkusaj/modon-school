@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { resolveTeacherContext, unauthorized } from "@/lib/teacher-api";
+import { resolveTeacherContext, unauthorized, verifyTeacherOwnsClass } from "@/lib/teacher-api";
 import { notifyNewAssignment } from "@/lib/notify-events";
 
 const ASSIGNMENT_STATUSES = ["active", "draft", "archived"] as const;
@@ -70,6 +70,14 @@ export async function POST(req: NextRequest) {
     return NextResponse.json(
       { ok: false, error: "missing_required_fields" },
       { status: 400 },
+    );
+  }
+
+  const ownsClass = await verifyTeacherOwnsClass(ctx, className);
+  if (!ownsClass) {
+    return NextResponse.json(
+      { ok: false, error: "class_not_assigned" },
+      { status: 403 },
     );
   }
 

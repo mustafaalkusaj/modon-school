@@ -24,40 +24,39 @@ export async function resolveTeacherContext(
 
   const supabase = createServiceSupabaseClient();
 
-  const { data: profile } = await supabase
-    .from("user_profiles")
+  const { data: teacher } = await supabase
+    .from("teachers")
     .select("id, full_name")
-    .eq("auth_user_id", session.userId)
     .eq("school_id", session.schoolId)
+    .eq("auth_user_id", session.userId)
+    .neq("status", "deleted")
     .maybeSingle();
 
-  let teacherId =
-    typeof (profile as Record<string, unknown>)?.id === "string"
-      ? ((profile as Record<string, unknown>).id as string)
-      : null;
+  if (!teacher) return null;
 
-  if (!teacherId) {
-    const { data: managed } = await supabase
-      .from("managed_user_profiles")
-      .select("auth_user_id")
-      .eq("auth_user_id", session.userId)
-      .eq("school_id", session.schoolId)
-      .maybeSingle();
-
-    if (managed) {
-      teacherId = session.userId;
-    }
-  }
-
-  if (!teacherId) return null;
+  const row = teacher as Record<string, unknown>;
 
   return {
     userId: session.userId,
     schoolId: session.schoolId,
-    teacherId,
-    fullName: (profile as Record<string, unknown>)?.full_name as string | null,
+    teacherId: row.id as string,
+    fullName: (row.full_name as string) ?? null,
     supabase,
   };
+}
+
+export async function verifyTeacherOwnsClass(
+  ctx: TeacherContext,
+  className: string,
+): Promise<boolean> {
+  const { data } = await ctx.supabase
+    .from("class_schedules")
+    .select("id")
+    .eq("school_id", ctx.schoolId)
+    .eq("teacher_id", ctx.teacherId)
+    .eq("class_name", className)
+    .limit(1);
+  return (data ?? []).length > 0;
 }
 
 export function unauthorized() {

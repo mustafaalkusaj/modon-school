@@ -46,8 +46,8 @@ export async function GET(req: NextRequest) {
         .order("created_at", { ascending: false })
         .limit(5),
 
-      (supabase as any)
-        .from("announcements")
+      supabase
+        .from("announcements" as never)
         .select("id, title, body, created_at")
         .eq("school_id", schoolId)
         .eq("is_active", true)

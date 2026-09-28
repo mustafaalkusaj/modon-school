@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { resolveTeacherContext, unauthorized } from "@/lib/teacher-api";
+import { resolveTeacherContext, unauthorized, verifyTeacherOwnsClass } from "@/lib/teacher-api";
 
 export async function GET(req: NextRequest) {
   const ctx = await resolveTeacherContext(req);
@@ -123,6 +123,17 @@ export async function POST(req: NextRequest) {
       { ok: false, error: "grades_required" },
       { status: 400 },
     );
+  }
+
+  const className = body.class_name as string | undefined;
+  if (className) {
+    const ownsClass = await verifyTeacherOwnsClass(ctx, className);
+    if (!ownsClass) {
+      return NextResponse.json(
+        { ok: false, error: "class_not_assigned" },
+        { status: 403 },
+      );
+    }
   }
 
   const insertRows = gradesInput.map((g) => ({
