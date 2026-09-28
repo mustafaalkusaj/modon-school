@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { resolveTeacherContext, unauthorized } from "@/lib/teacher-api";
 
-const DAY_ORDER = [
+// class_schedules.day_of_week is a smallint: 0 = Sunday … 6 = Saturday.
+const DAY_NAME = [
   "sunday",
   "monday",
   "tuesday",
@@ -20,7 +21,7 @@ export async function GET(req: NextRequest) {
   const { data, error } = await supabase
     .from("class_schedules")
     .select(
-      "id, day_of_week, start_time, end_time, subject_name, class_name, room",
+      "id, day_of_week, start_time, end_time, subject_name, class_name, section, room",
     )
     .eq("school_id", schoolId)
     .eq("teacher_id", teacherId)
@@ -33,48 +34,16 @@ export async function GET(req: NextRequest) {
     );
   }
 
-  const rows = (data ?? []) as Array<Record<string, unknown>>;
-
-  const grouped: Record<
-    string,
-    Array<{
-      id: string;
-      start_time: string;
-      end_time: string;
-      subject_name: string;
-      class_name: string;
-      room: string | null;
-    }>
-  > = {};
-
-  for (const day of DAY_ORDER) {
-    grouped[day] = [];
-  }
-
-  for (const row of rows) {
-    const day = (row.day_of_week as string) ?? "sunday";
-    if (!grouped[day]) {
-      grouped[day] = [];
-    }
-    grouped[day].push({
-      id: row.id as string,
-      start_time: (row.start_time as string) ?? "",
-      end_time: (row.end_time as string) ?? "",
-      subject_name: (row.subject_name as string) ?? "—",
-      class_name: (row.class_name as string) ?? "",
-      room: (row.room as string) ?? null,
-    });
-  }
-
-  const slots = rows.map((row) => ({
-    id: row.id as string,
-    day_of_week: ((row.day_of_week as string) ?? "sunday").toLowerCase(),
-    start_time: (row.start_time as string) ?? "",
-    end_time: (row.end_time as string) ?? "",
-    subject_name: (row.subject_name as string) ?? "—",
-    class_name: (row.class_name as string) ?? null,
-    room: (row.room as string) ?? null,
+  const slots = (data ?? []).map((row) => ({
+    id: row.id,
+    day_of_week: DAY_NAME[row.day_of_week ?? 0] ?? "sunday",
+    start_time: row.start_time ?? "",
+    end_time: row.end_time ?? "",
+    subject_name: row.subject_name ?? "—",
+    class_name:
+      [row.class_name, row.section].filter(Boolean).join(" / ") || null,
+    room: row.room ?? null,
   }));
 
-  return NextResponse.json({ ok: true, data: { schedule: grouped, slots } });
+  return NextResponse.json({ ok: true, data: { slots } });
 }

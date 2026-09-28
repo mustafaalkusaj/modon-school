@@ -34,6 +34,7 @@ function makeQuery(result: QueryResult) {
     filterCalls,
     select: () => query,
     in: () => query,
+    is: () => query,
     eq: (col: string, val: unknown) => {
       eqCalls.push([col, val]);
       return query;
@@ -134,7 +135,8 @@ describe("fetchTeacherAssignedStudents — branch isolation", () => {
 
   it("constrains the class-name roster query to the teacher's branch", async () => {
     const { studentQueries } = wireClient(BRANCH_A);
-    const { fetchTeacherAssignedStudents } = await import("@/lib/managed-user-app-context");
+    const { fetchTeacherAssignedStudents } =
+      await import("@/lib/managed-user-app-context");
 
     await fetchTeacherAssignedStudents(buildTeacherRecord());
 
@@ -148,7 +150,8 @@ describe("fetchTeacherAssignedStudents — branch isolation", () => {
 
   it("omits the branch filter when the teacher has no branch (legacy single-branch)", async () => {
     const { studentQueries } = wireClient(null);
-    const { fetchTeacherAssignedStudents } = await import("@/lib/managed-user-app-context");
+    const { fetchTeacherAssignedStudents } =
+      await import("@/lib/managed-user-app-context");
 
     await fetchTeacherAssignedStudents(buildTeacherRecord());
 
@@ -176,5 +179,16 @@ describe("fetchTeacherAssignedStudents — branch isolation", () => {
     const q = studentQueries[0];
     expect(q.eqCalls.some(([col]) => col === "section")).toBe(false);
     expect(q.filterCalls).toContainEqual(["or", 'section.ilike."A",section.is.null,section.eq.""']);
+  });
+
+  it("does not resolve a roster from an inactive teacher assignment", async () => {
+    const { studentQueries } = wireClient(BRANCH_A);
+    const user = buildTeacherRecord();
+    user.teacher!.assignments[0].is_active = false;
+    const { fetchTeacherAssignedStudents } =
+      await import("@/lib/managed-user-app-context");
+
+    await expect(fetchTeacherAssignedStudents(user)).resolves.toEqual([]);
+    expect(studentQueries).toHaveLength(0);
   });
 });

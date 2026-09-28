@@ -16,6 +16,8 @@ import { EmptyState } from "@/components/ui/empty-state";
 interface TeacherClass {
   id: string;
   class_name: string;
+  grade: string;
+  section: string | null;
   student_count: number;
   sections: string[];
   subjects: string[];
@@ -71,9 +73,11 @@ export default function TeacherClassesPage() {
               <Card
                 key={cls.id}
                 className="cursor-pointer hover:shadow-md active:scale-[0.98] transition-all"
-                onClick={() =>
-                  router.push(`/${locale}/teacher/students?class_name=${encodeURIComponent(cls.class_name)}`)
-                }
+                onClick={() => {
+                  const params = new URLSearchParams({ class_name: cls.class_name });
+                  if (cls.section) params.set("section", cls.section);
+                  router.push(`/${locale}/teacher/students?${params.toString()}`);
+                }}
               >
                 <CardContent className="pt-[var(--card-padding)]">
                   <div className="flex items-start gap-3">
@@ -83,6 +87,11 @@ export default function TeacherClassesPage() {
                     <div className="flex-1 min-w-0">
                       <h3 className="text-sm sm:text-base font-bold text-[var(--text-primary)] truncate">
                         {cls.class_name}
+                        {cls.section && (
+                          <span className="text-xs font-normal text-[var(--text-muted)] mr-1.5">
+                            ({cls.section})
+                          </span>
+                        )}
                       </h3>
                       <div className="flex items-center gap-1.5 mt-1.5">
                         <Users className="h-3.5 w-3.5 text-[var(--text-muted)]" />

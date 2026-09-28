@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { resolveTeacherContext, unauthorized } from "@/lib/teacher-api";
-import { notifyAssignmentGraded } from "@/lib/notify-events";
+import { createInsiteNotification } from "@/lib/notifications";
 
 type Params = { params: Promise<{ id: string; submissionId: string }> };
 
@@ -97,16 +97,26 @@ export async function PATCH(req: NextRequest, { params }: Params) {
   }
 
   const row = data as Record<string, unknown>;
+  const student = row.students as { auth_user_id?: string | null } | null;
 
-  // Best-effort: notify the student their work was graded (push + in-app).
-  if (row.student_id) {
-    void notifyAssignmentGraded({
-      supabase,
-      schoolId,
-      studentId: row.student_id as string,
-      grade: typeof row.grade === "number" ? row.grade : null,
-      maxGrade: typeof maxGrade === "number" ? maxGrade : null,
-    }).catch(() => {});
+  // Best-effort: notify the student their work was graded.
+  if (student?.auth_user_id) {
+    try {
+      await createInsiteNotification(supabase, {
+        schoolId,
+        title: `تم تصحيح واجب: ${assignmentRow.title}`,
+        body: `درجتك: ${row.grade} من ${maxGrade}.${
+          typeof row.feedback === "string" && row.feedback.trim()
+            ? ` ملاحظة المعلم: ${row.feedback}`
+            : ""
+        }`,
+        target: { targetType: "person", targetUserId: student.auth_user_id },
+        category: "homework",
+        sentByUserId: ctx.userId,
+      });
+    } catch {
+      // best-effort — grading already succeeded
+    }
   }
 
   return NextResponse.json({

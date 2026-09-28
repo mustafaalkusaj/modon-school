@@ -65,26 +65,21 @@ export default function TeacherProfilePage() {
     setPwdSaving(true);
     setPwdMsg(null);
     try {
-      const { response: res, payload } = await fetchJsonWithAuthorizedSession<{
-        ok?: boolean;
-        error?: { message?: string } | string;
-      }>("/api/auth/change-password", {
+      const res = await fetch("/api/teacher/profile/password", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          currentPassword: currentPwd,
-          newPassword: newPwd,
+          current_password: currentPwd,
+          new_password: newPwd,
         }),
       });
-      const data = payload ?? {};
+      const data = await res.json();
       if (res.ok && data.ok) {
         setPwdMsg({ type: "success", text: t("تم تغيير كلمة المرور بنجاح", "Password changed successfully") });
         setCurrentPwd("");
         setNewPwd("");
       } else {
-        const msg =
-          typeof data.error === "string" ? data.error : data.error?.message;
-        setPwdMsg({ type: "error", text: msg ?? t("حدث خطأ", "Something went wrong") });
+        setPwdMsg({ type: "error", text: data.error ?? t("حدث خطأ", "Something went wrong") });
       }
     } catch {
       setPwdMsg({ type: "error", text: t("خطأ في الاتصال", "Connection error") });

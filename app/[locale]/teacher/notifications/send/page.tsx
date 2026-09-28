@@ -54,7 +54,7 @@ export default function TeacherSendNotificationPage() {
   const [result, setResult] = useState<{ ok: boolean; text: string } | null>(null);
 
   useEffect(() => {
-    fetchJsonWithAuthorizedSession("/api/teacher/notifications/recipients")
+    fetchJsonWithAuthorizedSession("/api/teacher/students")
       .then((res) => {
         const d = (res.payload as { data?: { classes?: TeacherClass[]; students?: Student[] } } | null)?.data;
         if (res.response.ok && d) {

@@ -1,3 +1,4 @@
+import { sectionOrUnassignedFilter } from "@/lib/section-scope";
 import { isMissingTableError } from "@/lib/admin-infrastructure";
 import type {
   ManagedTeacherAssignmentRecord,
@@ -14,7 +15,6 @@ import {
   tableHasColumn,
 } from "@/lib/managed-users-server";
 import { createServiceSupabaseClient } from "@/lib/supabase-server";
-import { sectionOrUnassignedFilter } from "@/lib/section-scope";
 import { excludeDeletedStudents } from "@/lib/students/soft-delete";
 
 export type ManagedAppAccessReason =
@@ -131,7 +131,8 @@ function nullableText(value: unknown) {
 }
 
 const columnAvailabilityCache = new Map<string, Promise<boolean>>();
-const STUDENT_PREVIEW_SELECT = "id, auth_user_id, full_name, class_name, section, status";
+const STUDENT_PREVIEW_SELECT =
+  "id, auth_user_id, full_name, class_name, section, status";
 const ATTENDANCE_STATUSES = ["present", "absent", "late", "excused"] as const;
 
 function studentStatusAllowsApp(status: string | null | undefined) {
@@ -300,14 +301,17 @@ async function fetchStudentPaymentSummary(user: ManagedUserRecord) {
     return query.order("created_at", { ascending: false }).limit(1);
   };
 
-  const [{ count, error: countError }, { data: latestRows, error: latestError }] = await Promise.all([
-    buildPaymentCountQuery(),
-    buildLatestPaymentQuery(),
-  ]);
+  const [
+    { count, error: countError },
+    { data: latestRows, error: latestError },
+  ] = await Promise.all([buildPaymentCountQuery(), buildLatestPaymentQuery()]);
 
   const paymentError = countError ?? latestError;
   if (paymentError) {
-    if (isMissingTableError(paymentError, "payments") || paymentError.message.toLowerCase().includes("could not find")) {
+    if (
+      isMissingTableError(paymentError, "payments") ||
+      paymentError.message.toLowerCase().includes("could not find")
+    ) {
       return fallback;
     }
 
@@ -318,7 +322,10 @@ async function fetchStudentPaymentSummary(user: ManagedUserRecord) {
     ...fallback,
     payment_count: typeof count === "number" ? count : 0,
     recorded_payments_total: fallback.recorded_payments_total,
-    last_payment_at: typeof latestRows?.[0]?.created_at === "string" ? latestRows[0].created_at : null,
+    last_payment_at:
+      typeof latestRows?.[0]?.created_at === "string"
+        ? latestRows[0].created_at
+        : null,
   };
 }
 
@@ -338,9 +345,14 @@ async function fetchStudentAttendanceSummary(user: ManagedUserRecord) {
   }
 
   const serviceSupabase = createServiceSupabaseClient();
-  const attendanceHasSchoolId = await queryHasColumn("attendance_records", "school_id");
+  const attendanceHasSchoolId = await queryHasColumn(
+    "attendance_records",
+    "school_id",
+  );
 
-  const buildAttendanceCountQuery = (status?: (typeof ATTENDANCE_STATUSES)[number]) => {
+  const buildAttendanceCountQuery = (
+    status?: (typeof ATTENDANCE_STATUSES)[number],
+  ) => {
     let query = serviceSupabase
       .from("attendance_records")
       .select("id", { count: "exact", head: true })
@@ -371,8 +383,13 @@ async function fetchStudentAttendanceSummary(user: ManagedUserRecord) {
     ...ATTENDANCE_STATUSES.map((status) => buildAttendanceCountQuery(status)),
   ]);
 
-  const [totalResponse, latestResponse, ...statusResponses] = attendanceResponses;
-  const attendanceError = [totalResponse.error, latestResponse.error, ...statusResponses.map((response) => response.error)].find(Boolean);
+  const [totalResponse, latestResponse, ...statusResponses] =
+    attendanceResponses;
+  const attendanceError = [
+    totalResponse.error,
+    latestResponse.error,
+    ...statusResponses.map((response) => response.error),
+  ].find(Boolean);
 
   if (attendanceError) {
     if (
@@ -390,26 +407,39 @@ async function fetchStudentAttendanceSummary(user: ManagedUserRecord) {
     absent: number;
     late: number;
     excused: number;
-  }>((summary, status, index) => {
-    summary[status] = typeof statusResponses[index]?.count === "number" ? statusResponses[index].count : 0;
-    return summary;
-  }, {
-    present: 0,
-    absent: 0,
-    late: 0,
-    excused: 0,
-  });
+  }>(
+    (summary, status, index) => {
+      summary[status] =
+        typeof statusResponses[index]?.count === "number"
+          ? statusResponses[index].count
+          : 0;
+      return summary;
+    },
+    {
+      present: 0,
+      absent: 0,
+      late: 0,
+      excused: 0,
+    },
+  );
 
-  const totalRecords = typeof totalResponse.count === "number" ? totalResponse.count : 0;
+  const totalRecords =
+    typeof totalResponse.count === "number" ? totalResponse.count : 0;
   const attendanceRate =
-    totalRecords > 0 ? Math.round((((counts.present + counts.late) / totalRecords) * 100) * 100) / 100 : null;
+    totalRecords > 0
+      ? Math.round(
+          ((counts.present + counts.late) / totalRecords) * 100 * 100,
+        ) / 100
+      : null;
 
   return {
     ...counts,
     total_records: totalRecords,
     attendance_rate: attendanceRate,
     last_attendance_at:
-      typeof latestResponse.data?.[0]?.attendance_date === "string" ? latestResponse.data[0].attendance_date : null,
+      typeof latestResponse.data?.[0]?.attendance_date === "string"
+        ? latestResponse.data[0].attendance_date
+        : null,
   };
 }
 
@@ -417,7 +447,10 @@ function mapTeacherPreview(
   teacher: Record<string, unknown>,
   assignments: ManagedTeacherAssignmentRecord[],
 ): ManagedAppTeacherPreview {
-  const primaryAssignment = assignments.find((assignment) => assignment.is_active) ?? assignments[0] ?? null;
+  const primaryAssignment =
+    assignments.find((assignment) => assignment.is_active) ??
+    assignments[0] ??
+    null;
   const specialization =
     nullableText(teacher.specialization) ??
     nullableText(teacher.subject) ??
@@ -480,7 +513,8 @@ async function fetchStudentLinkedTeachers(user: ManagedUserRecord) {
     return [] satisfies ManagedAppTeacherPreview[];
   }
 
-  const teacherCapabilities = await getTeacherTableCapabilities(serviceSupabase);
+  const teacherCapabilities =
+    await getTeacherTableCapabilities(serviceSupabase);
   const teacherSelect = [
     "id",
     "auth_user_id",
@@ -499,16 +533,27 @@ async function fetchStudentLinkedTeachers(user: ManagedUserRecord) {
     throw teacherError;
   }
 
-  const assignmentsByTeacherId = await fetchTeacherAssignments(serviceSupabase, teacherIds, {
-    schoolId: user.school_id,
-  });
+  const assignmentsByTeacherId = await fetchTeacherAssignments(
+    serviceSupabase,
+    teacherIds,
+    {
+      schoolId: user.school_id,
+    },
+  );
 
   return ((teacherRows ?? []) as unknown as Array<Record<string, unknown>>)
-    .map((teacher) => mapTeacherPreview(teacher, assignmentsByTeacherId.get(String(teacher.id)) ?? []))
+    .map((teacher) =>
+      mapTeacherPreview(
+        teacher,
+        assignmentsByTeacherId.get(String(teacher.id)) ?? [],
+      ),
+    )
     .sort((left, right) => left.full_name.localeCompare(right.full_name, "ar"));
 }
 
-function mapStudentPreview(student: Record<string, unknown>): ManagedAppStudentPreview {
+function mapStudentPreview(
+  student: Record<string, unknown>,
+): ManagedAppStudentPreview {
   return {
     student_id: String(student.id),
     auth_user_id: nullableText(student.auth_user_id),
@@ -561,10 +606,16 @@ export async function fetchTeacherAssignedStudents(user: ManagedUserRecord) {
 
     return ((linkedStudents ?? []) as Array<Record<string, unknown>>)
       .map(mapStudentPreview)
-      .sort((left, right) => left.full_name.localeCompare(right.full_name, "ar"));
+      .sort((left, right) =>
+        left.full_name.localeCompare(right.full_name, "ar"),
+      );
   }
 
-  if ((user.teacher.assignments ?? []).length === 0) {
+  const activeAssignments = (user.teacher.assignments ?? []).filter(
+    (assignment) => assignment.is_active === true,
+  );
+
+  if (activeAssignments.length === 0) {
     return [] satisfies ManagedAppStudentPreview[];
   }
 
@@ -578,11 +629,13 @@ export async function fetchTeacherAssignedStudents(user: ManagedUserRecord) {
     .eq("id", user.teacher.id)
     .eq("school_id", user.school_id)
     .maybeSingle();
-  const teacherBranchId = nullableText((teacherRow as { branch_id?: unknown } | null)?.branch_id);
+  const teacherBranchId = nullableText(
+    (teacherRow as { branch_id?: unknown } | null)?.branch_id,
+  );
 
   const assignmentTargets = Array.from(
     new Map(
-      (user.teacher.assignments ?? [])
+      activeAssignments
         .filter((assignment) => Boolean(normalizeText(assignment.class_name)))
         .map((assignment) => [
           `${normalizeText(assignment.class_name).toLowerCase()}::${normalizeText(assignment.section_name).toLowerCase()}`,
@@ -600,6 +653,7 @@ export async function fetchTeacherAssignedStudents(user: ManagedUserRecord) {
         serviceSupabase.from("students").select(STUDENT_PREVIEW_SELECT),
       )
         .eq("school_id", user.school_id)
+        .is("deleted_at", null)
         .eq("class_name", target.className);
 
       if (teacherBranchId) {
@@ -623,11 +677,13 @@ export async function fetchTeacherAssignedStudents(user: ManagedUserRecord) {
       throw response.error;
     }
 
-    ((response.data ?? []) as Array<Record<string, unknown>>).forEach((student) => {
-      if (student.id) {
-        uniqueStudents.set(String(student.id), student);
-      }
-    });
+    ((response.data ?? []) as Array<Record<string, unknown>>).forEach(
+      (student) => {
+        if (student.id) {
+          uniqueStudents.set(String(student.id), student);
+        }
+      },
+    );
   });
 
   return Array.from(uniqueStudents.values())
@@ -635,12 +691,19 @@ export async function fetchTeacherAssignedStudents(user: ManagedUserRecord) {
     .sort((left, right) => left.full_name.localeCompare(right.full_name, "ar"));
 }
 
-export async function buildManagedAppAccountContext(authUserId: string): Promise<ManagedAppAccountContext> {
+export async function buildManagedAppAccountContext(
+  authUserId: string,
+): Promise<ManagedAppAccountContext> {
   const resolvedAccount = await resolveManagedAccountBase(authUserId);
   const { authUser, schoolId, role, user } = resolvedAccount;
   const loginIdentifier = resolvedAccount.loginIdentifier;
   const schoolBrand =
-    schoolId !== null ? await fetchManagedAccountSchoolBrand(createServiceSupabaseClient(), schoolId) : null;
+    schoolId !== null
+      ? await fetchManagedAccountSchoolBrand(
+          createServiceSupabaseClient(),
+          schoolId,
+        )
+      : null;
 
   const access = buildAccessState({
     role,
@@ -689,21 +752,27 @@ export async function buildManagedAppAccountContext(authUserId: string): Promise
     linkage: resolvedAccount.linkage,
     access,
     profile: {
-      full_name: (user?.full_name ?? normalizeText(authUser.user_metadata?.full_name)) || "حساب بدون اسم",
+      full_name:
+        (user?.full_name ?? normalizeText(authUser.user_metadata?.full_name)) ||
+        "حساب بدون اسم",
       email: user?.email ?? authUser.email ?? loginIdentifier ?? "",
       phone: user?.phone ?? nullableText(authUser.user_metadata?.phone),
-      created_at: user?.created_at ?? (typeof authUser.created_at === "string" ? authUser.created_at : null),
+      created_at:
+        user?.created_at ??
+        (typeof authUser.created_at === "string" ? authUser.created_at : null),
       updated_at: user?.updated_at ?? null,
     },
-    app_account: user?.app_account ?? (loginIdentifier
-      ? {
-          login_identifier: loginIdentifier,
-          has_temporary_password: false,
-          temporary_password_plain: null,
-          password_last_reset_at: null,
-          card_last_printed_at: null,
-        }
-      : null),
+    app_account:
+      user?.app_account ??
+      (loginIdentifier
+        ? {
+            login_identifier: loginIdentifier,
+            has_temporary_password: false,
+            temporary_password_plain: null,
+            password_last_reset_at: null,
+            card_last_printed_at: null,
+          }
+        : null),
     student,
     teacher,
   };

@@ -1,13 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { RBAC_COOKIE_NAME, verifyRBACSession } from "@/lib/rbac-session";
 import { createServiceSupabaseClient } from "@/lib/supabase-server";
-import {
-  buildManagedAppAccountContext,
-  type ManagedAppAccountContext,
-  type ManagedAppStudentPreview,
-} from "@/lib/managed-user-app-context";
+import { buildManagedAppAccountContext } from "@/lib/managed-user-app-context";
 import type { MobileRouteContext } from "@/lib/mobile-api-server";
-import type { ManagedTeacherAssignmentRecord } from "@/lib/managed-users";
+import { sectionMatches } from "@/lib/section-scope";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "@/types/database.types";
 
@@ -15,16 +11,10 @@ export interface TeacherContext {
   /** auth.users id of the signed-in teacher. */
   userId: string;
   schoolId: string;
-  /** public.teachers id — what every teacher_id FK column references. */
+  /** teachers.id — the key every teacher_* / assignments / grades FK points at. */
   teacherId: string;
   fullName: string | null;
   supabase: SupabaseClient<Database>;
-  account: ManagedAppAccountContext;
-  assignments: ManagedTeacherAssignmentRecord[];
-  /** Branch-scoped roster derived from teacher_assignments / student_teacher_links. */
-  students: ManagedAppStudentPreview[];
-  /** Same context shape the mobile teacher helpers take, so web routes can reuse them. */
-  mobile: MobileRouteContext;
 }
 
 export async function resolveTeacherContext(
@@ -37,108 +27,59 @@ export async function resolveTeacherContext(
     return null;
   }
 
-  const account = await buildManagedAppAccountContext(session.userId);
-  const teacher = account.teacher;
-  if (!teacher?.id) return null;
-  if (account.identity.school_id && account.identity.school_id !== session.schoolId) {
-    return null;
+  const supabase = createServiceSupabaseClient();
+
+  // Teacher accounts are managed accounts: managed_user_profiles.teacher_id
+  // links the login to the teachers row. Previously this resolved to the auth
+  // user id, which matches no teacher_assignments / assignments FK — so the
+  // teacher saw no classes or students and every insert failed.
+  const { data: managed } = await supabase
+    .from("managed_user_profiles")
+    .select("teacher_id, full_name")
+    .eq("auth_user_id", session.userId)
+    .eq("school_id", session.schoolId)
+    .maybeSingle();
+
+  let teacherId =
+    typeof managed?.teacher_id === "string" ? managed.teacher_id : null;
+  let fullName =
+    typeof managed?.full_name === "string" ? managed.full_name : null;
+
+  if (!teacherId) {
+    const { data: teacher } = await supabase
+      .from("teachers")
+      .select("id, full_name")
+      .eq("auth_user_id", session.userId)
+      .eq("school_id", session.schoolId)
+      .maybeSingle();
+    if (teacher?.id) {
+      teacherId = teacher.id;
+      fullName = fullName ?? teacher.full_name ?? null;
+    }
   }
 
-  const supabase = createServiceSupabaseClient();
+  if (!teacherId) return null;
 
   return {
     userId: session.userId,
     schoolId: session.schoolId,
-    teacherId: teacher.id,
-    fullName: teacher.full_name ?? account.profile.full_name ?? null,
+    teacherId,
+    fullName,
     supabase,
-    account,
-    assignments: teacher.assignments.filter((a) => a.is_active !== false),
-    students: teacher.assigned_students,
-    mobile: {
-      authUserId: session.userId,
-      role: "teacher",
-      schoolId: session.schoolId,
-      account,
-      serviceSupabase: supabase,
-    },
   };
-}
-
-function normalizeKey(value: string | null | undefined) {
-  return (value ?? "").trim().toLowerCase();
-}
-
-export interface TeacherClassSummary {
-  class_name: string;
-  sections: string[];
-  subjects: string[];
-  student_count: number;
-}
-
-/** The teacher's classes, from admin-set assignments plus any timetable slots. */
-export function summarizeTeacherClasses(
-  ctx: TeacherContext,
-  scheduleClassNames: string[] = [],
-): TeacherClassSummary[] {
-  const byClass = new Map<
-    string,
-    { class_name: string; sections: Set<string>; subjects: Set<string> }
-  >();
-
-  const touch = (className: string) => {
-    const key = normalizeKey(className);
-    if (!key) return null;
-    let entry = byClass.get(key);
-    if (!entry) {
-      entry = { class_name: className.trim(), sections: new Set(), subjects: new Set() };
-      byClass.set(key, entry);
-    }
-    return entry;
-  };
-
-  for (const assignment of ctx.assignments) {
-    const entry = touch(assignment.class_name);
-    if (!entry) continue;
-    if (assignment.section_name?.trim()) entry.sections.add(assignment.section_name.trim());
-    if (assignment.subject_name?.trim()) entry.subjects.add(assignment.subject_name.trim());
-  }
-  for (const className of scheduleClassNames) touch(className);
-
-  return Array.from(byClass.entries()).map(([key, entry]) => ({
-    class_name: entry.class_name,
-    sections: Array.from(entry.sections),
-    subjects: Array.from(entry.subjects),
-    student_count: ctx.students.filter((s) => normalizeKey(s.class_name) === key)
-      .length,
-  }));
-}
-
-/** Roster students, optionally narrowed to one class (and section). */
-export function filterTeacherStudents(
-  ctx: TeacherContext,
-  className?: string | null,
-  section?: string | null,
-) {
-  const classKey = normalizeKey(className);
-  const sectionKey = normalizeKey(section);
-  return ctx.students.filter((student) => {
-    if (classKey && normalizeKey(student.class_name) !== classKey) return false;
-    if (sectionKey && normalizeKey(student.section) !== sectionKey) return false;
-    return true;
-  });
 }
 
 /**
- * The same account context the mobile teacher app uses (branch-scoped
- * assigned_students roster keyed by the real teachers.id), so web-portal
- * notification sending shares one source of truth for "which students are mine".
+ * Build the same account context the mobile teacher app uses (assignments +
+ * branch-scoped assigned_students roster), so the web teacher portal shares
+ * one source of truth for "which classes and students belong to me".
  */
 export async function resolveTeacherAppContext(
   ctx: TeacherContext,
 ): Promise<MobileRouteContext | null> {
-  const { account } = ctx;
+  const account = await buildManagedAppAccountContext(ctx.userId).catch(() => null);
   if (
+    !account ||
     !account.identity.is_active ||
     account.identity.role !== "teacher" ||
     account.identity.school_id !== ctx.schoolId ||
@@ -146,7 +87,80 @@ export async function resolveTeacherAppContext(
   ) {
     return null;
   }
-  return ctx.mobile;
+  return {
+    authUserId: ctx.userId,
+    role: "teacher",
+    schoolId: ctx.schoolId,
+    account,
+    serviceSupabase: createServiceSupabaseClient(),
+  };
+}
+
+export interface TeacherClassSummary {
+  id: string;
+  class_name: string;
+  section: string | null;
+  student_count: number;
+  subjects: string[];
+}
+
+function norm(value: string | null | undefined) {
+  return (value ?? "").trim().toLowerCase();
+}
+
+/** Group the teacher's active assignments into class/section cards. */
+export function summarizeTeacherClasses(
+  app: MobileRouteContext,
+): TeacherClassSummary[] {
+  const teacher = app.account.teacher;
+  if (!teacher) return [];
+  const students = teacher.assigned_students;
+  const map = new Map<string, TeacherClassSummary>();
+
+  for (const a of teacher.assignments) {
+    if (!a.is_active || !a.class_name) continue;
+    const section = a.section_name?.trim() || null;
+    const key = `${norm(a.class_name)}::${norm(section)}`;
+    let entry = map.get(key);
+    if (!entry) {
+      entry = {
+        id: key,
+        class_name: a.class_name,
+        section,
+        student_count: students.filter(
+          (s) =>
+            norm(s.class_name) === norm(a.class_name) &&
+            sectionMatches(s.section, section),
+        ).length,
+        subjects: [],
+      };
+      map.set(key, entry);
+    }
+    if (a.subject_name && !entry.subjects.includes(a.subject_name)) {
+      entry.subjects.push(a.subject_name);
+    }
+  }
+
+  return Array.from(map.values()).sort((l, r) =>
+    `${l.class_name} ${l.section ?? ""}`.localeCompare(
+      `${r.class_name} ${r.section ?? ""}`,
+      "ar",
+    ),
+  );
+}
+
+/** Students on the teacher's roster, optionally narrowed to one class/section. */
+export function filterTeacherStudents(
+  app: MobileRouteContext,
+  className?: string | null,
+  section?: string | null,
+) {
+  const students = app.account.teacher?.assigned_students ?? [];
+  return students.filter((s) => {
+    if (className && norm(s.class_name) !== norm(className)) return false;
+    if (!sectionMatches(s.section, section)) return false;
+    return true;
+  });
 }
 
 export function unauthorized() {

@@ -1,126 +1,153 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createTeacherGradeRecord } from "@/lib/academic-records-server";
+import {
+  createTeacherGradeRecord,
+  updateTeacherGradeRecord,
+} from "@/lib/academic-records-server";
 import {
   filterTeacherStudents,
+  resolveTeacherAppContext,
   resolveTeacherContext,
   summarizeTeacherClasses,
   unauthorized,
 } from "@/lib/teacher-api";
 
+/**
+ * Without `class_name`: the teacher's classes + subjects (for the filters).
+ * With `class_name` (+ optional `section`, `subject`, `exam_type`): the class
+ * roster merged with the marks this teacher already entered for that
+ * subject/exam type, so re-saving edits instead of duplicating.
+ */
 export async function GET(req: NextRequest) {
   const ctx = await resolveTeacherContext(req);
   if (!ctx) return unauthorized();
+  const app = await resolveTeacherAppContext(ctx);
+  if (!app) return unauthorized();
 
   const url = new URL(req.url);
-  const classes = summarizeTeacherClasses(ctx);
-  const className = url.searchParams.get("class_name") || classes[0]?.class_name || "";
-  const subject = url.searchParams.get("subject") || "";
+  const className = url.searchParams.get("class_name");
+  const section = url.searchParams.get("section");
+  const subject = url.searchParams.get("subject");
+  const examType = url.searchParams.get("exam_type");
 
-  const roster = className ? filterTeacherStudents(ctx, className) : [];
-  const studentIds = roster.map((s) => s.student_id);
+  const classes = summarizeTeacherClasses(app);
+  const base = {
+    classes,
+    class_names: Array.from(new Set(classes.map((c) => c.class_name))),
+    subjects: Array.from(new Set(classes.flatMap((c) => c.subjects))),
+  };
 
-  let grades: Array<Record<string, unknown>> = [];
-  if (studentIds.length > 0) {
-    let query = ctx.supabase
-      .from("grades")
-      .select("id, student_id, subject, score, max_score, exam_type, created_at")
-      .eq("school_id", ctx.schoolId)
-      .eq("teacher_id", ctx.teacherId)
-      .in("student_id", studentIds)
-      .order("created_at", { ascending: false })
-      .limit(200);
-    if (subject) query = query.eq("subject", subject);
-    const { data } = await query;
-    grades = (data ?? []) as Array<Record<string, unknown>>;
+  if (!className) {
+    return NextResponse.json({ ok: true, data: { ...base, students: [] } });
   }
 
-  const nameById = new Map(roster.map((s) => [s.student_id, s.full_name]));
+  const roster = filterTeacherStudents(app, className, section);
+  const existing = new Map<
+    string,
+    { id: string; score: number | null; max_score: number | null }
+  >();
 
-  return NextResponse.json({
-    ok: true,
-    data: {
-      classes,
-      class_name: className,
-      students: roster.map((s) => ({
-        student_id: s.student_id,
-        full_name: s.full_name,
-        section: s.section,
-      })),
-      recent_grades: grades.map((g) => {
-        const score = Number(g.score) || 0;
-        const maxScore = Number(g.max_score) || 0;
-        return {
-          id: g.id as string,
-          student_id: g.student_id as string,
-          student_name: nameById.get(g.student_id as string) ?? "",
-          subject: (g.subject as string) ?? "",
-          exam_type: (g.exam_type as string) ?? null,
-          score,
-          max_score: maxScore,
-          percentage: maxScore > 0 ? Math.round((score / maxScore) * 100) : null,
-          date: (g.created_at as string) ?? null,
-        };
-      }),
+  if (roster.length > 0 && subject) {
+    let query = ctx.supabase
+      .from("grades")
+      .select("id, student_id, score, max_score, created_at")
+      .eq("school_id", ctx.schoolId)
+      .eq("teacher_id", ctx.teacherId)
+      .eq("subject", subject)
+      .in(
+        "student_id",
+        roster.map((s) => s.student_id),
+      )
+      .order("created_at", { ascending: false });
+    if (examType) query = query.eq("exam_type", examType);
+
+    const { data, error } = await query;
+    if (error) {
+      return NextResponse.json(
+        { ok: false, error: "fetch_failed" },
+        { status: 500 },
+      );
+    }
+    for (const row of data ?? []) {
+      if (row.student_id && !existing.has(row.student_id)) {
+        existing.set(row.student_id, {
+          id: row.id,
+          score: row.score === null ? null : Number(row.score),
+          max_score: row.max_score === null ? null : Number(row.max_score),
+        });
+      }
+    }
+  }
+
+  return NextResponse.json(
+    {
+      ok: true,
+      data: {
+        ...base,
+        students: roster.map((s) => {
+          const g = existing.get(s.student_id);
+          return {
+            student_id: s.student_id,
+            full_name: s.full_name,
+            section: s.section,
+            grade_id: g?.id ?? null,
+            score: g?.score ?? null,
+            max_score: g?.max_score ?? 100,
+          };
+        }),
+      },
     },
-  });
+    { headers: { "Cache-Control": "no-store" } },
+  );
 }
 
 export async function POST(req: NextRequest) {
   const ctx = await resolveTeacherContext(req);
   if (!ctx) return unauthorized();
+  const app = await resolveTeacherAppContext(ctx);
+  if (!app) return unauthorized();
 
-  const body = ((await req.json().catch(() => null)) ?? {}) as Record<string, unknown>;
-  const gradesInput = Array.isArray(body.grades)
-    ? (body.grades as Array<Record<string, unknown>>)
-    : [];
+  const body = (await req.json().catch(() => null)) as {
+    subject?: unknown;
+    exam_type?: unknown;
+    grades?: Array<Record<string, unknown>>;
+  } | null;
 
-  if (gradesInput.length === 0) {
+  const grades = Array.isArray(body?.grades) ? body.grades : [];
+  if (grades.length === 0 || grades.length > 300) {
     return NextResponse.json(
-      { ok: false, error: "أدخل درجة طالب واحد على الأقل." },
+      { ok: false, error: "لا توجد درجات للحفظ." },
       { status: 400 },
     );
   }
-  if (gradesInput.length > 200) {
-    return NextResponse.json(
-      { ok: false, error: "عدد الدرجات أكبر من الحد المسموح (200)." },
-      { status: 400 },
-    );
+
+  let saved = 0;
+  const errors: string[] = [];
+  for (const g of grades) {
+    const input = {
+      student_id: g.student_id,
+      subject: body?.subject,
+      exam_type: body?.exam_type,
+      score: g.score,
+      max_score: g.max_score,
+    };
+    const result =
+      typeof g.grade_id === "string" && g.grade_id
+        ? await updateTeacherGradeRecord(app, { ...input, id: g.grade_id })
+        : await createTeacherGradeRecord(app, input);
+    if (result.ok) saved += 1;
+    else {
+      const msg = result.message ?? "تعذر حفظ بعض الدرجات.";
+      if (!errors.includes(msg)) errors.push(msg);
+    }
   }
 
-  const academicCtx = {
-    schoolId: ctx.schoolId,
-    account: { teacher: { id: ctx.teacherId, assignments: ctx.assignments } },
-    serviceSupabase: ctx.supabase,
-  };
-
-  const results = await Promise.all(
-    gradesInput.map((g) =>
-      createTeacherGradeRecord(academicCtx, {
-        student_id: g.student_id,
-        subject: body.subject,
-        exam_type: body.exam_type,
-        score: g.score,
-        max_score: body.max_score ?? g.max_score,
-        note: g.note,
-      }),
-    ),
+  const ok = errors.length === 0;
+  return NextResponse.json(
+    {
+      ok,
+      error: ok ? undefined : errors.join(" "),
+      data: { saved, failed: grades.length - saved },
+    },
+    { status: ok ? 200 : saved > 0 ? 207 : 400 },
   );
-
-  const failed = results.filter((r) => !r.ok);
-  const inserted = results.length - failed.length;
-
-  if (inserted === 0) {
-    return NextResponse.json(
-      { ok: false, error: failed[0]?.message ?? "تعذر حفظ الدرجات." },
-      { status: 400 },
-    );
-  }
-
-  return NextResponse.json({
-    ok: true,
-    data: { inserted, failed: failed.length },
-    message: failed.length
-      ? `تم حفظ ${inserted} درجة، وتعذر حفظ ${failed.length}: ${failed[0].message}`
-      : `تم حفظ ${inserted} درجة.`,
-  });
 }

@@ -1,130 +1,96 @@
+import { todayBaghdadIso } from "@/lib/tz";
 import { NextRequest, NextResponse } from "next/server";
 import {
+  resolveTeacherAppContext,
   resolveTeacherContext,
   summarizeTeacherClasses,
   unauthorized,
 } from "@/lib/teacher-api";
 
-const DAY_MAP: Record<number, string> = {
-  0: "sunday",
-  1: "monday",
-  2: "tuesday",
-  3: "wednesday",
-  4: "thursday",
-  5: "friday",
-  6: "saturday",
-};
-
 export async function GET(req: NextRequest) {
   const ctx = await resolveTeacherContext(req);
   if (!ctx) return unauthorized();
+  const app = await resolveTeacherAppContext(ctx);
+  if (!app) return unauthorized();
 
   const { supabase, schoolId, teacherId, userId } = ctx;
+  // class_schedules.day_of_week is a smallint (0 = Sunday … 6 = Saturday).
+  const todayDay = new Date(`${todayBaghdadIso()}T12:00:00+03:00`).getUTCDay();
 
-  const todayDay = DAY_MAP[new Date().getDay()] ?? "sunday";
-
-  const [scheduleRes, examsRes, assignmentsRes, announcementsRes, unreadRes] =
+  const [scheduleRes, examsRes, assignmentsRes, announcementsRes] =
     await Promise.all([
       supabase
         .from("class_schedules")
         .select(
-          "id, day_of_week, start_time, end_time, subject_name, class_name, room",
+          "id, start_time, end_time, subject_name, class_name, section, room",
         )
         .eq("school_id", schoolId)
-        .eq("teacher_id", teacherId),
-
+        .eq("teacher_id", teacherId)
+        .eq("day_of_week", todayDay)
+        .order("start_time", { ascending: true }),
       supabase
         .from("exams")
         .select("id, title, starts_at, subject, class_name")
         .eq("school_id", schoolId)
         .eq("created_by", userId)
-        .gte("starts_at", new Date().toISOString().slice(0, 10))
+        .gte("starts_at", `${todayBaghdadIso()}T00:00:00+03:00`)
         .order("starts_at", { ascending: true })
         .limit(5),
-
       supabase
         .from("assignments")
-        .select("id, title, due_at, class_name, subject, created_at")
+        .select("id, title, due_at, class_name, section, subject")
         .eq("school_id", schoolId)
         .eq("teacher_id", teacherId)
         .order("created_at", { ascending: false })
         .limit(5),
-
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      (supabase as any)
-        .from("announcements")
+      supabase
+        .from("school_announcements")
         .select("id, title, body, created_at")
         .eq("school_id", schoolId)
-        .eq("is_active", true)
+        .or(`expires_at.is.null,expires_at.gt.${new Date().toISOString()}`)
         .order("created_at", { ascending: false })
         .limit(3),
-
-      supabase
-        .from("notifications")
-        .select("id", { count: "exact", head: true })
-        .eq("user_id", userId)
-        .eq("school_id", schoolId)
-        .eq("is_read", false),
     ]);
 
-  const allSlots = (scheduleRes.data ?? []) as Array<Record<string, unknown>>;
-  const todaySchedule = allSlots
-    .filter((s) => s.day_of_week === todayDay)
-    .map((s) => ({
-      id: s.id as string,
-      start_time: (s.start_time as string) ?? "",
-      end_time: (s.end_time as string) ?? "",
-      subject_name: (s.subject_name as string) ?? "—",
-      class_name: (s.class_name as string) ?? null,
-      room: (s.room as string) ?? null,
-    }))
-    .sort((a, b) => a.start_time.localeCompare(b.start_time));
-
-  const classes = summarizeTeacherClasses(
-    ctx,
-    allSlots.map((s) => (s.class_name as string) ?? "").filter(Boolean),
-  );
-  const subjects = Array.from(new Set(classes.flatMap((c) => c.subjects)));
-
-  const exams = (examsRes.data ?? []) as Array<Record<string, unknown>>;
-  const assignments = (assignmentsRes.data ?? []) as Array<Record<string, unknown>>;
-  const announcements = (announcementsRes.data ?? []) as Array<Record<string, unknown>>;
+  const classes = summarizeTeacherClasses(app);
+  const exams = examsRes.data ?? [];
 
   return NextResponse.json({
     ok: true,
     data: {
-      teacher_name: ctx.fullName,
-      subjects,
-      classes: classes.map((c) => ({
-        class_name: c.class_name,
-        sections: c.sections,
-        subjects: c.subjects,
-        student_count: c.student_count,
-      })),
+      teacher_name: app.account.teacher?.full_name ?? ctx.fullName,
+      school_name: app.account.school.name,
       classes_count: classes.length,
-      students_count: ctx.students.length,
+      students_count: app.account.teacher?.assigned_students.length ?? 0,
+      subjects: Array.from(new Set(classes.flatMap((c) => c.subjects))),
       upcoming_exams_count: exams.length,
-      unread_notifications: unreadRes.count ?? 0,
-      today_schedule: todaySchedule,
+      classes,
+      today_schedule: (scheduleRes.data ?? []).map((s) => ({
+        id: s.id,
+        start_time: s.start_time ?? "",
+        end_time: s.end_time ?? "",
+        subject_name: s.subject_name ?? "—",
+        class_name: [s.class_name, s.section].filter(Boolean).join(" / ") || null,
+        room: s.room ?? null,
+      })),
       upcoming_exams: exams.map((e) => ({
-        id: e.id as string,
-        title: (e.title as string) ?? "",
-        subject_name: (e.subject as string) ?? "",
-        exam_date: (e.starts_at as string) ?? "",
-        class_name: (e.class_name as string) ?? null,
+        id: e.id,
+        subject_name: e.subject ?? e.title ?? "",
+        exam_date: e.starts_at ?? "",
+        class_name: e.class_name ?? null,
       })),
-      recent_assignments: assignments.map((a) => ({
-        id: a.id as string,
-        title: (a.title as string) ?? "",
-        subject: (a.subject as string) ?? null,
-        due_at: (a.due_at as string) ?? null,
-        class_name: (a.class_name as string) ?? null,
+      recent_assignments: (assignmentsRes.data ?? []).map((a) => ({
+        id: a.id,
+        title: a.title ?? "",
+        subject: a.subject ?? null,
+        due_at: a.due_at ?? null,
+        class_name: [a.class_name, a.section].filter(Boolean).join(" / ") || null,
       })),
-      announcements: announcements.map((a) => ({
-        id: a.id as string,
-        title: (a.title as string) ?? "",
-        body: (a.body as string) ?? "",
-        created_at: (a.created_at as string) ?? "",
+      announcements: (announcementsRes.data ?? []).map((a) => ({
+        id: a.id,
+        title: a.title ?? "",
+        body: a.body ?? "",
+        created_at: a.created_at ?? "",
       })),
     },
   });

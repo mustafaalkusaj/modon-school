@@ -20,8 +20,11 @@ interface Assignment {
   title: string;
   class_name: string | null;
   subject: string | null;
-  due_date: string | null;
+  due_at: string | null;
+  section: string | null;
   description: string | null;
+  submissions_total?: number;
+  submissions_graded?: number;
   created_at: string;
   status: string | null;
 }
@@ -37,7 +40,7 @@ export default function TeacherAssignmentsPage() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    fetchJsonWithAuthorizedSession("/api/teacher/assignments")
+    fetchJsonWithAuthorizedSession("/api/teacher/homework")
       .then((res) => {
         if (res.response.ok)
           setAssignments(
@@ -55,12 +58,17 @@ export default function TeacherAssignmentsPage() {
     );
   }
 
+  const fmtDate = (d: string | null) =>
+    d ? new Date(d).toLocaleDateString(isAr ? "ar-IQ" : "en-GB") : t("بدون موعد", "No due date");
+  const classOf = (a: Assignment) =>
+    a.class_name ? `${a.class_name}${a.section ? ` / ${a.section}` : ""}` : null;
+
   const upcoming = assignments.filter((a) => {
-    const days = daysUntil(a.due_date);
+    const days = daysUntil(a.due_at);
     return days >= 0;
   });
   const past = assignments.filter((a) => {
-    const days = daysUntil(a.due_date);
+    const days = daysUntil(a.due_at);
     return days < 0;
   });
 
@@ -96,8 +104,8 @@ export default function TeacherAssignmentsPage() {
             }
             title={t("لا توجد واجبات", "No assignments")}
             description={t(
-              "لم تقم باضافة اي واجب بعد",
-              "You haven't added any assignments yet",
+              "اضغط \"إضافة واجب\" لإرسال أول واجب لطلابك",
+              "Tap \"Add homework\" to send your first homework",
             )}
           />
         ) : (
@@ -118,7 +126,7 @@ export default function TeacherAssignmentsPage() {
                 <CardContent>
                   <div className="space-y-3">
                     {upcoming.map((a) => {
-                      const days = daysUntil(a.due_date);
+                      const days = daysUntil(a.due_at);
                       const urgent = days <= 2;
                       return (
                         <div
@@ -131,12 +139,12 @@ export default function TeacherAssignmentsPage() {
                                 {a.title}
                               </p>
                               <p className="text-xs text-[var(--text-muted)] mt-1">
-                                {a.class_name && (
-                                  <span>{a.class_name} · </span>
-                                )}
+                                {classOf(a) && <span>{classOf(a)} · </span>}
                                 {a.subject && <span>{a.subject} · </span>}
-                                {t("تاريخ التسليم:", "Due:")}{" "}
-                                {a.due_date ? a.due_date.slice(0, 10) : t("بدون موعد", "No due date")}
+                                {t("التسليم:", "Due:")} {fmtDate(a.due_at)}
+                                {typeof a.submissions_total === "number" && (
+                                  <span> · {t("التسليمات", "Submissions")}: {a.submissions_total}</span>
+                                )}
                               </p>
                               {a.description && (
                                 <p className="text-xs text-[var(--text-secondary)] mt-2 line-clamp-2">
@@ -144,16 +152,16 @@ export default function TeacherAssignmentsPage() {
                                 </p>
                               )}
                             </div>
-                            {Number.isFinite(days) && (
-                              <Badge
-                                variant={urgent ? "danger" : "warning"}
-                                size="sm"
-                              >
-                                {days <= 0
+                            <Badge
+                              variant={urgent ? "danger" : "warning"}
+                              size="sm"
+                            >
+                              {!Number.isFinite(days)
+                                ? t("مفتوح", "Open")
+                                : days <= 0
                                   ? t("اليوم", "Today")
                                   : `${days} ${t("يوم", "days")}`}
-                              </Badge>
-                            )}
+                            </Badge>
                           </div>
                         </div>
                       );
@@ -186,11 +194,9 @@ export default function TeacherAssignmentsPage() {
                               {a.title}
                             </p>
                             <p className="text-xs text-[var(--text-muted)] mt-1">
-                              {a.class_name && (
-                                <span>{a.class_name} · </span>
-                              )}
+                              {classOf(a) && <span>{classOf(a)} · </span>}
                               {a.subject && <span>{a.subject} · </span>}
-                              {a.due_date ? a.due_date.slice(0, 10) : t("بدون موعد", "No due date")}
+                              {fmtDate(a.due_at)}
                             </p>
                           </div>
                           <Badge variant="info" size="sm">

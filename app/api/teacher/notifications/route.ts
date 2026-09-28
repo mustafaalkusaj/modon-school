@@ -100,15 +100,10 @@ export async function POST(req: NextRequest) {
   });
   if (limited) return limited;
 
-  const app = await resolveTeacherAppContext(ctx);
-  if (!app?.account.teacher) return unauthorized();
-
-  // ctx.teacherId is not always teachers.id in this portal; the app context's
-  // teacher.id is.
   const { data: teacherRow } = await ctx.supabase
     .from("teachers")
     .select("messaging_paused")
-    .eq("id", app.account.teacher.id)
+    .eq("id", ctx.teacherId)
     .eq("school_id", ctx.schoolId)
     .maybeSingle();
   if (teacherRow?.messaging_paused) {
@@ -117,6 +112,9 @@ export async function POST(req: NextRequest) {
       { status: 403 },
     );
   }
+
+  const app = await resolveTeacherAppContext(ctx);
+  if (!app) return unauthorized();
 
   const payload = ((await req.json().catch(() => null)) ?? {}) as Record<
     string,
