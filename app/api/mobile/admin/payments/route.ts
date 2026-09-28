@@ -258,6 +258,13 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    if (row.error_code === "PAYMENT_EXCEEDS_REMAINING") {
+      return NextResponse.json(
+        { ok: false, error: "قيمة الدفعة أكبر من المبلغ المتبقي." },
+        { status: 400 },
+      );
+    }
+
     if (row.error_code) {
       return NextResponse.json(
         { ok: false, error: "تعذر تسجيل الدفعة. حاول مرة أخرى." },

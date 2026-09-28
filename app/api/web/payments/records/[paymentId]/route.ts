@@ -110,14 +110,15 @@ export async function DELETE(
       errorCode: deleteError.code,
       errorMessage: deleteError.message,
     });
-    // Return detailed error for debugging
-    const msg = deleteError.message || "unknown error";
+    // Details are in the log above; the client only gets a generic reason so
+    // database internals (constraint/policy/column names) never leak.
+    const msg = deleteError.message || "";
     return jsonError(
       msg.includes("policy") || msg.includes("RLS")
-        ? "RLS policy blocks delete. Contact admin."
+        ? "لا تملك صلاحية حذف هذه الدفعة."
         : msg.includes("foreign key")
-        ? "Payment referenced elsewhere, cannot delete."
-        : "Delete failed: " + msg,
+        ? "لا يمكن حذف الدفعة لارتباطها بسجلات أخرى."
+        : "تعذر حذف الدفعة. حاول مرة أخرى.",
       500
     );
   }
