@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { RBAC_COOKIE_NAME, verifyRBACSession } from "@/lib/rbac-session";
 import { createServiceSupabaseClient } from "@/lib/supabase-server";
+import { buildManagedAppAccountContext } from "@/lib/managed-user-app-context";
+import type { MobileRouteContext } from "@/lib/mobile-api-server";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "@/types/database.types";
 
@@ -57,6 +59,34 @@ export async function resolveTeacherContext(
     teacherId,
     fullName: (profile as Record<string, unknown>)?.full_name as string | null,
     supabase,
+  };
+}
+
+/**
+ * Build the same account context the mobile teacher app uses (the
+ * branch-scoped assigned_students roster keyed by the real teachers.id), so
+ * the web portal's notification sending shares one source of truth for
+ * "which students belong to me".
+ */
+export async function resolveTeacherAppContext(
+  ctx: TeacherContext,
+): Promise<MobileRouteContext | null> {
+  const account = await buildManagedAppAccountContext(ctx.userId).catch(() => null);
+  if (
+    !account ||
+    !account.identity.is_active ||
+    account.identity.role !== "teacher" ||
+    account.identity.school_id !== ctx.schoolId ||
+    !account.teacher?.id
+  ) {
+    return null;
+  }
+  return {
+    authUserId: ctx.userId,
+    role: "teacher",
+    schoolId: ctx.schoolId,
+    account,
+    serviceSupabase: ctx.supabase,
   };
 }
 

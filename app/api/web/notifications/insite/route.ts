@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { resolveSchoolScopedActorContext } from "@/lib/managed-users-server";
+import { resolveNotificationActor } from "@/lib/notification-actor";
 import {
   createInsiteNotification,
   listNotifications,
@@ -20,24 +21,58 @@ export async function GET(request: NextRequest) {
   const { searchParams } = request.nextUrl;
   const view = searchParams.get("view");
 
-  const allowedRoles = view === "history"
-    ? (["admin", "super_admin"] as const)
-    : (["admin", "super_admin", "employee", "student"] as const);
+  const page = Number(searchParams.get("page") || "1");
+  const pageSize = Number(searchParams.get("pageSize") || "20");
+
+  // User inbox — also serves QR-login accounts (RBAC cookie, no Supabase
+  // session), which resolveSchoolScopedActorContext would reject with 401.
+  if (view !== "history") {
+    const actor = await resolveNotificationActor(request, [
+      "admin",
+      "super_admin",
+      "employee",
+      "student",
+      "teacher",
+    ], searchParams.get("schoolId"));
+    if (!actor.ok) {
+      return jsonError(actor.message, actor.status);
+    }
+    const rawItems = await listNotifications(
+      actor.value.supabase,
+      actor.value.userId,
+      actor.value.schoolId,
+      { page, pageSize },
+    );
+    const notifications = rawItems.map((n) => ({
+      id: n.id,
+      notification_id: n.notificationId,
+      title: n.title,
+      body: n.body,
+      priority: n.priority,
+      category: n.category,
+      is_read: n.isRead,
+      created_at: n.createdAt,
+      sent_at: null as string | null,
+    }));
+    return NextResponse.json({ ok: true, items: rawItems, notifications });
+  }
 
   const context = await resolveSchoolScopedActorContext(
     searchParams.get("schoolId"),
-    { allowedRoles: [...allowedRoles], roleDeniedMessage: "ليس لديك صلاحية عرض الإشعارات." },
+    {
+      allowedRoles: ["admin", "super_admin"],
+      roleDeniedMessage: "ليس لديك صلاحية عرض الإشعارات.",
+    },
     request.headers.get("authorization"),
   );
   if (!context.ok) {
     return jsonError(context.message, context.status);
   }
 
-  const { actorSupabase, actorUserId, targetSchoolId, actorBranchId, actorRole } = context.value;
-  const page = Number(searchParams.get("page") || "1");
-  const pageSize = Number(searchParams.get("pageSize") || "20");
+  const { actorSupabase, targetSchoolId, actorBranchId, actorRole } =
+    context.value;
 
-  if (view === "history") {
+  {
     const search = searchParams.get("search") ?? undefined;
     const result = await listSentNotifications(actorSupabase, targetSchoolId, {
       page,
@@ -61,28 +96,6 @@ export async function GET(request: NextRequest) {
 
     return NextResponse.json({ ok: true, ...result, notifications });
   }
-
-  // User inbox
-  const rawItems = await listNotifications(actorSupabase, actorUserId, targetSchoolId, {
-    page,
-    pageSize,
-  });
-
-  const items = rawItems;
-
-  const notifications = rawItems.map((n) => ({
-    id: n.id,
-    notification_id: n.notificationId,
-    title: n.title,
-    body: n.body,
-    priority: n.priority,
-    category: n.category,
-    is_read: n.isRead,
-    created_at: n.createdAt,
-    sent_at: null as string | null,
-  }));
-
-  return NextResponse.json({ ok: true, items, notifications });
 }
 
 // ----------------------------------------------------------------
@@ -91,14 +104,23 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
   const context = await resolveSchoolScopedActorContext(
     null,
-    { allowedRoles: ["admin", "super_admin"], roleDeniedMessage: "ليس لديك صلاحية إرسال الإشعارات." },
+    {
+      allowedRoles: ["admin", "super_admin"],
+      roleDeniedMessage: "ليس لديك صلاحية إرسال الإشعارات.",
+    },
     request.headers.get("authorization"),
   );
   if (!context.ok) {
     return jsonError(context.message, context.status);
   }
 
-  const { actorSupabase, actorUserId, targetSchoolId, actorBranchId, actorRole } = context.value;
+  const {
+    actorSupabase,
+    actorUserId,
+    targetSchoolId,
+    actorBranchId,
+    actorRole,
+  } = context.value;
 
   const body = await request.json().catch(() => null);
   if (!body?.title || !body?.body || !body?.target?.targetType) {
@@ -108,9 +130,10 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  const postBranchId = body.branchId && (actorRole === "super_admin" || !actorBranchId)
-    ? body.branchId
-    : (actorBranchId ?? null);
+  const postBranchId =
+    body.branchId && (actorRole === "super_admin" || !actorBranchId)
+      ? body.branchId
+      : (actorBranchId ?? null);
 
   const input: CreateNotificationInput = {
     schoolId: targetSchoolId,
@@ -126,7 +149,10 @@ export async function POST(request: NextRequest) {
 
   const result = await createInsiteNotification(actorSupabase, input);
   if (!result.ok) {
-    return NextResponse.json({ ok: false, error: result.error }, { status: 500 });
+    return NextResponse.json(
+      { ok: false, error: result.error },
+      { status: 500 },
+    );
   }
 
   const partial = result.delivery.failed > 0;

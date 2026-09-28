@@ -9,6 +9,7 @@
 //   2. Looks up active Expo push tokens in `user_push_subscriptions`
 //      and sends them via the Expo Push API (batched <= 100).
 //   3. Marks tokens inactive on DeviceNotRegistered.
+//   4. Sends Web Push (VAPID) to browser / PWA devices via lib/web-push.ts.
 //
 // Additive only: reuses the existing `sendExpoPushToTokens` transport
 // from lib/notifications/push-service.ts. Never throws — always returns
@@ -20,6 +21,7 @@ import type { Json } from "@/types/database.types";
 
 import type { ExpoPushPayload } from "@/lib/notifications/push-service";
 import { createServiceSupabaseClient } from "@/lib/supabase-server";
+import { sendWebPushToUsers } from "@/lib/web-push";
 
 const EXPO_PUSH_ENDPOINT = "https://exp.host/--/api/v2/push/send";
 const TOKEN_BATCH_SIZE = 100;
@@ -176,9 +178,9 @@ export async function sendPushNotification(
     tokenRows.map((row) => extractExpoToken(row.subscription_json) ?? ""),
   );
 
-  if (tokens.length === 0) {
-    return result;
-  }
+  // NOTE: no early return when there are no Expo tokens — web (PWA) devices
+  // register through Web Push, and returning here would skip step 5, so they
+  // would never get a sound / system banner.
 
   // ----------------------------------------------------------------
   // 3. Send via Expo, detecting DeviceNotRegistered per-token so we
@@ -271,5 +273,34 @@ export async function sendPushNotification(
     ).length;
   }
 
+  // ----------------------------------------------------------------
+  // 5. Web Push (VAPID) for browser / installed-PWA devices — best-effort
+  // ----------------------------------------------------------------
+  try {
+    const webResult = await sendWebPushToUsers(userIds, input.schoolId, {
+      title: input.title,
+      body: input.message,
+      category: webPushCategory(type),
+      url: link ?? undefined,
+    });
+    result.sent += webResult.sent;
+    result.failed += webResult.failed;
+    result.deactivatedTokens += webResult.deactivated;
+    // "VAPID keys not configured" is expected on environments without Web Push.
+    result.errors.push(...webResult.errors.filter((e) => !e.startsWith("VAPID")));
+  } catch (error) {
+    result.errors.push(
+      `web push: ${error instanceof Error ? error.message : "unknown"}`,
+    );
+  }
+
   return result;
+}
+
+/** Map a notification type onto the categories public/sw.js knows (icon + fallback route). */
+function webPushCategory(type: string): string {
+  if (type === "assignment" || type === "homework") return "homework";
+  if (type === "exam") return "exams";
+  if (type === "payment") return "financial";
+  return "general";
 }

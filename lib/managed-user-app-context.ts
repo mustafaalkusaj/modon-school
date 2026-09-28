@@ -14,6 +14,8 @@ import {
   tableHasColumn,
 } from "@/lib/managed-users-server";
 import { createServiceSupabaseClient } from "@/lib/supabase-server";
+import { sectionOrUnassignedFilter } from "@/lib/section-scope";
+import { excludeDeletedStudents } from "@/lib/students/soft-delete";
 
 export type ManagedAppAccessReason =
   | "ok"
@@ -547,9 +549,9 @@ export async function fetchTeacherAssignedStudents(user: ManagedUserRecord) {
   }
 
   if (studentIds.length > 0) {
-    const { data: linkedStudents, error: linkedStudentsError } = await serviceSupabase
-      .from("students")
-      .select(STUDENT_PREVIEW_SELECT)
+    const { data: linkedStudents, error: linkedStudentsError } = await excludeDeletedStudents(
+      serviceSupabase.from("students").select(STUDENT_PREVIEW_SELECT),
+    )
       .eq("school_id", user.school_id)
       .in("id", studentIds);
 
@@ -594,9 +596,9 @@ export async function fetchTeacherAssignedStudents(user: ManagedUserRecord) {
 
   const studentResponses = await Promise.all(
     assignmentTargets.map((target) => {
-      let query = serviceSupabase
-        .from("students")
-        .select(STUDENT_PREVIEW_SELECT)
+      let query = excludeDeletedStudents(
+        serviceSupabase.from("students").select(STUDENT_PREVIEW_SELECT),
+      )
         .eq("school_id", user.school_id)
         .eq("class_name", target.className);
 
@@ -604,8 +606,10 @@ export async function fetchTeacherAssignedStudents(user: ManagedUserRecord) {
         query = query.eq("branch_id", teacherBranchId);
       }
 
+      // Students without a section yet count as part of every section of
+      // their class (see lib/section-scope.ts).
       if (target.section) {
-        query = query.eq("section", target.section);
+        query = query.or(sectionOrUnassignedFilter(target.section));
       }
 
       return query;

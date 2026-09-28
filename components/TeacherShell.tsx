@@ -4,6 +4,7 @@ import { usePathname } from "next/navigation";
 import { AppSidebar } from "@/components/AppSidebar";
 import { AppShellTopbar } from "@/components/AppShellTopbar";
 import { ProtectedRoute } from "@/components/ProtectedRoute";
+import { EnablePushBanner } from "@/components/web-push-registration";
 import { getLocaleFromPath } from "@/lib/locale-routing";
 
 interface TeacherShellProps {
@@ -39,7 +40,10 @@ export function TeacherShell({
             subtitle={isAr ? subtitleAr : subtitleEn}
             actions={actions}
           />
-          <main className="p-4 md:p-6">{children}</main>
+          <main className="p-4 md:p-6">
+            <EnablePushBanner audience="teacher" />
+            {children}
+          </main>
         </div>
       </div>
     </ProtectedRoute>

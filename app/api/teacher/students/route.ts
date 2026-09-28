@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { excludeDeletedStudents } from "@/lib/students/soft-delete";
 import { resolveTeacherContext, unauthorized } from "@/lib/teacher-api";
 
 export async function GET(req: NextRequest) {
@@ -17,9 +18,11 @@ export async function GET(req: NextRequest) {
     );
   }
 
-  const { data, error } = await supabase
-    .from("students")
-    .select("id, full_name, class_name, phone, guardian_phone")
+  const { data, error } = await excludeDeletedStudents(
+    supabase
+      .from("students")
+      .select("id, full_name, class_name, phone, guardian_phone"),
+  )
     .eq("school_id", schoolId)
     .eq("class_name", className)
     .order("full_name", { ascending: true });

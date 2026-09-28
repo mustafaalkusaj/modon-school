@@ -25,29 +25,46 @@ vi.mock("@/lib/managed-users-server", () => ({
 
 type QueryResult = { data: unknown; error: unknown };
 
-// Minimal chainable PostgREST-ish query double that records every .eq(col, val).
+// Minimal chainable PostgREST-ish query double that records filter calls.
 function makeQuery(result: QueryResult) {
   const eqCalls: Array<[string, unknown]> = [];
+  const filterCalls: Array<[string, ...unknown[]]> = [];
   const query: Record<string, unknown> = {
     eqCalls,
+    filterCalls,
     select: () => query,
     in: () => query,
     eq: (col: string, val: unknown) => {
       eqCalls.push([col, val]);
       return query;
     },
+    neq: (col: string, val: unknown) => {
+      filterCalls.push(["neq", col, val]);
+      return query;
+    },
+    is: (col: string, val: unknown) => {
+      filterCalls.push(["is", col, val]);
+      return query;
+    },
+    or: (expr: string) => {
+      filterCalls.push(["or", expr]);
+      return query;
+    },
     maybeSingle: () => Promise.resolve(result),
     then: (onF: (v: QueryResult) => unknown, onR?: (e: unknown) => unknown) =>
       Promise.resolve(result).then(onF, onR),
   };
-  return query as { eqCalls: Array<[string, unknown]> } & Record<string, unknown>;
+  return query as {
+    eqCalls: Array<[string, unknown]>;
+    filterCalls: Array<[string, ...unknown[]]>;
+  } & Record<string, unknown>;
 }
 
 const SCHOOL_ID = "11111111-1111-1111-1111-111111111111";
 const TEACHER_ID = "33333333-3333-3333-3333-333333333333";
 const BRANCH_A = "22222222-2222-2222-2222-222222222222";
 
-function buildTeacherRecord(): ManagedUserRecord {
+function buildTeacherRecord(sectionName: string | null = null): ManagedUserRecord {
   return {
     auth_user_id: "auth-teacher-1",
     school_id: SCHOOL_ID,
@@ -76,7 +93,7 @@ function buildTeacherRecord(): ManagedUserRecord {
           class_id: null,
           class_name: "الأول",
           section_id: null,
-          section_name: null,
+          section_name: sectionName,
           is_active: true,
         },
       ],
@@ -88,7 +105,7 @@ function buildTeacherRecord(): ManagedUserRecord {
 // falls through to the assignment (class_name) match path, which is the one that
 // must be branch-scoped. `teacherBranchId` controls what the teachers lookup returns.
 function wireClient(teacherBranchId: string | null) {
-  const studentQueries: Array<{ eqCalls: Array<[string, unknown]> }> = [];
+  const studentQueries: Array<ReturnType<typeof makeQuery>> = [];
   const client = {
     from: (table: string) => {
       if (table === "student_teacher_links") {
@@ -139,5 +156,25 @@ describe("fetchTeacherAssignedStudents — branch isolation", () => {
     const eqCalls = studentQueries[0].eqCalls;
     expect(eqCalls).toContainEqual(["class_name", "الأول"]);
     expect(eqCalls.some(([col]) => col === "branch_id")).toBe(false);
+  });
+
+  it("excludes soft-deleted students from the roster", async () => {
+    const { studentQueries } = wireClient(BRANCH_A);
+    const { fetchTeacherAssignedStudents } = await import("@/lib/managed-user-app-context");
+
+    await fetchTeacherAssignedStudents(buildTeacherRecord());
+
+    expect(studentQueries[0].filterCalls).toContainEqual(["is", "deleted_at", null]);
+  });
+
+  it("includes students without a section in a section-scoped assignment", async () => {
+    const { studentQueries } = wireClient(BRANCH_A);
+    const { fetchTeacherAssignedStudents } = await import("@/lib/managed-user-app-context");
+
+    await fetchTeacherAssignedStudents(buildTeacherRecord("A"));
+
+    const q = studentQueries[0];
+    expect(q.eqCalls.some(([col]) => col === "section")).toBe(false);
+    expect(q.filterCalls).toContainEqual(["or", 'section.ilike."A",section.is.null,section.eq.""']);
   });
 });

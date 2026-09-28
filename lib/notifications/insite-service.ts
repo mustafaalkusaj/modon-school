@@ -13,6 +13,43 @@ import type {
 
 const BATCH_SIZE = 500;
 
+type RecipientParent = {
+  title: string;
+  body: string;
+  category: NotificationWithReadStatus["category"];
+  priority: NotificationWithReadStatus["priority"];
+};
+
+type RecipientNotificationRow = {
+  id: string;
+  notification_id: string;
+  // Many-to-one embed: PostgREST returns a single object at runtime, though
+  // generated types may describe it as an array — accept both.
+  school_notifications: RecipientParent | RecipientParent[] | null;
+  is_read: boolean;
+  read_at: string | null;
+  created_at: string;
+};
+
+type SentNotificationRow = {
+  id: string;
+  type: NotificationListItem["type"];
+  title: string;
+  body: string;
+  target_type: NotificationListItem["targetType"];
+  target_class: string | null;
+  target_section: string | null;
+  priority: NotificationListItem["priority"];
+  category: NotificationListItem["category"];
+  status: NotificationListItem["status"];
+  recipient_count: number;
+  created_at: string;
+  sent_at: string | null;
+  template: NotificationListItem["template"] | null;
+  media_url: string | null;
+  media_type: NotificationListItem["mediaType"];
+};
+
 // ----------------------------------------------------------------
 // إرسال إشعار جديد
 // ----------------------------------------------------------------
@@ -27,7 +64,12 @@ export async function createInsiteNotification(
   supabase: SupabaseClient,
   input: CreateNotificationInput,
 ): Promise<
-  | { ok: true; notificationId: string; recipientCount: number; delivery: InsiteDeliveryStats }
+  | {
+      ok: true;
+      notificationId: string;
+      recipientCount: number;
+      delivery: InsiteDeliveryStats;
+    }
   | { ok: false; error: string }
 > {
   // 1. إدراج الإشعار بحالة draft
@@ -55,19 +97,30 @@ export async function createInsiteNotification(
     .single();
 
   if (insertErr || !notif) {
-    return { ok: false, error: insertErr?.message ?? "Failed to insert notification" };
+    return {
+      ok: false,
+      error: insertErr?.message ?? "Failed to insert notification",
+    };
   }
 
   const notificationId = notif.id as string;
 
   try {
     // 2. تحديد المستلمين
-    const userIds = await getTargetUsers(supabase, input.schoolId, input.target);
+    const userIds = await getTargetUsers(
+      supabase,
+      input.schoolId,
+      input.target,
+    );
 
     if (userIds.length === 0) {
       await supabase
         .from("school_notifications")
-        .update({ status: "sent", sent_at: new Date().toISOString(), recipient_count: 0 })
+        .update({
+          status: "sent",
+          sent_at: new Date().toISOString(),
+          recipient_count: 0,
+        })
         .eq("id", notificationId);
       return {
         ok: true,
@@ -160,7 +213,12 @@ export async function createInsiteNotification(
       })
       .eq("id", notificationId);
 
-    return { ok: true, notificationId, recipientCount: succeededCount, delivery };
+    return {
+      ok: true,
+      notificationId,
+      recipientCount: succeededCount,
+      delivery,
+    };
   } catch (err) {
     // في حالة الفشل نُحدّث الحالة إلى failed
     await supabase
@@ -183,14 +241,81 @@ export async function getUnreadCount(
   // الإشعارات غير المقروءة عبر مدارس مختلفة لنفس المستخدم.
   const { count, error } = await supabase
     .from("notification_recipients")
-    .select("id, school_notifications!inner(school_id)", { count: "exact", head: true })
+    .select("id, school_notifications!inner(school_id)", {
+      count: "exact",
+      head: true,
+    })
     .eq("user_id", userId)
     .eq("is_read", false)
     .not("notification_id", "is", null)
     .eq("school_notifications.school_id", schoolId);
 
-  if (error) return 0;
-  return count ?? 0;
+  const direct = await countDirectUnread(supabase, userId, schoolId);
+  return (error ? 0 : (count ?? 0)) + direct;
+}
+
+// ----------------------------------------------------------------
+// Direct per-user notifications (`notifications` table) — written by
+// sendPushNotification for teacher broadcasts, homework, absence, grades…
+// Rows mirrored from this insite system carry metadata.source = "insite"
+// and are excluded so the bell never counts the same notice twice.
+// ----------------------------------------------------------------
+const NOT_INSITE_MIRROR = "metadata->>source.is.null,metadata->>source.neq.insite";
+
+async function countDirectUnread(
+  supabase: SupabaseClient,
+  userId: string,
+  schoolId: string,
+): Promise<number> {
+  const { count, error } = await supabase
+    .from("notifications")
+    .select("id", { count: "exact", head: true })
+    .eq("user_id", userId)
+    .eq("school_id", schoolId)
+    .eq("is_read", false)
+    .or(NOT_INSITE_MIRROR);
+  return error ? 0 : (count ?? 0);
+}
+
+async function listDirectNotifications(
+  supabase: SupabaseClient,
+  userId: string,
+  schoolId: string,
+  limit: number,
+): Promise<NotificationWithReadStatus[]> {
+  const { data, error } = await supabase
+    .from("notifications")
+    .select("id, type, title, message, is_read, created_at")
+    .eq("user_id", userId)
+    .eq("school_id", schoolId)
+    .or(NOT_INSITE_MIRROR)
+    .order("created_at", { ascending: false })
+    .limit(limit);
+  if (error || !data) return [];
+  return (
+    data as Array<{
+      id: string;
+      type: string | null;
+      title: string | null;
+      message: string | null;
+      is_read: boolean | null;
+      created_at: string;
+    }>
+  ).map((row) => ({
+    id: row.id,
+    // Direct rows have no school_notifications parent; their own id is what
+    // markAsRead receives back from the bell.
+    notificationId: row.id,
+    title: row.title ?? "",
+    body: row.message ?? "",
+    category: (row.type === "homework" || row.type === "assignment"
+      ? "homework"
+      : "general") as NotificationWithReadStatus["category"],
+    priority: "normal" as NotificationWithReadStatus["priority"],
+    isRead: Boolean(row.is_read),
+    readAt: null,
+    createdAt: row.created_at,
+  }));
 }
 
 // ----------------------------------------------------------------
@@ -202,11 +327,18 @@ export async function markAsRead(
   notificationIds: string[],
 ): Promise<void> {
   if (notificationIds.length === 0) return;
-  await supabase
-    .from("notification_recipients")
-    .update({ is_read: true, read_at: new Date().toISOString() })
-    .eq("user_id", userId)
-    .in("notification_id", notificationIds);
+  await Promise.all([
+    supabase
+      .from("notification_recipients")
+      .update({ is_read: true, read_at: new Date().toISOString() })
+      .eq("user_id", userId)
+      .in("notification_id", notificationIds),
+    supabase
+      .from("notifications")
+      .update({ is_read: true })
+      .eq("user_id", userId)
+      .in("id", notificationIds),
+  ]);
 }
 
 // ----------------------------------------------------------------
@@ -216,11 +348,18 @@ export async function markAllAsRead(
   supabase: SupabaseClient,
   userId: string,
 ): Promise<void> {
-  await supabase
-    .from("notification_recipients")
-    .update({ is_read: true, read_at: new Date().toISOString() })
-    .eq("user_id", userId)
-    .eq("is_read", false);
+  await Promise.all([
+    supabase
+      .from("notification_recipients")
+      .update({ is_read: true, read_at: new Date().toISOString() })
+      .eq("user_id", userId)
+      .eq("is_read", false),
+    supabase
+      .from("notifications")
+      .update({ is_read: true })
+      .eq("user_id", userId)
+      .eq("is_read", false),
+  ]);
 }
 
 // ----------------------------------------------------------------
@@ -229,7 +368,7 @@ export async function markAllAsRead(
 export async function listNotifications(
   supabase: SupabaseClient,
   userId: string,
-  _schoolId: string,
+  schoolId: string,
   opts: { page?: number; pageSize?: number } = {},
 ): Promise<NotificationWithReadStatus[]> {
   const page = Math.max(1, opts.page ?? 1);
@@ -238,7 +377,8 @@ export async function listNotifications(
 
   const { data, error } = await supabase
     .from("notification_recipients")
-    .select(`
+    .select(
+      `
       id,
       notification_id,
       is_read,
@@ -250,24 +390,39 @@ export async function listNotifications(
         category,
         priority
       )
-    `)
+    `,
+    )
     .eq("user_id", userId)
     .order("created_at", { ascending: false })
     .range(from, from + pageSize - 1);
 
-  if (error || !data) return [];
+  const insiteItems = error || !data ? [] : mapRecipientRows(data as unknown as RecipientNotificationRow[]);
+  // Merge the latest direct notifications into the first page (what the bell
+  // and the inbox top show); deeper pages keep paging insite rows only so
+  // nothing repeats across pages.
+  const direct =
+    page === 1 ? await listDirectNotifications(supabase, userId, schoolId, pageSize) : [];
+  return [...insiteItems, ...direct]
+    .sort((l, r) => (r.createdAt ?? "").localeCompare(l.createdAt ?? ""))
+    .slice(0, pageSize);
+}
 
-  return data.map((row: any) => ({
-    id: row.id,
-    notificationId: row.notification_id,
-    title: row.school_notifications?.title ?? "",
-    body: row.school_notifications?.body ?? "",
-    category: row.school_notifications?.category ?? "general",
-    priority: row.school_notifications?.priority ?? "normal",
-    isRead: row.is_read,
-    readAt: row.read_at,
-    createdAt: row.created_at,
-  }));
+function mapRecipientRows(data: RecipientNotificationRow[]): NotificationWithReadStatus[] {
+  return data.map((row) => {
+    const parent = row.school_notifications;
+    const notification = Array.isArray(parent) ? parent[0] : parent;
+    return {
+      id: row.id,
+      notificationId: row.notification_id,
+      title: notification?.title ?? "",
+      body: notification?.body ?? "",
+      category: notification?.category ?? "general",
+      priority: notification?.priority ?? "normal",
+      isRead: row.is_read,
+      readAt: row.read_at,
+      createdAt: row.created_at,
+    };
+  });
 }
 
 // ----------------------------------------------------------------
@@ -276,7 +431,12 @@ export async function listNotifications(
 export async function listSentNotifications(
   supabase: SupabaseClient,
   schoolId: string,
-  opts: { page?: number; pageSize?: number; search?: string; branchId?: string | null } = {},
+  opts: {
+    page?: number;
+    pageSize?: number;
+    search?: string;
+    branchId?: string | null;
+  } = {},
 ): Promise<{ items: NotificationListItem[]; totalCount: number }> {
   const page = Math.max(1, opts.page ?? 1);
   const pageSize = Math.min(50, opts.pageSize ?? 20);
@@ -301,24 +461,26 @@ export async function listSentNotifications(
   const { data, count, error } = await query;
   if (error || !data) return { items: [], totalCount: 0 };
 
-  const items: NotificationListItem[] = data.map((row: any) => ({
-    id: row.id,
-    type: row.type,
-    title: row.title,
-    body: row.body,
-    targetType: row.target_type,
-    targetClass: row.target_class,
-    targetSection: row.target_section,
-    priority: row.priority,
-    category: row.category,
-    status: row.status,
-    recipientCount: row.recipient_count,
-    createdAt: row.created_at,
-    sentAt: row.sent_at,
-    template: row.template ?? "default",
-    mediaUrl: row.media_url ?? null,
-    mediaType: row.media_type ?? null,
-  }));
+  const items: NotificationListItem[] = (data as SentNotificationRow[]).map(
+    (row) => ({
+      id: row.id,
+      type: row.type,
+      title: row.title,
+      body: row.body,
+      targetType: row.target_type,
+      targetClass: row.target_class,
+      targetSection: row.target_section,
+      priority: row.priority,
+      category: row.category,
+      status: row.status,
+      recipientCount: row.recipient_count,
+      createdAt: row.created_at,
+      sentAt: row.sent_at,
+      template: row.template ?? "default",
+      mediaUrl: row.media_url ?? null,
+      mediaType: row.media_type ?? null,
+    }),
+  );
 
   return { items, totalCount: count ?? 0 };
 }
