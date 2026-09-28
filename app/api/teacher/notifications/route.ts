@@ -1,5 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
-import { resolveTeacherContext, unauthorized } from "@/lib/teacher-api";
+import { sendTeacherBroadcast } from "@/lib/mobile-api-server";
+import { enforceRateLimit } from "@/lib/rate-limit";
+import {
+  resolveTeacherAppContext,
+  resolveTeacherContext,
+  unauthorized,
+} from "@/lib/teacher-api";
 
 export async function GET(req: NextRequest) {
   const ctx = await resolveTeacherContext(req);
@@ -75,4 +81,59 @@ export async function PATCH(req: NextRequest) {
   }
 
   return NextResponse.json({ ok: true, data: { id, is_read: isRead } });
+}
+
+/**
+ * Send a notification to the teacher's own students (a whole class, one
+ * section, or a single student). Recipients are resolved server-side from the
+ * teacher's assigned roster — the same path the mobile teacher app uses.
+ */
+export async function POST(req: NextRequest) {
+  const ctx = await resolveTeacherContext(req);
+  if (!ctx) return unauthorized();
+
+  const limited = await enforceRateLimit(req, {
+    namespace: "web-teacher-broadcast",
+    windowMs: 60 * 60_000,
+    maxHits: 30,
+    identifier: ctx.userId,
+  });
+  if (limited) return limited;
+
+  const { data: teacherRow } = await ctx.supabase
+    .from("teachers")
+    .select("messaging_paused")
+    .eq("id", ctx.teacherId)
+    .maybeSingle();
+  if (teacherRow?.messaging_paused) {
+    return NextResponse.json(
+      { ok: false, error: "تم إيقاف الإرسال لحسابك مؤقتاً من قبل الإدارة." },
+      { status: 403 },
+    );
+  }
+
+  const app = await resolveTeacherAppContext(ctx);
+  if (!app) return unauthorized();
+
+  const payload = ((await req.json().catch(() => null)) ?? {}) as Record<
+    string,
+    unknown
+  >;
+  const result = await sendTeacherBroadcast(app, {
+    title: payload.title,
+    message: payload.message,
+    class_name: payload.class_name,
+    section: payload.section,
+    student_id: payload.student_id,
+  });
+
+  return NextResponse.json(
+    {
+      ok: result.ok,
+      error: result.ok ? undefined : result.message,
+      message: result.message,
+      data: result.data ?? null,
+    },
+    { status: result.ok ? 200 : 400 },
+  );
 }

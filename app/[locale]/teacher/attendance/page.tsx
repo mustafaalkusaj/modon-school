@@ -43,16 +43,25 @@ const STATUS_OPTIONS: Array<{
   { value: "excused", ar: "إجازة", en: "Excused", variant: "info", icon: CalendarCheck },
 ];
 
+function classKey(c: { class_name: string; section: string | null }) {
+  return `${c.class_name}::${c.section ?? ""}`;
+}
+
+function classLabel(key: string) {
+  const [className, section] = key.split("::");
+  return section ? `${className} / ${section}` : className;
+}
+
 export default function TeacherAttendancePage() {
   const pathname = usePathname();
   const locale = getLocaleFromPath(pathname);
   const isAr = locale === "ar";
   const t = (ar: string, en: string) => (isAr ? ar : en);
 
-  const [classNames, setClassNames] = useState<string[]>([]);
+  const [classes, setClasses] = useState<Array<{ class_name: string; section: string | null }>>([]);
   const [selectedClass, setSelectedClass] = useState("");
   const [selectedDate, setSelectedDate] = useState(
-    new Date().toISOString().split("T")[0],
+    new Date().toLocaleDateString("en-CA"),
   );
   const [students, setStudents] = useState<StudentAttendance[]>([]);
   const [loading, setLoading] = useState(false);
@@ -65,10 +74,9 @@ export default function TeacherAttendancePage() {
     fetchJsonWithAuthorizedSession("/api/teacher/classes")
       .then((res) => {
         if (res.response.ok) {
-          const cls = (res.payload as any)?.data?.classes ?? [];
-          const names = cls.map((c: any) => c.class_name as string);
-          setClassNames(names);
-          if (names.length > 0 && !selectedClass) setSelectedClass(names[0]);
+          const cls = ((res.payload as { data?: { classes?: Array<{ class_name: string; section: string | null }> } } | null)?.data?.classes ?? []);
+          setClasses(cls);
+          if (cls.length > 0) setSelectedClass((prev) => prev || classKey(cls[0]));
         }
       })
       .catch(() => {})
@@ -78,14 +86,15 @@ export default function TeacherAttendancePage() {
   // Fetch attendance when class or date changes
   const fetchAttendance = useCallback(() => {
     if (!selectedClass || !selectedDate) return;
+    const [className, section] = selectedClass.split("::");
+    const params = new URLSearchParams({ class_name: className, date: selectedDate });
+    if (section) params.set("section", section);
     setLoading(true);
     setSaveMsg(null);
-    fetchJsonWithAuthorizedSession(
-      `/api/teacher/attendance?class_name=${encodeURIComponent(selectedClass)}&date=${selectedDate}`,
-    )
+    fetchJsonWithAuthorizedSession(`/api/teacher/attendance?${params}`)
       .then((res) => {
         if (res.response.ok) {
-          setStudents((res.payload as any)?.data?.students ?? []);
+          setStudents((res.payload as { data?: { students?: StudentAttendance[] } } | null)?.data?.students ?? []);
         }
       })
       .catch(() => {})
@@ -113,7 +122,6 @@ export default function TeacherAttendancePage() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          class_name: selectedClass,
           date: selectedDate,
           records: students.map((s) => ({
             student_id: s.student_id,
@@ -125,7 +133,7 @@ export default function TeacherAttendancePage() {
       if (res.ok && data.ok) {
         setSaveMsg({ type: "success", text: t("تم حفظ الحضور بنجاح", "Attendance saved successfully") });
       } else {
-        setSaveMsg({ type: "error", text: data.error ?? t("حدث خطأ", "Something went wrong") });
+        setSaveMsg({ type: "error", text: data.error ?? data.message ?? t("حدث خطأ", "Something went wrong") });
       }
     } catch {
       setSaveMsg({ type: "error", text: t("خطأ في الاتصال", "Connection error") });
@@ -153,12 +161,12 @@ export default function TeacherAttendancePage() {
             >
               {classesLoading ? (
                 <option>{t("جاري التحميل...", "Loading...")}</option>
-              ) : classNames.length === 0 ? (
-                <option>{t("لا توجد صفوف", "No classes")}</option>
+              ) : classes.length === 0 ? (
+                <option>{t("لا توجد صفوف مسندة إليك", "No classes assigned")}</option>
               ) : (
-                classNames.map((cn) => (
-                  <option key={cn} value={cn}>
-                    {cn}
+                classes.map((c) => (
+                  <option key={classKey(c)} value={classKey(c)}>
+                    {classLabel(classKey(c))}
                   </option>
                 ))
               )}
@@ -195,12 +203,30 @@ export default function TeacherAttendancePage() {
                   <div className="flex items-center gap-2">
                     <CalendarCheck className="h-5 w-5 text-[var(--primary)]" />
                     <CardTitle className="text-sm sm:text-base">
-                      {selectedClass} · {selectedDate}
+                      {classLabel(selectedClass)} · {selectedDate}
                     </CardTitle>
                   </div>
-                  <span className="text-xs text-[var(--text-muted)]">
-                    {students.length} {t("طالب", "students")}
-                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setStudents((prev) => prev.map((s) => ({ ...s, status: "present" })))}
+                    className="text-xs font-semibold text-[var(--primary)]"
+                  >
+                    {t("الكل حاضر", "All present")}
+                  </button>
+                </div>
+                <div className="mt-2 flex flex-wrap gap-2 text-[11px]">
+                  {STATUS_OPTIONS.map((opt) => (
+                    <span
+                      key={opt.value}
+                      className="rounded-full px-2 py-0.5 font-semibold"
+                      style={{
+                        color: `var(--${opt.variant})`,
+                        background: `color-mix(in srgb, var(--${opt.variant}) 12%, transparent)`,
+                      }}
+                    >
+                      {isAr ? opt.ar : opt.en}: {students.filter((s) => s.status === opt.value).length}
+                    </span>
+                  ))}
                 </div>
               </CardHeader>
               <CardContent>
@@ -233,11 +259,12 @@ export default function TeacherAttendancePage() {
                               onClick={() =>
                                 updateStatus(student.student_id, opt.value)
                               }
-                              className={`flex items-center gap-1 px-2 py-1 rounded-lg text-[10px] sm:text-xs font-medium transition-all ${
+                              className={`flex items-center gap-1 px-2 py-1.5 rounded-lg text-[10px] sm:text-xs font-medium transition-all ${
                                 isSelected
-                                  ? `bg-[var(--${opt.variant})]/[0.15] text-[var(--${opt.variant})] ring-1 ring-[var(--${opt.variant})]/30`
+                                  ? "text-white shadow-sm"
                                   : "bg-[var(--surface-soft)] text-[var(--text-muted)] hover:bg-[var(--surface-strong)]"
                               }`}
+                              style={isSelected ? { background: `var(--${opt.variant})` } : undefined}
                               title={isAr ? opt.ar : opt.en}
                             >
                               <Icon className="h-3 w-3" />

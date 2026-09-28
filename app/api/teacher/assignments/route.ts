@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { resolveTeacherContext, unauthorized } from "@/lib/teacher-api";
-import { notifyNewAssignment } from "@/lib/notify-events";
+import { createInsiteNotification } from "@/lib/notifications";
 
 const ASSIGNMENT_STATUSES = ["active", "draft", "archived"] as const;
 type AssignmentStatus = (typeof ASSIGNMENT_STATUSES)[number];
@@ -118,15 +118,22 @@ export async function POST(req: NextRequest) {
   // homework. Never fail assignment creation because notification delivery
   // failed.
   if (status === "active") {
-    void notifyNewAssignment({
-      supabase,
-      schoolId,
-      className,
-      section,
-      title,
-      subject,
-      dueAt: dueAt ?? null,
-    }).catch(() => {});
+    try {
+      await createInsiteNotification(supabase, {
+        schoolId,
+        title: `واجب جديد: ${title}`,
+        body: description?.trim()
+          ? description
+          : `تم نشر واجب جديد في مادة ${subject} لصف ${className}${section ? ` / شعبة ${section}` : ""}.`,
+        target: section
+          ? { targetType: "section", targetClass: className, targetSection: section }
+          : { targetType: "class", targetClass: className },
+        category: "homework",
+        sentByUserId: ctx.userId,
+      });
+    } catch {
+      // best-effort — assignment creation already succeeded
+    }
   }
 
   return NextResponse.json({

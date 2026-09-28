@@ -1,8 +1,9 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
+import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Bell, CheckCheck } from "lucide-react";
+import { Bell, CheckCheck, Send } from "lucide-react";
 import { TeacherShell } from "@/components/TeacherShell";
 import { getLocaleFromPath } from "@/lib/locale-routing";
 import { fetchJsonWithAuthorizedSession } from "@/lib/authorized-api";
@@ -81,6 +82,18 @@ export default function TeacherNotificationsPage() {
       subtitleAr={unreadCount > 0 ? `${unreadCount} غير مقروء` : undefined}
       subtitleEn={unreadCount > 0 ? `${unreadCount} unread` : undefined}
     >
+      <Link
+        href={`/${locale}/teacher/notifications/send`}
+        className="mb-4 max-w-3xl mx-auto flex items-center gap-3 rounded-2xl bg-[var(--primary)] p-4 text-white shadow-sm active:scale-[0.99] transition"
+      >
+        <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-white/20">
+          <Send className="h-5 w-5" />
+        </span>
+        <span className="flex-1">
+          <span className="block text-sm font-bold">{t("إرسال إشعار لطلابي", "Send a notice to my students")}</span>
+          <span className="block text-xs text-white/80">{t("لصف كامل أو شعبة أو طالب واحد", "A whole class, a section, or one student")}</span>
+        </span>
+      </Link>
       <div className="space-y-3 max-w-3xl mx-auto">
         {loading ? (
           <div className="space-y-3">

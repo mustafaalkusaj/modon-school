@@ -4,7 +4,6 @@ import { useEffect, useState } from "react";
 import { usePathname } from "next/navigation";
 import {
   BarChart3,
-  Filter,
   Save,
   Loader2,
 } from "lucide-react";
@@ -23,14 +22,26 @@ import { EmptyState } from "@/components/ui/empty-state";
 interface StudentGrade {
   student_id: string;
   full_name: string;
+  grade_id: string | null;
   score: number | null;
   max_score: number;
 }
 
-interface GradeData {
-  students: StudentGrade[];
-  class_names: string[];
+interface TeacherClass {
+  class_name: string;
+  section: string | null;
   subjects: string[];
+}
+
+const EXAM_TYPES = [
+  { value: "daily", ar: "يومي", en: "Daily" },
+  { value: "monthly", ar: "شهري", en: "Monthly" },
+  { value: "midterm", ar: "نصف السنة", en: "Midterm" },
+  { value: "final", ar: "نهائي", en: "Final" },
+];
+
+function classKey(c: { class_name: string; section: string | null }) {
+  return `${c.class_name}::${c.section ?? ""}`;
 }
 
 export default function TeacherGradesPage() {
@@ -39,25 +50,29 @@ export default function TeacherGradesPage() {
   const isAr = locale === "ar";
   const t = (ar: string, en: string) => (isAr ? ar : en);
 
-  const [data, setData] = useState<GradeData | null>(null);
+  const [classes, setClasses] = useState<TeacherClass[]>([]);
   const [selectedClass, setSelectedClass] = useState("");
   const [selectedSubject, setSelectedSubject] = useState("");
+  const [examType, setExamType] = useState(EXAM_TYPES[1].value);
+  const [maxScore, setMaxScore] = useState(100);
   const [students, setStudents] = useState<StudentGrade[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [saveMsg, setSaveMsg] = useState<{ type: "success" | "error"; text: string } | null>(null);
 
-  // Initial load to get class names and subjects
+  const currentClass = classes.find((c) => classKey(c) === selectedClass) ?? null;
+  const subjects = currentClass?.subjects ?? [];
+
+  // Initial load: the teacher's classes and their subjects.
   useEffect(() => {
     fetchJsonWithAuthorizedSession("/api/teacher/grades")
       .then((res) => {
+        const cls = (res.payload as { data?: { classes?: TeacherClass[] } } | null)?.data?.classes ?? [];
         if (res.response.ok) {
-          const d = (res.payload as any)?.data as GradeData | undefined;
-          if (d) {
-            setData(d);
-            setStudents(d.students ?? []);
-            if (d.class_names.length > 0 && !selectedClass) setSelectedClass(d.class_names[0]);
-            if (d.subjects.length > 0 && !selectedSubject) setSelectedSubject(d.subjects[0]);
+          setClasses(cls);
+          if (cls.length > 0) {
+            setSelectedClass(classKey(cls[0]));
+            setSelectedSubject(cls[0].subjects[0] ?? "");
           }
         }
       })
@@ -65,58 +80,71 @@ export default function TeacherGradesPage() {
       .finally(() => setLoading(false));
   }, []);
 
-  // Refetch when filters change
+  // Load the roster + existing marks whenever the filters change.
   useEffect(() => {
-    if (!selectedClass && !selectedSubject) return;
+    if (!currentClass || !selectedSubject) {
+      setStudents([]);
+      return;
+    }
     setLoading(true);
     setSaveMsg(null);
-    const params = new URLSearchParams();
-    if (selectedClass) params.set("class_name", selectedClass);
-    if (selectedSubject) params.set("subject", selectedSubject);
-    fetchJsonWithAuthorizedSession(`/api/teacher/grades?${params.toString()}`)
+    const params = new URLSearchParams({
+      class_name: currentClass.class_name,
+      subject: selectedSubject,
+      exam_type: examType,
+    });
+    if (currentClass.section) params.set("section", currentClass.section);
+    fetchJsonWithAuthorizedSession(`/api/teacher/grades?${params}`)
       .then((res) => {
+        const list = (res.payload as { data?: { students?: StudentGrade[] } } | null)?.data?.students ?? [];
         if (res.response.ok) {
-          const d = (res.payload as any)?.data;
-          setStudents(d?.students ?? []);
+          setStudents(list);
+          const existingMax = list.find((s) => s.grade_id)?.max_score;
+          if (existingMax) setMaxScore(existingMax);
         }
       })
       .catch(() => {})
       .finally(() => setLoading(false));
-  }, [selectedClass, selectedSubject]);
+  }, [currentClass, selectedSubject, examType]);
 
   function updateScore(studentId: string, score: number | null) {
     setStudents((prev) =>
-      prev.map((s) =>
-        s.student_id === studentId ? { ...s, score } : s,
-      ),
+      prev.map((s) => (s.student_id === studentId ? { ...s, score } : s)),
     );
   }
 
   async function handleSave() {
-    if (students.length === 0) return;
+    const toSave = students.filter((s) => s.score != null);
+    if (toSave.length === 0) {
+      setSaveMsg({ type: "error", text: t("أدخل درجة واحدة على الأقل", "Enter at least one mark") });
+      return;
+    }
+    if (toSave.some((s) => (s.score ?? 0) > maxScore || (s.score ?? 0) < 0)) {
+      setSaveMsg({ type: "error", text: t(`الدرجة يجب أن تكون بين 0 و ${maxScore}`, `Marks must be between 0 and ${maxScore}`) });
+      return;
+    }
     setSaving(true);
     setSaveMsg(null);
     try {
-      const res = await fetch("/api/teacher/grades", {
+      const res = await fetchJsonWithAuthorizedSession("/api/teacher/grades", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          class_name: selectedClass,
           subject: selectedSubject,
-          grades: students
-            .filter((s) => s.score != null)
-            .map((s) => ({
-              student_id: s.student_id,
-              score: s.score,
-              max_score: s.max_score,
-            })),
+          exam_type: examType,
+          grades: toSave.map((s) => ({
+            student_id: s.student_id,
+            grade_id: s.grade_id,
+            score: s.score,
+            max_score: maxScore,
+          })),
         }),
       });
-      const payload = await res.json();
-      if (res.ok && payload.ok) {
-        setSaveMsg({ type: "success", text: t("تم حفظ الدرجات بنجاح", "Grades saved successfully") });
+      const payload = res.payload as { ok?: boolean; error?: string; data?: { saved?: number } } | null;
+      if (res.response.ok && payload?.ok) {
+        setSaveMsg({ type: "success", text: t(`تم حفظ ${payload.data?.saved ?? toSave.length} درجة`, "Grades saved") });
       } else {
-        setSaveMsg({ type: "error", text: payload.error ?? t("حدث خطأ", "Something went wrong") });
+        setSaveMsg({ type: "error", text: payload?.error ?? t("حدث خطأ", "Something went wrong") });
       }
     } catch {
       setSaveMsg({ type: "error", text: t("خطأ في الاتصال", "Connection error") });
@@ -133,37 +161,57 @@ export default function TeacherGradesPage() {
     >
       <div className="space-y-4 max-w-3xl mx-auto">
         {/* Filters */}
-        <div className="flex flex-col sm:flex-row gap-2 sm:gap-3">
-          <div className="relative flex-1">
-            <Filter className="absolute start-3 top-1/2 -translate-y-1/2 h-4 w-4 text-[var(--text-muted)]" />
-            <select
-              value={selectedClass}
-              onChange={(e) => setSelectedClass(e.target.value)}
-              className="w-full rounded-xl border border-[var(--card-border)] bg-[var(--surface-soft)] ps-9 pe-8 py-2.5 text-sm text-[var(--text-primary)] outline-none focus:border-[var(--primary)] focus:ring-2 focus:ring-[var(--primary)]/20 transition-all appearance-none"
-            >
-              <option value="">{t("اختر الصف", "Select Class")}</option>
-              {(data?.class_names ?? []).map((cn) => (
-                <option key={cn} value={cn}>
-                  {cn}
-                </option>
-              ))}
-            </select>
-          </div>
-          <div className="relative flex-1">
-            <BarChart3 className="absolute start-3 top-1/2 -translate-y-1/2 h-4 w-4 text-[var(--text-muted)]" />
-            <select
-              value={selectedSubject}
-              onChange={(e) => setSelectedSubject(e.target.value)}
-              className="w-full rounded-xl border border-[var(--card-border)] bg-[var(--surface-soft)] ps-9 pe-8 py-2.5 text-sm text-[var(--text-primary)] outline-none focus:border-[var(--primary)] focus:ring-2 focus:ring-[var(--primary)]/20 transition-all appearance-none"
-            >
-              <option value="">{t("اختر المادة", "Select Subject")}</option>
-              {(data?.subjects ?? []).map((s) => (
-                <option key={s} value={s}>
-                  {s}
-                </option>
-              ))}
-            </select>
-          </div>
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+          <select
+            value={selectedClass}
+            onChange={(e) => {
+              setSelectedClass(e.target.value);
+              const next = classes.find((c) => classKey(c) === e.target.value);
+              setSelectedSubject(next?.subjects[0] ?? "");
+            }}
+            className="col-span-2 sm:col-span-1 rounded-xl border border-[var(--card-border)] bg-[var(--card-bg)] px-3 py-2.5 text-sm text-[var(--text-primary)] outline-none focus:border-[var(--primary)]"
+          >
+            {classes.length === 0 && <option value="">{t("لا توجد صفوف مسندة", "No classes assigned")}</option>}
+            {classes.map((c) => (
+              <option key={classKey(c)} value={classKey(c)}>
+                {c.class_name}
+                {c.section ? ` / ${c.section}` : ""}
+              </option>
+            ))}
+          </select>
+          <select
+            value={selectedSubject}
+            onChange={(e) => setSelectedSubject(e.target.value)}
+            className="col-span-2 sm:col-span-1 rounded-xl border border-[var(--card-border)] bg-[var(--card-bg)] px-3 py-2.5 text-sm text-[var(--text-primary)] outline-none focus:border-[var(--primary)]"
+          >
+            {subjects.length === 0 && <option value="">{t("لا توجد مواد", "No subjects")}</option>}
+            {subjects.map((s) => (
+              <option key={s} value={s}>
+                {s}
+              </option>
+            ))}
+          </select>
+          <select
+            value={examType}
+            onChange={(e) => setExamType(e.target.value)}
+            className="rounded-xl border border-[var(--card-border)] bg-[var(--card-bg)] px-3 py-2.5 text-sm text-[var(--text-primary)] outline-none focus:border-[var(--primary)]"
+          >
+            {EXAM_TYPES.map((et) => (
+              <option key={et.value} value={et.value}>
+                {isAr ? et.ar : et.en}
+              </option>
+            ))}
+          </select>
+          <label className="flex items-center gap-2 rounded-xl border border-[var(--card-border)] bg-[var(--card-bg)] px-3 text-xs text-[var(--text-muted)]">
+            {t("من", "Out of")}
+            <input
+              type="number"
+              min={1}
+              value={maxScore}
+              onChange={(e) => setMaxScore(Math.max(1, Number(e.target.value) || 1))}
+              className="w-full bg-transparent py-2.5 text-sm text-[var(--text-primary)] outline-none"
+            />
+          </label>
         </div>
 
         {/* Grades table */}
@@ -201,8 +249,8 @@ export default function TeacherGradesPage() {
                 <div className="space-y-2">
                   {students.map((student) => {
                     const pct =
-                      student.score != null && student.max_score > 0
-                        ? Math.round((student.score / student.max_score) * 100)
+                      student.score != null && maxScore > 0
+                        ? Math.round((student.score / maxScore) * 100)
                         : null;
                     return (
                       <div
@@ -225,7 +273,7 @@ export default function TeacherGradesPage() {
                           <input
                             type="number"
                             min={0}
-                            max={student.max_score}
+                            max={maxScore}
                             value={student.score ?? ""}
                             onChange={(e) => {
                               const val = e.target.value === "" ? null : Number(e.target.value);
@@ -235,7 +283,7 @@ export default function TeacherGradesPage() {
                             className="w-16 rounded-lg border border-[var(--card-border)] bg-[var(--surface-soft)] px-2 py-1.5 text-center text-sm text-[var(--text-primary)] outline-none focus:border-[var(--primary)] focus:ring-2 focus:ring-[var(--primary)]/20 transition-all"
                           />
                           <span className="text-xs text-[var(--text-muted)]">
-                            / {student.max_score}
+                            / {maxScore}
                           </span>
                           {pct != null && (
                             <Badge

@@ -54,7 +54,7 @@ export async function GET(req: NextRequest) {
 
   const enriched = await enrichAssignmentRows(ctx.serviceSupabase, rows);
   const items = enriched.map((row) => {
-    const id = row.id as string;
+    const id = (row as Record<string, unknown>).id as string;
     const counts = submissionCounts.get(id) ?? { total: 0, graded: 0 };
     return { ...row, submissions_total: counts.total, submissions_graded: counts.graded };
   });

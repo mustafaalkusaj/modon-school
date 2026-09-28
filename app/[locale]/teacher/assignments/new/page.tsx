@@ -1,12 +1,19 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { Save, ArrowRight } from "lucide-react";
 import { TeacherShell } from "@/components/TeacherShell";
 import { getLocaleFromPath } from "@/lib/locale-routing";
 import { fetchJsonWithAuthorizedSession } from "@/lib/authorized-api";
 import { Card, CardContent } from "@/components/ui/card";
+
+interface TeacherClass {
+  id: string;
+  class_name: string;
+  section: string | null;
+  subjects: string[];
+}
 
 export default function TeacherNewAssignmentPage() {
   const pathname = usePathname();
@@ -17,15 +24,32 @@ export default function TeacherNewAssignmentPage() {
 
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
-  const [className, setClassName] = useState("");
+  const [selectedClassIdx, setSelectedClassIdx] = useState<number>(-1);
   const [subject, setSubject] = useState("");
   const [dueDate, setDueDate] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
 
+  const [classes, setClasses] = useState<TeacherClass[]>([]);
+  const [loadingClasses, setLoadingClasses] = useState(true);
+
+  useEffect(() => {
+    fetchJsonWithAuthorizedSession("/api/teacher/classes")
+      .then((res) => {
+        if (res.response.ok) {
+          setClasses((res.payload as any)?.data?.classes ?? []);
+        }
+      })
+      .catch(() => {})
+      .finally(() => setLoadingClasses(false));
+  }, []);
+
+  const selectedClass = selectedClassIdx >= 0 ? classes[selectedClassIdx] : null;
+  const availableSubjects = selectedClass?.subjects ?? [];
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!title.trim() || !dueDate) {
+    if (!title.trim() || !dueDate || !selectedClass || !subject) {
       setError(t("يرجى ملء الحقول المطلوبة", "Please fill required fields"));
       return;
     }
@@ -34,23 +58,25 @@ export default function TeacherNewAssignmentPage() {
     setError("");
 
     try {
-      const res = await fetchJsonWithAuthorizedSession("/api/teacher/assignments", {
+      const res = await fetchJsonWithAuthorizedSession("/api/teacher/homework", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           title: title.trim(),
           description: description.trim() || null,
-          class_name: className || null,
-          subject: subject || null,
-          due_date: dueDate,
+          class_name: selectedClass.class_name,
+          section: selectedClass.section || null,
+          subject,
+          // End of the chosen day, Baghdad time.
+          due_at: `${dueDate}T23:59:00+03:00`,
         }),
       });
 
-      if (res.response.ok) {
+      if (res.response.ok && (res.payload as { ok?: boolean } | null)?.ok !== false) {
         router.push(`/${locale}/teacher/assignments`);
       } else {
-        const payload = res.payload as { error?: string } | null;
-        setError(payload?.error ?? t("حدث خطأ", "An error occurred"));
+        const payload = res.payload as { error?: string; message?: string } | null;
+        setError(payload?.message ?? payload?.error ?? t("حدث خطأ", "An error occurred"));
       }
     } catch {
       setError(t("حدث خطأ في الاتصال", "Connection error"));
@@ -120,28 +146,58 @@ export default function TeacherNewAssignmentPage() {
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
                   <label className={labelClass}>
-                    {t("الصف", "Class")}
+                    {t("الصف", "Class")} *
                   </label>
-                  <input
-                    type="text"
-                    value={className}
-                    onChange={(e) => setClassName(e.target.value)}
-                    placeholder={t("مثال: الصف الأول", "e.g. Grade 1")}
+                  <select
+                    value={selectedClassIdx}
+                    onChange={(e) => {
+                      const idx = Number(e.target.value);
+                      setSelectedClassIdx(idx);
+                      const subs = classes[idx]?.subjects ?? [];
+                      setSubject(subs.length === 1 ? subs[0] : "");
+                    }}
                     className={inputClass}
-                  />
+                    disabled={loadingClasses}
+                    required
+                  >
+                    <option value={-1}>
+                      {loadingClasses
+                        ? t("جاري التحميل...", "Loading...")
+                        : t("اختر الصف", "Select class")}
+                    </option>
+                    {classes.map((cls, idx) => (
+                      <option key={cls.id} value={idx}>
+                        {cls.class_name}
+                        {cls.section ? ` - ${cls.section}` : ""}
+                      </option>
+                    ))}
+                  </select>
                 </div>
 
                 <div>
                   <label className={labelClass}>
-                    {t("المادة", "Subject")}
+                    {t("المادة", "Subject")} *
                   </label>
-                  <input
-                    type="text"
+                  <select
                     value={subject}
                     onChange={(e) => setSubject(e.target.value)}
-                    placeholder={t("مثال: الرياضيات", "e.g. Mathematics")}
                     className={inputClass}
-                  />
+                    disabled={!selectedClass || availableSubjects.length === 0}
+                    required
+                  >
+                    <option value="">
+                      {!selectedClass
+                        ? t("اختر الصف أولاً", "Select class first")
+                        : availableSubjects.length === 0
+                          ? t("لا توجد مواد", "No subjects")
+                          : t("اختر المادة", "Select subject")}
+                    </option>
+                    {availableSubjects.map((s) => (
+                      <option key={s} value={s}>
+                        {s}
+                      </option>
+                    ))}
+                  </select>
                 </div>
               </div>
 
@@ -157,6 +213,10 @@ export default function TeacherNewAssignmentPage() {
                   required
                 />
               </div>
+
+              <p className="text-xs text-[var(--text-muted)]">
+                {t("سيصل إشعار بالواجب إلى جميع طلاب الصف المحدد فور الحفظ.", "Students of the selected class are notified as soon as you save.")}
+              </p>
 
               <div className="pt-2">
                 <button

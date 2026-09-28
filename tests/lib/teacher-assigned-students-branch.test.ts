@@ -32,6 +32,7 @@ function makeQuery(result: QueryResult) {
     eqCalls,
     select: () => query,
     in: () => query,
+    is: () => query,
     eq: (col: string, val: unknown) => {
       eqCalls.push([col, val]);
       return query;
@@ -40,7 +41,10 @@ function makeQuery(result: QueryResult) {
     then: (onF: (v: QueryResult) => unknown, onR?: (e: unknown) => unknown) =>
       Promise.resolve(result).then(onF, onR),
   };
-  return query as { eqCalls: Array<[string, unknown]> } & Record<string, unknown>;
+  return query as { eqCalls: Array<[string, unknown]> } & Record<
+    string,
+    unknown
+  >;
 }
 
 const SCHOOL_ID = "11111111-1111-1111-1111-111111111111";
@@ -117,7 +121,8 @@ describe("fetchTeacherAssignedStudents — branch isolation", () => {
 
   it("constrains the class-name roster query to the teacher's branch", async () => {
     const { studentQueries } = wireClient(BRANCH_A);
-    const { fetchTeacherAssignedStudents } = await import("@/lib/managed-user-app-context");
+    const { fetchTeacherAssignedStudents } =
+      await import("@/lib/managed-user-app-context");
 
     await fetchTeacherAssignedStudents(buildTeacherRecord());
 
@@ -131,7 +136,8 @@ describe("fetchTeacherAssignedStudents — branch isolation", () => {
 
   it("omits the branch filter when the teacher has no branch (legacy single-branch)", async () => {
     const { studentQueries } = wireClient(null);
-    const { fetchTeacherAssignedStudents } = await import("@/lib/managed-user-app-context");
+    const { fetchTeacherAssignedStudents } =
+      await import("@/lib/managed-user-app-context");
 
     await fetchTeacherAssignedStudents(buildTeacherRecord());
 
@@ -139,5 +145,16 @@ describe("fetchTeacherAssignedStudents — branch isolation", () => {
     const eqCalls = studentQueries[0].eqCalls;
     expect(eqCalls).toContainEqual(["class_name", "الأول"]);
     expect(eqCalls.some(([col]) => col === "branch_id")).toBe(false);
+  });
+
+  it("does not resolve a roster from an inactive teacher assignment", async () => {
+    const { studentQueries } = wireClient(BRANCH_A);
+    const user = buildTeacherRecord();
+    user.teacher!.assignments[0].is_active = false;
+    const { fetchTeacherAssignedStudents } =
+      await import("@/lib/managed-user-app-context");
+
+    await expect(fetchTeacherAssignedStudents(user)).resolves.toEqual([]);
+    expect(studentQueries).toHaveLength(0);
   });
 });
