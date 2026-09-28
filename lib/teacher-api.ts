@@ -163,6 +163,17 @@ export function filterTeacherStudents(
   });
 }
 
+/** True when `className` is one of the teacher's active admin-set assignments. */
+export async function verifyTeacherOwnsClass(
+  ctx: TeacherContext,
+  className: string,
+): Promise<boolean> {
+  const app = await resolveTeacherAppContext(ctx);
+  if (!app) return false;
+  const target = norm(className);
+  return summarizeTeacherClasses(app).some((c) => norm(c.class_name) === target);
+}
+
 export function unauthorized() {
   return NextResponse.json(
     { ok: false, error: "unauthorized" },

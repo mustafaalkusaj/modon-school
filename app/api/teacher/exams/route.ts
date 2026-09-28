@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { resolveTeacherContext, unauthorized } from "@/lib/teacher-api";
+import { resolveTeacherContext, unauthorized, verifyTeacherOwnsClass } from "@/lib/teacher-api";
 
 export async function GET(req: NextRequest) {
   const ctx = await resolveTeacherContext(req);
@@ -72,6 +72,14 @@ export async function POST(req: NextRequest) {
     return NextResponse.json(
       { ok: false, error: "missing_required_fields" },
       { status: 400 },
+    );
+  }
+
+  const ownsClass = await verifyTeacherOwnsClass(ctx, className);
+  if (!ownsClass) {
+    return NextResponse.json(
+      { ok: false, error: "class_not_assigned" },
+      { status: 403 },
     );
   }
 
