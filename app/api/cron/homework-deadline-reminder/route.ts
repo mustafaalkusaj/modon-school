@@ -1,6 +1,8 @@
 /**
  * Cron worker: reminds students one day before a homework due date if they
- * have not submitted yet. Registered in vercel.json under `crons`; Vercel
+ * have not submitted yet. Registered in vercel.json under `crons` (daily,
+ * 15:00 UTC = 18:00 Baghdad); on the PM2 server it needs the same crontab
+ * entry as the other cron routes. Vercel
  * sends `Authorization: Bearer $CRON_SECRET` automatically — same guard as
  * /api/cron/account-deletion. `OPS_ALERT_TOKEN` is also accepted so it can be
  * triggered by hand.
@@ -44,7 +46,7 @@ async function handle(req: NextRequest) {
   try {
     const { data, error } = await client
       .from("assignments")
-      .select("id, school_id, title, subject, class_name, section, due_at, student_id, status")
+      .select("id, school_id, branch_id, title, subject, class_name, section, due_at, student_id, status")
       .eq("status", "active")
       .gte("due_at", windowStart.toISOString())
       .lt("due_at", windowEnd.toISOString());
@@ -65,6 +67,7 @@ async function handle(req: NextRequest) {
   for (const assignment of dueAssignments as Record<string, unknown>[]) {
     try {
       const schoolId = assignment.school_id as string;
+      const branchId = (assignment.branch_id as string) ?? null;
       const assignmentId = assignment.id as string;
       const className = (assignment.class_name as string) ?? null;
       const section = (assignment.section as string) ?? null;
@@ -74,13 +77,19 @@ async function handle(req: NextRequest) {
       if (directStudentId) {
         candidateStudentIds = [directStudentId];
       } else if (className) {
+        // Same class name exists in every branch: scope to the assignment's
+        // branch, and skip withdrawn/graduated/deleted students.
         let query = client
           .from("students")
           .select("id")
           .eq("school_id", schoolId)
-          .eq("class_name", className);
+          .eq("class_name", className)
+          .eq("status", "active")
+          .is("deleted_at", null);
+        if (branchId) query = query.eq("branch_id", branchId);
         if (section) query = query.eq("section", section);
-        const { data: students } = await query;
+        const { data: students, error: studentsError } = await query;
+        if (studentsError) throw studentsError;
         candidateStudentIds = (students ?? [])
           .map((row) => (row as Record<string, unknown>).id as string)
           .filter(Boolean);
@@ -88,11 +97,14 @@ async function handle(req: NextRequest) {
 
       if (candidateStudentIds.length === 0) continue;
 
-      const { data: submitted } = await client
+      const { data: submitted, error: submittedError } = await client
         .from("assignment_submissions")
         .select("student_id")
         .eq("assignment_id", assignmentId)
         .in("student_id", candidateStudentIds);
+      // Without this, a failed lookup reads as "nobody submitted" and
+      // reminds students who already handed the work in.
+      if (submittedError) throw submittedError;
 
       const submittedIds = new Set(
         (submitted ?? []).map(

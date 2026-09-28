@@ -129,6 +129,26 @@ export function filterTeacherStudents(
   });
 }
 
+/**
+ * The same account context the mobile teacher app uses (branch-scoped
+ * assigned_students roster keyed by the real teachers.id), so web-portal
+ * notification sending shares one source of truth for "which students are mine".
+ */
+export async function resolveTeacherAppContext(
+  ctx: TeacherContext,
+): Promise<MobileRouteContext | null> {
+  const { account } = ctx;
+  if (
+    !account.identity.is_active ||
+    account.identity.role !== "teacher" ||
+    account.identity.school_id !== ctx.schoolId ||
+    !account.teacher?.id
+  ) {
+    return null;
+  }
+  return ctx.mobile;
+}
+
 export function unauthorized() {
   return NextResponse.json(
     { ok: false, error: "unauthorized" },

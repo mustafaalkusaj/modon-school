@@ -4,6 +4,7 @@ import { resolveSchoolScopedActorContext } from "@/lib/managed-users-server";
 import { sendPushNotification } from "@/lib/push-notifications";
 import { enforceRateLimit } from "@/lib/rate-limit";
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { excludeDeletedStudents } from "@/lib/students/soft-delete";
 
 type TargetScope = "school" | "branch" | "class" | "role" | "user";
 
@@ -15,7 +16,13 @@ interface SendBody {
   link?: string;
 }
 
-const VALID_SCOPES: TargetScope[] = ["school", "branch", "class", "role", "user"];
+const VALID_SCOPES: TargetScope[] = [
+  "school",
+  "branch",
+  "class",
+  "role",
+  "user",
+];
 
 function jsonError(message: string, status: number) {
   return NextResponse.json({ error: { message } }, { status });
@@ -39,19 +46,27 @@ async function resolveTargetUserIds(
         .select("auth_user_id")
         .eq("school_id", schoolId)
         .not("auth_user_id", "is", null);
-      return uniqueIds((data ?? []).map((r) => (r as { auth_user_id: string | null }).auth_user_id));
+      return uniqueIds(
+        (data ?? []).map(
+          (r) => (r as { auth_user_id: string | null }).auth_user_id,
+        ),
+      );
     }
-    const { data } = await supabase
-      .from("students")
-      .select("auth_user_id")
+    const { data } = await excludeDeletedStudents(
+      supabase.from("students").select("auth_user_id"),
+    )
       .eq("school_id", schoolId)
       .not("auth_user_id", "is", null);
-    return uniqueIds((data ?? []).map((r) => (r as { auth_user_id: string | null }).auth_user_id));
+    return uniqueIds(
+      (data ?? []).map(
+        (r) => (r as { auth_user_id: string | null }).auth_user_id,
+      ),
+    );
   }
 
-  let query = supabase
-    .from("students")
-    .select("auth_user_id")
+  let query = excludeDeletedStudents(
+    supabase.from("students").select("auth_user_id"),
+  )
     .eq("school_id", schoolId)
     .not("auth_user_id", "is", null);
 
@@ -63,26 +78,38 @@ async function resolveTargetUserIds(
   }
 
   const { data } = await query;
-  return uniqueIds((data ?? []).map((r) => (r as { auth_user_id: string | null }).auth_user_id));
+  return uniqueIds(
+    (data ?? []).map(
+      (r) => (r as { auth_user_id: string | null }).auth_user_id,
+    ),
+  );
 }
 
 function uniqueIds(values: Array<string | null>): string[] {
   return Array.from(
-    new Set(values.filter((v): v is string => Boolean(v && v.trim())).map((v) => v.trim())),
+    new Set(
+      values
+        .filter((v): v is string => Boolean(v && v.trim()))
+        .map((v) => v.trim()),
+    ),
   );
 }
 
 export async function POST(request: NextRequest) {
   const context = await resolveSchoolScopedActorContext(
     null,
-    { allowedRoles: ["admin", "super_admin"], roleDeniedMessage: "ليس لديك صلاحية إرسال الإشعارات." },
+    {
+      allowedRoles: ["admin", "super_admin"],
+      roleDeniedMessage: "ليس لديك صلاحية إرسال الإشعارات.",
+    },
     request.headers.get("authorization"),
   );
   if (!context.ok) {
     return jsonError(context.message, context.status);
   }
 
-  const { actorSupabase, actorUserId, targetSchoolId, actorBranchId } = context.value;
+  const { actorSupabase, actorUserId, targetSchoolId, actorBranchId } =
+    context.value;
 
   const rateLimited = await enforceRateLimit(request, {
     namespace: "notifications-send",
@@ -102,7 +129,8 @@ export async function POST(request: NextRequest) {
     return NextResponse.json(
       {
         ok: false,
-        error: "target.scope (school|branch|class|role|user), title, and message are required",
+        error:
+          "target.scope (school|branch|class|role|user), title, and message are required",
       },
       { status: 400 },
     );
@@ -110,7 +138,12 @@ export async function POST(request: NextRequest) {
 
   let userIds: string[];
   try {
-    userIds = await resolveTargetUserIds(actorSupabase, targetSchoolId, scope, body?.target?.value);
+    userIds = await resolveTargetUserIds(
+      actorSupabase,
+      targetSchoolId,
+      scope,
+      body?.target?.value,
+    );
   } catch {
     return NextResponse.json(
       { ok: false, error: "Failed to resolve recipients" },
@@ -120,12 +153,21 @@ export async function POST(request: NextRequest) {
 
   const result = await sendPushNotification(actorSupabase, {
     schoolId: targetSchoolId,
-    branchId: scope === "branch" ? body?.target?.value ?? actorBranchId ?? null : actorBranchId ?? null,
+    branchId:
+      scope === "branch"
+        ? (body?.target?.value ?? actorBranchId ?? null)
+        : (actorBranchId ?? null),
     userIds,
-    type: typeof body?.type === "string" && body.type.trim() ? body.type.trim() : "general",
+    type:
+      typeof body?.type === "string" && body.type.trim()
+        ? body.type.trim()
+        : "general",
     title,
     message,
-    link: typeof body?.link === "string" && body.link.trim() ? body.link.trim() : null,
+    link:
+      typeof body?.link === "string" && body.link.trim()
+        ? body.link.trim()
+        : null,
   });
 
   return NextResponse.json({

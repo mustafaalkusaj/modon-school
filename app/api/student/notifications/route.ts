@@ -32,6 +32,53 @@ interface NotificationItem {
   created_at: string;
 }
 
+// ---------------------------------------------------------------------------
+// PATCH — mark app_notifications rows as read. Body: { notificationIds: string[] }
+// Only rows addressed to this student are updated; role-wide rows
+// (recipient_role = student) are shared by every student, so one student
+// must not flip them for everyone.
+// ---------------------------------------------------------------------------
+export async function PATCH(req: NextRequest) {
+  const ctx = await resolveStudentContext(req);
+  if (!ctx) return unauthorized();
+
+  const { supabase, userId, schoolId } = ctx;
+
+  const body = (await req.json().catch(() => null)) as {
+    notificationIds?: unknown;
+  } | null;
+  const ids = body?.notificationIds;
+
+  if (
+    !Array.isArray(ids) ||
+    ids.length === 0 ||
+    ids.length > 100 ||
+    !ids.every((id) => typeof id === "string" && id.length > 0)
+  ) {
+    return NextResponse.json(
+      { ok: false, error: "invalid_notification_ids" },
+      { status: 400 },
+    );
+  }
+
+  const { error } = await supabase
+    .from("app_notifications")
+    .update({ status: "read" })
+    .in("id", ids as string[])
+    .eq("school_id", schoolId)
+    .eq("recipient_user_id", userId)
+    .eq("status", "unread");
+
+  if (error) {
+    return NextResponse.json(
+      { ok: false, error: "update_failed" },
+      { status: 500 },
+    );
+  }
+
+  return NextResponse.json({ ok: true });
+}
+
 export async function GET(req: NextRequest) {
   const ctx = await resolveStudentContext(req);
   if (!ctx) return unauthorized();

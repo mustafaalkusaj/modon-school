@@ -25,6 +25,7 @@ import {
 } from "@/lib/supabase-server";
 import { buildSchoolCacheTag, rememberWithTtl } from "@/lib/server-cache";
 import { todayBaghdadIso } from "@/lib/tz";
+import { sectionMatches } from "@/lib/section-scope";
 
 // Mobile session config/features change rarely but are read on every app
 // launch. Cache them briefly (in-memory, per-process) and invalidate on the
@@ -2075,11 +2076,7 @@ export async function sendTeacherBroadcast(
       normalizeText(student.class_name).toLowerCase() !== targetClass
     )
       return false;
-    if (
-      targetSection &&
-      normalizeText(student.section).toLowerCase() !== targetSection
-    )
-      return false;
+    if (!sectionMatches(student.section, targetSection)) return false;
     return true;
   });
 
@@ -2106,6 +2103,8 @@ export async function sendTeacherBroadcast(
     type: normalizeText(input.type) || "teacher_broadcast",
     title,
     message,
+    // Tapping the system notification opens the student's inbox.
+    link: "/ar/student/notifications",
     metadata: {
       teacher_id: teacher.id,
       attachment_bucket: rawAttachment ? attachmentBucket : null,

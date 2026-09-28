@@ -14,6 +14,34 @@ interface WebPushSubscription {
   keys: { p256dh: string; auth: string };
 }
 
+const SEND_BATCH = 20;
+const RETRY_ATTEMPTS = 2;
+const RETRY_BASE_MS = 800;
+
+/** Retries transient failures; 404/410 mean the device is gone, so rethrow at once. */
+async function sendWithRetry(
+  subscription: WebPushSubscription,
+  payload: string,
+  options: Parameters<typeof webpush.sendNotification>[2],
+) {
+  let lastErr: unknown;
+  for (let i = 0; i <= RETRY_ATTEMPTS; i++) {
+    try {
+      await webpush.sendNotification(subscription, payload, options);
+      return;
+    } catch (err) {
+      lastErr = err;
+      const code = (err as { statusCode?: number }).statusCode;
+      if (code === 410 || code === 404) throw err;
+      if (i < RETRY_ATTEMPTS) {
+        const delay = RETRY_BASE_MS * Math.pow(2, i) * (0.5 + Math.random() * 0.5);
+        await new Promise((r) => setTimeout(r, delay));
+      }
+    }
+  }
+  throw lastErr;
+}
+
 interface WebPushResult {
   sent: number;
   failed: number;
@@ -76,7 +104,13 @@ export async function sendWebPushToUsers(
 
   const deadIds: string[] = [];
 
-  for (const sub of webSubs) {
+  // Parallel batches with a per-request timeout: sequential sends with no
+  // timeout could run past the route's time limit on a school-wide
+  // announcement. TTL keeps a notification queued for an offline device for a
+  // day instead of the push service default.
+  const sendOptions = { urgency: "high" as const, TTL: 24 * 60 * 60, timeout: 10_000 };
+
+  const sendOne = async (sub: (typeof webSubs)[number]) => {
     const json = sub.subscription_json as Record<string, unknown>;
     const subscription: WebPushSubscription = {
       endpoint: json.endpoint as string,
@@ -85,13 +119,11 @@ export async function sendWebPushToUsers(
 
     if (!subscription.endpoint || !subscription.keys?.p256dh || !subscription.keys?.auth) {
       result.failed += 1;
-      continue;
+      return;
     }
 
     try {
-      await webpush.sendNotification(subscription, pushPayload, {
-        urgency: "high",
-      });
+      await sendWithRetry(subscription, pushPayload, sendOptions);
       result.sent += 1;
     } catch (err: unknown) {
       const statusCode = (err as { statusCode?: number }).statusCode;
@@ -105,6 +137,10 @@ export async function sendWebPushToUsers(
         );
       }
     }
+  };
+
+  for (let i = 0; i < webSubs.length; i += SEND_BATCH) {
+    await Promise.all(webSubs.slice(i, i + SEND_BATCH).map(sendOne));
   }
 
   if (deadIds.length > 0) {
