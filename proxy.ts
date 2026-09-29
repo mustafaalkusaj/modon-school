@@ -224,9 +224,44 @@ function isScheduledJobPath(normalizedPath: string) {
   );
 }
 
+/** Login screens that a user who is already signed in should skip. */
+const SIGNED_IN_SKIP_PATHS = new Set(["/login", "/student-login"]);
+
+/**
+ * Students and teachers open the site from a home-screen shortcut, which often
+ * lands on the login page. The RBAC cookie lives for months, so if it is still
+ * valid send them straight to where they were going (or their home page)
+ * instead of showing the login form again. Logging out clears the cookie, so
+ * the login page still appears after an explicit logout.
+ */
+async function getSignedInLoginRedirect(request: NextRequest, normalizedPath: string): Promise<URL | null> {
+  if (!SIGNED_IN_SKIP_PATHS.has(normalizedPath)) return null;
+
+  const session = await verifyRBACSession(request.cookies.get(RBAC_COOKIE_NAME)?.value);
+  if (!session?.userActive) return null;
+
+  const locale = getLocaleFromRequestPath(request.nextUrl.pathname);
+  const fallback = new URL(localizePath(session.defaultPath || "/dashboard", locale), request.url);
+
+  const next = request.nextUrl.searchParams.get("next");
+  if (!next || !next.startsWith("/") || next.startsWith("//") || next.startsWith("/\\")) {
+    return fallback;
+  }
+
+  const nextUrl = new URL(next, request.url);
+  const isSameOrigin = nextUrl.origin === request.nextUrl.origin;
+  const pointsBackToLogin = SIGNED_IN_SKIP_PATHS.has(normalizePath(nextUrl.pathname));
+  return isSameOrigin && !pointsBackToLogin ? nextUrl : fallback;
+}
+
 async function getGuardRedirect(request: NextRequest): Promise<URL | NextResponse | null> {
   const normalizedPath = normalizePath(request.nextUrl.pathname);
   const isApiRequest = normalizedPath.startsWith("/api/");
+
+  if (!isApiRequest) {
+    const signedInRedirect = await getSignedInLoginRedirect(request, normalizedPath);
+    if (signedInRedirect) return signedInRedirect;
+  }
   const isPublicPath = PUBLIC_PATHS.some((path) => normalizedPath === path) ||
     normalizedPath.startsWith("/upload/");
   const isPublicApiPath =
