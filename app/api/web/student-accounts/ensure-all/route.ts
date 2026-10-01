@@ -1,3 +1,4 @@
+import { toManagedAuthEmail } from "@/lib/managed-users/auth-email";
 import { NextRequest, NextResponse } from "next/server";
 import {
   ensureManagedUserProfileLink,
@@ -172,12 +173,7 @@ export async function POST(request: NextRequest) {
         },
       });
 
-      const asciiLogin = loginIdentifier.replace(/[^\x00-\x7F]/g, (ch) =>
-        ch === "ط" ? "st" : ch === "م" ? "tc" : "u",
-      );
-      const authEmail = loginIdentifier.includes("@")
-        ? loginIdentifier
-        : `${asciiLogin}@schoolapp.local`;
+      const authEmail = toManagedAuthEmail(loginIdentifier);
 
       const { data: createdUser, error: createError } =
         await serviceSupabase.auth.admin.createUser({

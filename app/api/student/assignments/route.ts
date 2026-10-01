@@ -12,6 +12,7 @@ export async function GET(req: NextRequest) {
     .select("id, title, subject, due_at, content_kind, description, created_at")
     .eq("school_id", schoolId)
     .eq("class_name", className ?? "")
+    .eq("status", "active")
     .order("due_at", { ascending: true });
 
   if (error) {

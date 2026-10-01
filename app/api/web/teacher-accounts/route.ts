@@ -1,3 +1,4 @@
+import { toManagedAuthEmail } from "@/lib/managed-users/auth-email";
 import { NextRequest, NextResponse } from "next/server";
 import { resolveSchoolScopedActorContext } from "@/lib/managed-users-server";
 import { createServiceSupabaseClient } from "@/lib/supabase-server";
@@ -172,9 +173,7 @@ export async function POST(request: NextRequest) {
     },
   });
 
-  const authEmail = loginIdentifier.includes("@")
-    ? loginIdentifier
-    : `${loginIdentifier}@schoolapp.local`;
+  const authEmail = toManagedAuthEmail(loginIdentifier);
 
   const { data: createdUser, error: createError } = await serviceSupabase.auth.admin.createUser({
     email: authEmail,

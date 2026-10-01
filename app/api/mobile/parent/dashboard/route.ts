@@ -106,6 +106,7 @@ export async function GET(req: NextRequest) {
         )
         .in("student_id", studentIds)
         .eq("school_id", schoolId)
+        .in("status", ["confirmed", "locked"])
         .order("created_at", { ascending: false })
         .limit(20),
 

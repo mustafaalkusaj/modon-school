@@ -111,7 +111,8 @@ export async function POST(req: NextRequest) {
       .from("students")
       .update({ class_name: targetClassName, status: "active" satisfies StudentStatus })
       .eq("school_id", targetSchoolId)
-      .in("id", studentIds),
+      .in("id", studentIds)
+      .not("status", "in", "(deleted,withdrawn,archived,graduated)"),
     branchScope.value,
   ).select("id");
 

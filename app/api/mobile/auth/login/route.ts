@@ -1,3 +1,4 @@
+import { resolveManagedSignInEmail } from "@/lib/managed-users/resolve-login-email";
 import { NextRequest, NextResponse } from "next/server";
 
 import {
@@ -64,9 +65,9 @@ export async function POST(req: NextRequest) {
     // - No @ (plain username) → append @schoolapp.local (managed account)
     const isRealEmail =
       identifier.includes("@") && !identifier.endsWith("@schoolapp.local");
-    const managedEmail = identifier.endsWith("@schoolapp.local")
+    const managedEmail = isRealEmail
       ? identifier
-      : `${identifier}@schoolapp.local`;
+      : await resolveManagedSignInEmail(identifier);
 
     let data;
     let error;

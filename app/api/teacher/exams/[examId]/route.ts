@@ -9,13 +9,14 @@ export async function GET(
   if (!ctx) return unauthorized();
 
   const { examId } = await params;
-  const { supabase, schoolId } = ctx;
+  const { supabase, schoolId, userId } = ctx;
 
   const { data, error } = await supabase
     .from("exams")
     .select("*")
     .eq("id", examId)
     .eq("school_id", schoolId)
+    .eq("created_by", userId)
     .single();
 
   if (error || !data) {
@@ -93,7 +94,7 @@ export async function PATCH(
   if (!ctx) return unauthorized();
 
   const { examId } = await params;
-  const { supabase, schoolId } = ctx;
+  const { supabase, schoolId, userId } = ctx;
 
   let body: Record<string, unknown>;
   try {
@@ -133,6 +134,7 @@ export async function PATCH(
     .update(updates as Record<string, unknown>)
     .eq("id", examId)
     .eq("school_id", schoolId)
+    .eq("created_by", userId)
     .select(
       "id, title, subject, class_name, starts_at, ends_at, total_marks, type",
     )

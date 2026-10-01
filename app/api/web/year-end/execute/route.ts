@@ -97,7 +97,7 @@ export async function POST(req: NextRequest) {
         .from("students")
         .select("id, class_name, status, paid_fee")
         .eq("school_id", targetSchoolId)
-        .neq("status", "graduated"),
+        .not("status", "in", "(graduated,deleted,withdrawn,archived,transferred)"),
       branchScope.value,
     );
 
@@ -193,7 +193,7 @@ export async function POST(req: NextRequest) {
           .from("students")
           .update({ paid_fee: 0 })
           .eq("school_id", targetSchoolId)
-          .neq("status", "graduated"),
+          .not("status", "in", "(graduated,deleted,withdrawn,archived,transferred)"),
         branchScope.value,
       ).select("id");
 

@@ -285,7 +285,10 @@ async function getGuardRedirect(request: NextRequest): Promise<URL | NextRespons
     // Mobile photo upload — uses token-based auth, no session cookie
     normalizedPath === "/api/web/upload/mobile" ||
     normalizedPath === "/api/web/upload/status" ||
-    normalizedPath === "/api/auth/qr-login";
+    normalizedPath === "/api/auth/qr-login" ||
+    // Anonymous-by-design endpoints (receipt QR verification, account-deletion request, exam photo upload)
+    normalizedPath.startsWith("/api/verify/") ||
+    normalizedPath.startsWith("/api/public/");
 
   if ((!isApiRequest && isPublicPath) || (isApiRequest && isPublicApiPath)) {
     return null;

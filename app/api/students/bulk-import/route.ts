@@ -1,3 +1,5 @@
+import { logRouteError } from "@/lib/route-utils";
+import { toManagedAuthEmail } from "@/lib/managed-users/auth-email";
 import { NextRequest, NextResponse } from "next/server";
 import { buildStudentInsertPayloads, getStudentImportValidationMessage, readStudentImportErrorMessage, studentImportRequestSchema } from "@/lib/api/student-import";
 import { resolveBranchIdForWrite, resolveBranchScope } from "@/lib/branch-scope";
@@ -210,14 +212,15 @@ export async function POST(request: NextRequest) {
         });
 
         const { data: createdUser, error: createAuthError } = await serviceSupabase.auth.admin.createUser({
-          email: loginIdentifier,
+          email: toManagedAuthEmail(loginIdentifier),
           password: temporaryPassword,
           email_confirm: true,
           ...authIdentityPayload,
         });
 
         if (createAuthError || !createdUser.user?.id) {
-          accountsFailed.push({ studentId, reason: createAuthError?.message ?? "فشل إنشاء حساب المصادقة" });
+          logRouteError("students-bulk-import-auth-create", createAuthError, { studentId });
+          accountsFailed.push({ studentId, reason: "فشل إنشاء حساب المصادقة" });
           return;
         }
 

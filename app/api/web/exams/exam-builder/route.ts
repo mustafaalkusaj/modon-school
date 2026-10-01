@@ -127,6 +127,17 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ ok: false, error: "questionIds[] is required" }, { status: 400 });
   }
 
+  // Every question must belong to this school — never link another tenant's questions.
+  const uniqueQuestionIds = Array.from(new Set(questionIds));
+  const { data: ownedQuestions, error: ownedQuestionsError } = await actorSupabase
+    .from("questions")
+    .select("id")
+    .eq("school_id", targetSchoolId)
+    .in("id", uniqueQuestionIds);
+  if (ownedQuestionsError || (ownedQuestions ?? []).length !== uniqueQuestionIds.length) {
+    return NextResponse.json({ ok: false, error: "invalid_question_ids" }, { status: 400 });
+  }
+
   // Delete stale questions from a previous build before inserting the new set.
   await actorSupabase
     .from("exam_questions")

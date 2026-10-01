@@ -51,7 +51,7 @@ export async function POST(
 
   const assignmentRow = assignment as Record<string, unknown> | null;
 
-  if (!assignmentRow || assignmentRow.class_name !== className) {
+  if (!assignmentRow || assignmentRow.class_name !== className || assignmentRow.status !== "active") {
     return NextResponse.json(
       { ok: false, error: "assignment_not_found" },
       { status: 404 },

@@ -1,3 +1,4 @@
+import { logRouteError } from "@/lib/route-utils";
 import { NextRequest, NextResponse } from "next/server";
 
 import { applyBranchScopeToQuery, resolveBranchScope, type ResolvedBranchScope } from "@/lib/branch-scope";
@@ -584,13 +585,16 @@ export async function DELETE(
     return jsonError(context.message, context.status);
   }
 
-  const { serviceSupabase, targetSchoolId, branchScope, actorUserId } = context.value;
+  const { serviceSupabase, targetSchoolId, branchScope, actorUserId, actorRole } = context.value;
   const currentStudent = await fetchStudent(serviceSupabase, studentId, targetSchoolId, branchScope);
   if (!currentStudent) {
     return jsonError("الطالب المطلوب غير موجود ضمن المدرسة الحالية.", 404);
   }
 
   const isHardDelete = forceDelete || currentStudent.status === "deleted";
+  if (isHardDelete && actorRole !== "admin" && actorRole !== "super_admin") {
+    return jsonError("الحذف النهائي للطالب وسجل مدفوعاته متاح للمدير فقط.", 403);
+  }
 
   // Hard delete: audit log first, then soft-delete payments, then remove them
   if (isHardDelete) {
@@ -602,18 +606,26 @@ export async function DELETE(
       timestamp: new Date().toISOString(),
     });
 
-    await serviceSupabase
+    const { error: softDeletePaymentsError } = await serviceSupabase
       .from("payments")
       .update({ deleted_at: new Date().toISOString() })
       .eq("student_id", studentId)
       .eq("school_id", targetSchoolId)
       .is("deleted_at", null);
 
-    await serviceSupabase
+    const { error: deletePaymentsError } = await serviceSupabase
       .from("payments")
       .delete()
       .eq("student_id", studentId)
       .eq("school_id", targetSchoolId);
+
+    if (softDeletePaymentsError || deletePaymentsError) {
+      logRouteError("students-hard-delete-payments", softDeletePaymentsError ?? deletePaymentsError, {
+        studentId,
+        schoolId: targetSchoolId,
+      });
+      return jsonError("تعذر حذف مدفوعات الطالب، لم يتم حذف الطالب.", 500);
+    }
   }
 
   const deleteQuery = isHardDelete

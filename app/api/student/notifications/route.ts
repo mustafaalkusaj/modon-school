@@ -97,7 +97,7 @@ export async function GET(req: NextRequest) {
       .from("app_notifications")
       .select("id, type, title, message, status, created_at")
       .eq("school_id", schoolId)
-      .or(`recipient_user_id.eq.${userId},recipient_role.eq.student`)
+      .or(`recipient_user_id.eq.${userId},and(recipient_user_id.is.null,recipient_role.eq.student)`)
       .order("created_at", { ascending: false })
       .limit(50),
   ]);

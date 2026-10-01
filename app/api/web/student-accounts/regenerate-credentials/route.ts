@@ -1,3 +1,4 @@
+import { toManagedAuthEmail } from "@/lib/managed-users/auth-email";
 import { NextRequest, NextResponse } from "next/server";
 import {
   generateManagedLoginIdentifier,
@@ -78,10 +79,7 @@ export async function POST(request: NextRequest) {
     });
 
     const newPassword = generateTemporaryPassword();
-    const safeId = newLoginIdentifier.replace(/[^\x20-\x7E]/g, "") || `st${newLoginIdentifier.replace(/[^\d]/g, "")}`;
-    const authEmail = newLoginIdentifier.includes("@")
-      ? newLoginIdentifier
-      : `${safeId}@schoolapp.local`;
+    const authEmail = toManagedAuthEmail(newLoginIdentifier);
 
     const { error: authUpdateError } = await serviceSupabase.auth.admin.updateUserById(
       authUserId,

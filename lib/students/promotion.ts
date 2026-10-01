@@ -33,7 +33,7 @@ const ARABIC_VARIANTS: Array<{ level: number; variants: string[] }> = [
   { level: 4, variants: ["الرابع", "رابع"] },
   { level: 3, variants: ["الثالث", "ثالث"] },
   { level: 2, variants: ["الثاني", "ثاني"] },
-  { level: 1, variants: ["الأول", "اول", "أول", "الاول"] },
+  { level: 1, variants: ["الأول", "الاول", "أول", "اول"] },
 ];
 
 const ENGLISH_WORDS: Record<number, string> = {

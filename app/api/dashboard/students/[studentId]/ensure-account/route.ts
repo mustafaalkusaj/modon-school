@@ -1,3 +1,4 @@
+import { toManagedAuthEmail } from "@/lib/managed-users/auth-email";
 import { NextRequest, NextResponse } from "next/server";
 
 import {
@@ -120,8 +121,7 @@ export async function POST(
           cardLastPrintedAt: null,
         },
       });
-      // Supabase Auth requires an email — append @schoolapp.local to simple identifiers
-      const authEmail = loginIdentifier.includes("@") ? loginIdentifier : `${loginIdentifier}@schoolapp.local`;
+      const authEmail = toManagedAuthEmail(loginIdentifier);
       const { data: createdUser, error: createAuthError } = await serviceSupabase.auth.admin.createUser({
         email: authEmail,
         password: temporaryPassword,

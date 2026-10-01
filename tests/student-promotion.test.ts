@@ -46,4 +46,9 @@ describe("student promotion helpers", () => {
       toClassName: "الثاني",
     });
   });
+  it("promotes the hamza-less first grade without corrupting the word", () => {
+    expect(promoteClassName("الصف الاول").nextClassName).toBe("الصف الثاني");
+    expect(promoteClassName("الاول").nextClassName).toBe("الثاني");
+    expect(promoteClassName("الصف الأول").nextClassName).toBe("الصف الثاني");
+  });
 });

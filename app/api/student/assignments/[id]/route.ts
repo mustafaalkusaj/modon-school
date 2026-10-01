@@ -28,7 +28,7 @@ export async function GET(
     );
   }
 
-  if (!assignment) {
+  if (!assignment || (assignment as { status?: string | null }).status !== "active") {
     return NextResponse.json(
       { ok: false, error: "not_found" },
       { status: 404 },

@@ -1,3 +1,4 @@
+import { toManagedAuthEmail } from "@/lib/managed-users/auth-email";
 import { NextRequest, NextResponse } from "next/server";
 
 import { isInfrastructureCompatError, isMissingColumnError, isMissingTableError } from "@/lib/admin-infrastructure";
@@ -1282,8 +1283,7 @@ export async function POST(req: NextRequest) {
         cardLastPrintedAt: null,
       },
     });
-    // Supabase Auth requires a valid email — append @schoolapp.local for simple identifiers
-    const authEmail = loginIdentifier.includes("@") ? loginIdentifier : `${loginIdentifier}@schoolapp.local`;
+    const authEmail = toManagedAuthEmail(loginIdentifier);
     const { data: authData, error: createAuthError } = await serviceSupabase.auth.admin.createUser({
       email: authEmail,
       password: temporaryPassword,

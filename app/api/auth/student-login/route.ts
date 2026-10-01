@@ -1,8 +1,8 @@
+import { resolveManagedSignInEmail } from "@/lib/managed-users/resolve-login-email";
 import { NextRequest, NextResponse } from "next/server";
 
 import { resolveManagedAccountBase } from "@/lib/managed-users/queries";
 import { studentLoginRequestSchema } from "@/lib/api-schemas";
-import { createServiceSupabaseClient } from "@/lib/supabase-server";
 import {
   ACCOUNT_LOGIN_RATE_LIMIT,
   buildAccountRateLimitIdentifier,
@@ -77,23 +77,9 @@ export async function POST(req: NextRequest) {
     }
 
     _step = "resolve_login_identifier";
-    let signInEmail = normalizedEmail || parsed.data.email;
-    if (!signInEmail.includes("@")) {
-      const serviceClient = createServiceSupabaseClient();
-      const { data: credRow } = await serviceClient
-        .from("managed_user_credentials")
-        .select("auth_user_id")
-        .eq("login_identifier", signInEmail)
-        .limit(1)
-        .maybeSingle();
-      if (credRow?.auth_user_id) {
-        const { data: authUser } =
-          await serviceClient.auth.admin.getUserById(credRow.auth_user_id);
-        if (authUser?.user?.email) {
-          signInEmail = authUser.user.email;
-        }
-      }
-    }
+    const signInEmail = await resolveManagedSignInEmail(
+      normalizedEmail || parsed.data.email,
+    );
 
     _step = "supabase_signin";
     const { client: supabase, pendingCookies } =

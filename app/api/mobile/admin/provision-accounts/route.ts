@@ -1,3 +1,4 @@
+import { toManagedAuthEmail } from "@/lib/managed-users/auth-email";
 import { NextRequest, NextResponse } from "next/server";
 
 import { resolveSchoolScopedActorContext } from "@/lib/managed-users/context";
@@ -166,7 +167,7 @@ export async function POST(request: NextRequest) {
           },
         });
 
-        const authEmail = `${loginIdentifier}@schoolapp.local`;
+        const authEmail = toManagedAuthEmail(loginIdentifier);
 
         const { data: authData, error: createAuthError } =
           await serviceSupabase.auth.admin.createUser({
@@ -301,10 +302,8 @@ export async function POST(request: NextRequest) {
           },
         });
 
-        // If teacher has a real email, use that; otherwise use managed format
-        const authEmail = loginIdentifier.includes("@")
-          ? loginIdentifier
-          : `${loginIdentifier}@schoolapp.local`;
+        // Real email stays as-is; managed identifiers become ASCII-safe
+        const authEmail = toManagedAuthEmail(loginIdentifier);
 
         const { data: authData, error: createAuthError } =
           await serviceSupabase.auth.admin.createUser({
