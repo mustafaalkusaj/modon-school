@@ -8,6 +8,7 @@ import {
   createServiceSupabaseClient,
   getRouteAuthenticatedUser,
 } from "@/lib/supabase-server";
+import { logRouteError } from "@/lib/route-utils";
 
 const MAX_MESSAGE_LENGTH = 1000;
 
@@ -88,9 +89,7 @@ export async function POST(request: NextRequest) {
   }
 
   const safePageUrl =
-    typeof page_url === "string"
-      ? page_url.slice(0, 500)
-      : null;
+    typeof page_url === "string" ? page_url.slice(0, 500) : null;
 
   const serviceSupabase = createServiceSupabaseClient();
   const { data: ticket, error: insertError } = await serviceSupabase
@@ -107,7 +106,8 @@ export async function POST(request: NextRequest) {
     .single();
 
   if (insertError) {
-    return jsonError(insertError.message, 500);
+    logRouteError("web-support-tickets", insertError);
+    return jsonError("تعذر إكمال العملية. حاول مرة أخرى لاحقاً.", 500);
   }
 
   // Telegram alert — fire and forget
@@ -123,7 +123,9 @@ export async function POST(request: NextRequest) {
     .filter(Boolean)
     .join("\n");
 
-  sendTelegramMessage(tgMsg).catch(() => { /* fire-and-forget: alert failure must not block the ticket response */ });
+  sendTelegramMessage(tgMsg).catch(() => {
+    /* fire-and-forget: alert failure must not block the ticket response */
+  });
 
   return NextResponse.json(
     { ok: true, id: ticket.id },
@@ -153,12 +155,15 @@ export async function GET(request: NextRequest) {
   const serviceSupabase = createServiceSupabaseClient();
   const { data, error } = await serviceSupabase
     .from("support_tickets")
-    .select("id, created_at, status, school_id, branch_id, user_id, page_url, message, metadata")
+    .select(
+      "id, created_at, status, school_id, branch_id, user_id, page_url, message, metadata",
+    )
     .order("created_at", { ascending: false })
     .limit(limit);
 
   if (error) {
-    return jsonError(error.message, 500);
+    logRouteError("web-support-tickets", error);
+    return jsonError("تعذر إكمال العملية. حاول مرة أخرى لاحقاً.", 500);
   }
 
   return NextResponse.json(

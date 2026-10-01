@@ -8,6 +8,7 @@ import {
   withJsonHeaders,
 } from "@/lib/authorized-api";
 import { formatNumber } from "@/lib/formatting";
+import { useAutoRefresh } from "@/hooks/useAutoRefresh";
 import { AppSidebar } from "@/components/AppSidebar";
 import { AppShellTopbar } from "@/components/AppShellTopbar";
 import { ProtectedRoute } from "@/components/ProtectedRoute";
@@ -436,14 +437,20 @@ export default function AttendancePage() {
   }, [profile?.school_id, schoolScope.selectedSchoolId]);
 
   const fetchAttendanceSnapshot = useCallback(
-    async (dateValue: string) => {
-      setLoadingStudents(true);
-      setLoadingAttendance(true);
-      setError("");
+    async (dateValue: string, options?: { silent?: boolean }) => {
+      // Silent (background) refreshes never flash loading state, never clear the
+      // list on a transient failure, and are skipped by the caller while unsaved.
+      const silent = options?.silent === true;
+      if (!silent) {
+        setLoadingStudents(true);
+        setLoadingAttendance(true);
+        setError("");
+      }
       const scopedSchoolId = await resolveSchoolIdForProfile(profile, {
         selectedSchoolId: schoolScope.selectedSchoolId,
       });
       if (!scopedSchoolId) {
+        if (silent) return;
         setStudents([]);
         setAttendanceDrafts({});
         setHistoryRows([]);
@@ -466,6 +473,7 @@ export default function AttendancePage() {
         );
 
       if (!response.ok || !payload?.ok) {
+        if (silent) return;
         const message = payload?.error?.message || copy.loadStudentsFailed;
         setError(
           `${copy.loadAttendanceFailedPrefix} ${mapAttendanceDbError(message, copy, locale)}`,
@@ -515,6 +523,20 @@ export default function AttendancePage() {
       if (successTimerRef.current) clearTimeout(successTimerRef.current);
     };
   }, []);
+
+  // Keep the roster in sync with other devices, but never replace drafts that the
+  // user is editing or saving (a refresh would discard their unsaved marks).
+  const hasUnsavedDraftsRef = useRef(false);
+  hasUnsavedDraftsRef.current =
+    saving || Object.values(attendanceDrafts).some((draft) => draft.touched);
+
+  useAutoRefresh({
+    enabled: !schoolScope.scopeLoading && !schoolScope.shouldBlockContent,
+    onRefresh: useCallback(() => {
+      if (hasUnsavedDraftsRef.current) return;
+      void fetchAttendanceSnapshot(selectedDate, { silent: true });
+    }, [fetchAttendanceSnapshot, selectedDate]),
+  });
 
   useEffect(() => {
     if (schoolScope.scopeLoading) return;

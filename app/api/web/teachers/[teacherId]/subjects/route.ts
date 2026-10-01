@@ -63,7 +63,7 @@ export async function GET(
   try {
     const { data, error } = await actorSupabase
       .from("teacher_assignments")
-      .select("*, subjects(id, name)")
+      .select("*, subjects(id, name), classes(id, name, grade, section), sections(id, name)")
       .eq("teacher_id", teacherId)
       .eq("is_active", true);
 

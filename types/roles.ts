@@ -408,6 +408,10 @@ export interface RoutePermissionRule {
   requireAll?: boolean;
 }
 
+// Public legal / store-policy pages (privacy, terms, support, account deletion)
+// must be reachable without signing in.
+export const PUBLIC_PATH_PREFIXES = ["/terms", "/privacy", "/support", "/account-deletion"] as const;
+
 export const PUBLIC_PATHS = ["/login", "/student-login", "/qr-login", "/forgot-password", "/access-denied", "/subscription-expired", "/upload", "/api/auth/qr-login"] as const;
 
 export const ROUTE_ACCESS_RULES: RouteAccessRule[] = [

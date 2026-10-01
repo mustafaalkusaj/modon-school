@@ -22,7 +22,10 @@ export async function POST(request: NextRequest) {
   });
   if (rateLimited) return rateLimited;
 
-  const body = (await request.json().catch(() => null)) as Record<string, unknown> | null;
+  const body = (await request.json().catch(() => null)) as Record<
+    string,
+    unknown
+  > | null;
 
   const context = await resolveSchoolScopedActorContext(
     typeof body?.schoolId === "string" ? body.schoolId : null,
@@ -57,7 +60,12 @@ export async function POST(request: NextRequest) {
   );
 
   if (studentsToProvision.length === 0) {
-    return NextResponse.json({ ok: true, created: 0, failed: 0, message: "جميع الطلبة لديهم حسابات بالفعل." });
+    return NextResponse.json({
+      ok: true,
+      created: 0,
+      failed: 0,
+      message: "جميع الطلبة لديهم حسابات بالفعل.",
+    });
   }
 
   let created = 0;
@@ -65,16 +73,23 @@ export async function POST(request: NextRequest) {
 
   const CONCURRENCY = 10;
 
-  const createAccount = async (student: { id: string; full_name: unknown; phone: unknown }) => {
+  const createAccount = async (student: {
+    id: string;
+    full_name: unknown;
+    phone: unknown;
+  }) => {
     const fullName = (student.full_name as string).trim();
     const phone = typeof student.phone === "string" ? student.phone : null;
 
-    const loginIdentifier = await generateManagedLoginIdentifier(actorSupabase, {
-      schoolId: targetSchoolId,
-      role: "student",
-      fullName,
-      preferredEmail: "",
-    });
+    const loginIdentifier = await generateManagedLoginIdentifier(
+      actorSupabase,
+      {
+        schoolId: targetSchoolId,
+        role: "student",
+        fullName,
+        preferredEmail: "",
+      },
+    );
     const temporaryPassword = generateTemporaryPassword();
     const createdAt = new Date().toISOString();
 
@@ -92,17 +107,27 @@ export async function POST(request: NextRequest) {
       },
     });
 
-    const authEmail = loginIdentifier.includes("@") ? loginIdentifier : `${loginIdentifier}@schoolapp.local`;
+    const safeIdentifier =
+      loginIdentifier.replace(/[^\x20-\x7E]/g, "") ||
+      `st${loginIdentifier.replace(/[^\d]/g, "")}`;
+    const authEmail = loginIdentifier.includes("@")
+      ? loginIdentifier
+      : `${safeIdentifier}@schoolapp.local`;
 
-    const { data: createdUser, error: createError } = await serviceSupabase.auth.admin.createUser({
-      email: authEmail,
-      password: temporaryPassword,
-      email_confirm: true,
-      ...authIdentityPayload,
-    });
+    const { data: createdUser, error: createError } =
+      await serviceSupabase.auth.admin.createUser({
+        email: authEmail,
+        password: temporaryPassword,
+        email_confirm: true,
+        ...authIdentityPayload,
+      });
 
     if (createError || !createdUser.user?.id) {
-      failed.push({ studentId: student.id, name: fullName, reason: createError?.message ?? "فشل إنشاء الحساب" });
+      failed.push({
+        studentId: student.id,
+        name: fullName,
+        reason: createError?.message ?? "فشل إنشاء الحساب",
+      });
       return;
     }
 
@@ -116,7 +141,11 @@ export async function POST(request: NextRequest) {
 
     if (linkError) {
       await serviceSupabase.auth.admin.deleteUser(authUserId);
-      failed.push({ studentId: student.id, name: fullName, reason: "فشل ربط الحساب" });
+      failed.push({
+        studentId: student.id,
+        name: fullName,
+        reason: "فشل ربط الحساب",
+      });
       return;
     }
 

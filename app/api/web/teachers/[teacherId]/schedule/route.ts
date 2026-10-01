@@ -23,7 +23,9 @@ export async function GET(
 
   if (!context.ok) {
     return jsonError(
-      "message" in context ? context.message : "تعذر التحقق من صلاحيات المستخدم.",
+      "message" in context
+        ? context.message
+        : "تعذر التحقق من صلاحيات المستخدم.",
       "status" in context ? context.status : 500,
     );
   }
@@ -60,31 +62,48 @@ export async function GET(
       .single();
 
     if (teacherErr || !teacher) {
-      logRouteError("teachers-schedule", teacherErr ?? "teacher not found", { teacherId, schoolId: targetSchoolId });
+      logRouteError("teachers-schedule", teacherErr ?? "teacher not found", {
+        teacherId,
+        schoolId: targetSchoolId,
+      });
       return jsonError("تعذر العثور على المعلم.", 404);
     }
 
-    // Query class_schedules by teacher_name (same table used by main schedule page)
-    const DAY_ORDER = ["sunday", "monday", "tuesday", "wednesday", "thursday", "saturday"];
+    // `class_schedules` stores the teacher as an FK and the day as a smallint
+    // (sunday = 0), so match on teacher_id and translate the day for display.
+    const DAY_NAMES: Record<number, string> = {
+      0: "sunday",
+      1: "monday",
+      2: "tuesday",
+      3: "wednesday",
+      4: "thursday",
+      5: "friday",
+      6: "saturday",
+    };
     const { data, error } = await actorSupabase
       .from("class_schedules")
-      .select("id, day_of_week, period_number, subject, teacher_name, class_name, section")
+      .select(
+        "id, day_of_week, period_number, subject_name, room, class_name, section",
+      )
       .eq("school_id", targetSchoolId)
-      .ilike("teacher_name", teacher.full_name)
+      .eq("teacher_id", teacherId)
       .returns<
         {
           id: string;
-          day_of_week: string;
-          period_number: number;
-          subject: string | null;
-          teacher_name: string | null;
+          day_of_week: number;
+          period_number: number | null;
+          subject_name: string | null;
+          room: string | null;
           class_name: string | null;
           section: string | null;
         }[]
       >();
 
     if (error) {
-      logRouteError("teachers-schedule", error, { teacherId, schoolId: targetSchoolId });
+      logRouteError("teachers-schedule", error, {
+        teacherId,
+        schoolId: targetSchoolId,
+      });
       return jsonError("تعذر تحميل الجدول الدراسي.", 500);
     }
 
@@ -99,21 +118,29 @@ export async function GET(
 
     const schedule = (data ?? [])
       .sort((a, b) => {
-        const dayDiff = DAY_ORDER.indexOf(a.day_of_week) - DAY_ORDER.indexOf(b.day_of_week);
-        return dayDiff !== 0 ? dayDiff : (a.period_number - b.period_number);
+        const dayDiff = a.day_of_week - b.day_of_week;
+        return dayDiff !== 0
+          ? dayDiff
+          : (a.period_number ?? 0) - (b.period_number ?? 0);
       })
-      .map((row) => ({
-        id: row.id,
-        day: DAY_KEY_MAP[row.day_of_week] ?? row.day_of_week,
-        period: row.period_number,
-        subject: row.subject ?? null,
-        class: row.class_name ?? null,
-        section: row.section ?? null,
-        room: null,
-      }));
+      .map((row) => {
+        const dayName = DAY_NAMES[row.day_of_week] ?? "";
+        return {
+          id: row.id,
+          day: DAY_KEY_MAP[dayName] ?? dayName,
+          period: row.period_number,
+          subject: row.subject_name ?? null,
+          class: row.class_name ?? null,
+          section: row.section ?? null,
+          room: row.room ?? null,
+        };
+      });
     return NextResponse.json({ ok: true, schedule });
   } catch (error) {
-    logRouteError("teachers-schedule", error, { teacherId, schoolId: targetSchoolId });
+    logRouteError("teachers-schedule", error, {
+      teacherId,
+      schoolId: targetSchoolId,
+    });
     return jsonError("تعذر تحميل الجدول الدراسي.", 500);
   }
 }

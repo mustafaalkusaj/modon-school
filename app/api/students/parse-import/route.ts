@@ -12,6 +12,9 @@ function jsonError(message: string, status: number) {
   return NextResponse.json({ error: { message } }, { status });
 }
 
+/** Hard cap on the uploaded workbook before it is handed to the XLSX parser. */
+const MAX_IMPORT_FILE_BYTES = 5 * 1024 * 1024;
+
 export async function POST(request: NextRequest) {
   const rateLimited = await enforceRateLimit(request, {
     namespace: "students-parse-import",
@@ -24,7 +27,8 @@ export async function POST(request: NextRequest) {
 
   try {
     const actorContext = await resolveSchoolScopedActorContext(
-      request.nextUrl.searchParams.get("school") ?? request.nextUrl.searchParams.get("schoolId"),
+      request.nextUrl.searchParams.get("school") ??
+        request.nextUrl.searchParams.get("schoolId"),
       {
         allowedRoles: ["admin", "super_admin"],
         roleDeniedMessage: "استيراد الطلاب متاح لمدير المدرسة فقط.",
@@ -37,7 +41,8 @@ export async function POST(request: NextRequest) {
     }
 
     const requestedBranchId =
-      request.nextUrl.searchParams.get("branchId") ?? request.nextUrl.searchParams.get("branch_id");
+      request.nextUrl.searchParams.get("branchId") ??
+      request.nextUrl.searchParams.get("branch_id");
     const branchScope = resolveBranchScope(
       actorContext.value,
       requestedBranchId,
@@ -59,15 +64,33 @@ export async function POST(request: NextRequest) {
       return jsonError("الملف يجب أن يكون Excel (.xlsx, .xls) أو CSV", 400);
     }
 
+    // Cap the upload before it ever reaches the spreadsheet parser — a large
+    // workbook expands enormously in memory while parsing.
+    if (file.size > MAX_IMPORT_FILE_BYTES) {
+      return jsonError(
+        "حجم الملف يتجاوز الحد الأقصى المسموح (5 ميغابايت).",
+        413,
+      );
+    }
+
     // Parse Excel file — use raw array mode to support files with title rows above headers
     const XLSX = await loadXLSX();
     const buffer = await file.arrayBuffer();
+    if (buffer.byteLength > MAX_IMPORT_FILE_BYTES) {
+      return jsonError(
+        "حجم الملف يتجاوز الحد الأقصى المسموح (5 ميغابايت).",
+        413,
+      );
+    }
     const wb = await XLSX.read(buffer, { type: "array" });
     const ws = wb.Sheets[wb.SheetNames[0]];
 
     // Get raw rows as arrays so we can find the real header row regardless of its position
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const rawRows = (XLSX.utils.sheet_to_json as any)(ws, { header: 1, defval: "" }) as unknown[][];
+    const rawRows = (XLSX.utils.sheet_to_json as any)(ws, {
+      header: 1,
+      defval: "",
+    }) as unknown[][];
 
     if (rawRows.length === 0) {
       return jsonError("الملف فارغ أو لا يحتوي على بيانات", 400);
@@ -75,19 +98,26 @@ export async function POST(request: NextRequest) {
 
     // Find header row: first row that has at least 2 recognizable column aliases
     // (search first 15 rows to handle files with title/logo rows at top)
-    const { findColumnIndex: _findCol, COLUMN_ALIASES } = await import("@/lib/students/import-engine");
+    const { findColumnIndex: _findCol, COLUMN_ALIASES } =
+      await import("@/lib/students/import-engine");
     const requiredFields = ["fullName", "className"] as const;
 
     let headerRowIdx = 0;
     for (let i = 0; i < Math.min(15, rawRows.length); i++) {
-      const rowCells = (rawRows[i] as unknown[]).map((v) => String(v ?? "").trim());
+      const rowCells = (rawRows[i] as unknown[]).map((v) =>
+        String(v ?? "").trim(),
+      );
       const matchCount = requiredFields.filter((field) =>
         rowCells.some((cell) => {
           const aliases = COLUMN_ALIASES[field] ?? [];
           const cellNorm = cell.toLowerCase();
-          return aliases.some((alias) => cellNorm === alias.toLowerCase() ||
-            cellNorm.replace(/\s+/g, "") === alias.toLowerCase().replace(/\s+/g, ""));
-        })
+          return aliases.some(
+            (alias) =>
+              cellNorm === alias.toLowerCase() ||
+              cellNorm.replace(/\s+/g, "") ===
+                alias.toLowerCase().replace(/\s+/g, ""),
+          );
+        }),
       ).length;
       if (matchCount >= 2) {
         headerRowIdx = i;
@@ -96,7 +126,9 @@ export async function POST(request: NextRequest) {
     }
 
     // Build header→column map from detected header row
-    const headerCells = (rawRows[headerRowIdx] as unknown[]).map((v) => String(v ?? "").trim());
+    const headerCells = (rawRows[headerRowIdx] as unknown[]).map((v) =>
+      String(v ?? "").trim(),
+    );
 
     // Convert raw rows to objects using detected headers
     const rows = rawRows.slice(headerRowIdx).map((rawRow) => {
@@ -115,7 +147,11 @@ export async function POST(request: NextRequest) {
     // Load classes for current school/branch
     const { targetSchoolId } = actorContext.value;
     const adminSupabase = createServiceSupabaseClient();
-    const classesHasBranchScope = await tableHasColumn(adminSupabase, "classes", "branch_id").catch(() => false);
+    const classesHasBranchScope = await tableHasColumn(
+      adminSupabase,
+      "classes",
+      "branch_id",
+    ).catch(() => false);
 
     let classesQuery = adminSupabase
       .from("classes")
@@ -140,29 +176,29 @@ export async function POST(request: NextRequest) {
 
     const classes = Array.isArray(classesData)
       ? classesData
-          .map((classRow: any) => {
+          .map((classRow) => {
             let parsedSections: Array<{ id: string; name: string }> = [];
-            const sectionRaw = classRow.section;
+            const sectionRaw: unknown = classRow.section;
             if (sectionRaw) {
-              if (typeof sectionRaw === 'string') {
+              if (typeof sectionRaw === "string") {
                 try {
                   const parsed = JSON.parse(sectionRaw);
                   if (Array.isArray(parsed)) {
-                    parsedSections = parsed.map((s: any, i: number) => ({
+                    parsedSections = parsed.map((s, i: number) => ({
                       id: s.id || s.name || String(i),
-                      name: s.name || String(s)
+                      name: s.name || String(s),
                     }));
                   }
                 } catch {
-                  parsedSections = sectionRaw.split(',').map((s, i) => ({
+                  parsedSections = sectionRaw.split(",").map((s, i) => ({
                     id: `${classRow.id}_${i}`,
-                    name: s.trim()
+                    name: s.trim(),
                   }));
                 }
               } else if (Array.isArray(sectionRaw)) {
                 parsedSections = sectionRaw.map((s: any, i: number) => ({
                   id: s.id || s.name || String(i),
-                  name: s.name || String(s)
+                  name: s.name || String(s),
                 }));
               }
             }
@@ -173,8 +209,8 @@ export async function POST(request: NextRequest) {
             return {
               id: classRow.id,
               nameAr: displayName,
-              nameEn: `Grade ${classRow.grade || ''}`,
-              gradeLevel: classRow.grade || 0,
+              nameEn: `Grade ${classRow.grade || ""}`,
+              gradeLevel: Number(classRow.grade || 0),
               schoolId: classRow.school_id || targetSchoolId,
               branchId: classRow.branch_id || branchScope.value.branchId || "",
               academicYearId: undefined,
@@ -183,11 +219,19 @@ export async function POST(request: NextRequest) {
               sectionsCount: parsedSections.length,
             };
           })
-          .sort((left, right) => String(left.nameAr || "").localeCompare(String(right.nameAr || ""), "ar"))
+          .sort((left, right) =>
+            String(left.nameAr || "").localeCompare(
+              String(right.nameAr || ""),
+              "ar",
+            ),
+          )
       : [];
 
     const classIds = classes.map((cls) => cls.id);
-    let sectionsByClassId = new Map<string, Array<{ id: string; name: string }>>();
+    let sectionsByClassId = new Map<
+      string,
+      Array<{ id: string; name: string }>
+    >();
     if (classIds.length > 0) {
       const { data: sectionsData, error: sectionsError } = await adminSupabase
         .from("sections")
@@ -215,7 +259,8 @@ export async function POST(request: NextRequest) {
       return {
         ...cls,
         sections: dbSections.length > 0 ? dbSections : cls.sections,
-        sectionsCount: dbSections.length > 0 ? dbSections.length : cls.sections.length,
+        sectionsCount:
+          dbSections.length > 0 ? dbSections.length : cls.sections.length,
       };
     });
 
@@ -230,7 +275,7 @@ export async function POST(request: NextRequest) {
     );
 
     // Prepare response — return all errors so the client can show them fully
-    const invalidRowsPreview = preview.invalidRows.map(row => ({
+    const invalidRowsPreview = preview.invalidRows.map((row) => ({
       rowNumber: row.rowIndex,
       errors: row.errors,
     }));
@@ -257,6 +302,9 @@ export async function POST(request: NextRequest) {
     });
   } catch (error) {
     console.error("[ParseImport] Error:", error);
-    return jsonError(readStudentImportErrorMessage(error, "تعذر تحليل الملف"), 500);
+    return jsonError(
+      readStudentImportErrorMessage(error, "تعذر تحليل الملف"),
+      500,
+    );
   }
 }

@@ -6,6 +6,7 @@ import { getCacheHeaders, CACHE_STRATEGIES } from "@/lib/cache-strategies"; // �
 import { invalidateSchoolCacheDomains } from "@/lib/server-cache";
 import { fetchBudgetSummaries } from "@/lib/school-manager/budget-summary";
 import { assertBranchBelongsToUserContext } from "@/lib/branch-validation";
+import { jsonServerError } from "@/lib/route-utils";
 
 function jsonError(message: string, status: number) {
   return NextResponse.json({ error: { message } }, { status });
@@ -50,7 +51,10 @@ export async function GET(req: NextRequest) {
   }
 
   try {
-    const { current, next } = await fetchBudgetSummaries(actorSupabase, targetSchoolId);
+    const { current, next } = await fetchBudgetSummaries(
+      actorSupabase,
+      targetSchoolId,
+    );
 
     return NextResponse.json(
       {
@@ -115,7 +119,11 @@ export async function POST(req: NextRequest) {
     }>;
   };
 
-  if (typeof fiscal_year !== "number" || fiscal_year < 2020 || fiscal_year > 2100) {
+  if (
+    typeof fiscal_year !== "number" ||
+    fiscal_year < 2020 ||
+    fiscal_year > 2100
+  ) {
     return jsonError("السنة المالية غير صحيحة.", 400);
   }
 
@@ -156,13 +164,19 @@ export async function POST(req: NextRequest) {
       try {
         for (const item of items) {
           if (item.branch_id) {
-            assertBranchBelongsToUserContext(item.branch_id, context.value, "item.branch_id");
+            assertBranchBelongsToUserContext(
+              item.branch_id,
+              context.value,
+              "item.branch_id",
+            );
           }
         }
       } catch (validationError) {
-        return jsonError(
-          validationError instanceof Error ? validationError.message : "Invalid branch_id in budget items.",
-          403
+        return jsonServerError(
+          "web-dashboard-budgets",
+          validationError,
+          "Invalid branch_id in budget items.",
+          403,
         );
       }
 
@@ -192,7 +206,11 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    invalidateSchoolCacheDomains(targetSchoolId, ["dashboard-budgets", "dashboard-overview", "reports-overview"]);
+    invalidateSchoolCacheDomains(targetSchoolId, [
+      "dashboard-budgets",
+      "dashboard-overview",
+      "reports-overview",
+    ]);
 
     return NextResponse.json({
       ok: true,

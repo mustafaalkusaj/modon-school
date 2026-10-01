@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 
 import { resolveSuperAdminActorContext } from "@/lib/super-admin-server";
 import { createServiceSupabaseClient } from "@/lib/supabase-server";
+import { jsonServerError } from "@/lib/route-utils";
+import { excludeDeletedStudents } from "@/lib/students/soft-delete";
 
 const ENDPOINT = "GET /api/web/mobile-app/overview";
 
@@ -10,10 +12,14 @@ function jsonError(message: string, status: number) {
 }
 
 export async function GET(request: NextRequest) {
-  const context = await resolveSuperAdminActorContext(request.headers.get("authorization"));
+  const context = await resolveSuperAdminActorContext(
+    request.headers.get("authorization"),
+  );
   if (!context.ok) {
     return jsonError(
-      "message" in context ? context.message : "تعذر التحقق من صلاحيات المستخدم.",
+      "message" in context
+        ? context.message
+        : "تعذر التحقق من صلاحيات المستخدم.",
       "status" in context ? context.status : 500,
     );
   }
@@ -30,7 +36,12 @@ export async function GET(request: NextRequest) {
       .eq("is_active", true);
 
     if (subsError) {
-      return jsonError(`تعذر تحميل اشتراكات الأجهزة: ${subsError.message}`, 500);
+      return jsonServerError(
+        "web-mobile-app-overview",
+        subsError,
+        "تعذر تحميل اشتراكات الأجهزة",
+        500,
+      );
     }
 
     const subs = (subsData ?? []) as Array<{
@@ -68,24 +79,41 @@ export async function GET(request: NextRequest) {
         .from("schools")
         .select("id, name")
         .in("id", schoolIds);
-      for (const row of (schoolsData ?? []) as Array<{ id: string; name: string | null }>) {
+      for (const row of (schoolsData ?? []) as Array<{
+        id: string;
+        name: string | null;
+      }>) {
         schoolNames[row.id] = row.name ?? row.id;
       }
     }
 
     const bySchool = schoolIds
-      .map((id) => ({ school_id: id, school_name: schoolNames[id] ?? id, devices: bySchoolCount[id] }))
+      .map((id) => ({
+        school_id: id,
+        school_name: schoolNames[id] ?? id,
+        devices: bySchoolCount[id],
+      }))
       .sort((a, b) => b.devices - a.devices);
 
     // Breakdown by role: classify the active users via students/teachers/users.
     // We count distinct auth-linked accounts that own an active device.
     const userIdList = Array.from(activeUserIds);
-    const byRole: Record<string, number> = { student: 0, teacher: 0, staff: 0, unknown: 0 };
+    const byRole: Record<string, number> = {
+      student: 0,
+      teacher: 0,
+      staff: 0,
+      unknown: 0,
+    };
 
     if (userIdList.length > 0) {
       const [studentsRes, teachersRes, usersRes] = await Promise.all([
-        supabase.from("students").select("auth_user_id").in("auth_user_id", userIdList),
-        supabase.from("teachers").select("auth_user_id").in("auth_user_id", userIdList),
+        excludeDeletedStudents(
+          supabase.from("students").select("auth_user_id"),
+        ).in("auth_user_id", userIdList),
+        supabase
+          .from("teachers")
+          .select("auth_user_id")
+          .in("auth_user_id", userIdList),
         supabase.from("users").select("id, role").in("id", userIdList),
       ]);
 
@@ -100,7 +128,10 @@ export async function GET(request: NextRequest) {
           .filter(Boolean),
       );
       const staffById = new Map<string, string>();
-      for (const r of (usersRes.data ?? []) as Array<{ id?: string; role?: string | null }>) {
+      for (const r of (usersRes.data ?? []) as Array<{
+        id?: string;
+        role?: string | null;
+      }>) {
         const id = (r.id ?? "").trim();
         if (id) staffById.set(id, (r.role ?? "staff").trim() || "staff");
       }
@@ -123,7 +154,9 @@ export async function GET(request: NextRequest) {
         .not("app_last_login", "is", null)
         .order("app_last_login", { ascending: false })
         .limit(1);
-      const row = (loginData ?? [])[0] as { app_last_login: string | null } | undefined;
+      const row = (loginData ?? [])[0] as
+        | { app_last_login: string | null }
+        | undefined;
       lastTeacherLogin = row?.app_last_login ?? null;
     } catch {
       lastTeacherLogin = null;

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { resolveStudentContext, unauthorized } from "@/lib/student-api";
+import { jsonServerError } from "@/lib/route-utils";
 
 export async function GET(
   req: NextRequest,
@@ -22,10 +23,7 @@ export async function GET(
     .maybeSingle();
 
   if (aErr) {
-    return NextResponse.json(
-      { ok: false, error: aErr.message },
-      { status: 500 },
-    );
+    return jsonServerError("student/assignments/[id]", aErr, "تعذر إتمام العملية. حاول مرة أخرى.");
   }
 
   if (!assignment) {

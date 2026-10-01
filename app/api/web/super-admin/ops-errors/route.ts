@@ -7,6 +7,7 @@ import {
   type OpsErrorStatus,
   type OpsErrorSeverity,
 } from "@/lib/ops/error-capture";
+import { logRouteError } from "@/lib/route-utils";
 
 const VALID_STATUSES = new Set<OpsErrorStatus>([
   "open",
@@ -57,16 +58,16 @@ export async function GET(req: NextRequest) {
   try {
     const errors = await getRecentOpsErrors({ limit, status, severity });
     // Strip fix_prompt and safe_stack from list — fetch per-error on demand
-    const safe = errors.map(({ fix_prompt: _fp, safe_stack: _ss, ...rest }) => rest);
+    const safe = errors.map(
+      ({ fix_prompt: _fp, safe_stack: _ss, ...rest }) => rest,
+    );
     return NextResponse.json(
       { ok: true, errors: safe, count: safe.length },
       { headers: { "Cache-Control": "no-store" } },
     );
   } catch (err) {
-    return jsonError(
-      err instanceof Error ? err.message : "unknown",
-      500,
-    );
+    logRouteError("web-super-admin-ops-errors", err);
+    return jsonError("unknown", 500);
   }
 }
 
@@ -109,6 +110,7 @@ export async function PATCH(req: NextRequest) {
       { headers: { "Cache-Control": "no-store" } },
     );
   } catch (err) {
-    return jsonError(err instanceof Error ? err.message : "unknown", 500);
+    logRouteError("web-super-admin-ops-errors", err);
+    return jsonError("unknown", 500);
   }
 }

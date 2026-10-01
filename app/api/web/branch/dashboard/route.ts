@@ -1,15 +1,22 @@
 import { NextRequest, NextResponse } from "next/server";
-import { applyBranchScopeToQuery, resolveBranchScope } from "@/lib/branch-scope";
+import {
+  applyBranchScopeToQuery,
+  resolveBranchScope,
+} from "@/lib/branch-scope";
 import { resolveSchoolScopedActorContext } from "@/lib/managed-users-server";
 import { jsonError } from "@/lib/route-utils";
 import { getRecentAuditLogs } from "@/lib/audit/audit-log";
+import { excludeDeletedStudents } from "@/lib/students/soft-delete";
 
 export async function GET(req: NextRequest) {
   const schoolId = req.nextUrl.searchParams.get("schoolId");
 
   const context = await resolveSchoolScopedActorContext(
     schoolId,
-    { allowedRoles: ["super_admin", "admin", "employee"], roleDeniedMessage: "غير مصرح بالوصول لبيانات الفرع." },
+    {
+      allowedRoles: ["super_admin", "admin", "employee"],
+      roleDeniedMessage: "غير مصرح بالوصول لبيانات الفرع.",
+    },
     req.headers.get("authorization"),
   );
   if (!context.ok) {
@@ -22,65 +29,81 @@ export async function GET(req: NextRequest) {
   const { targetSchoolId, actorBranchId, actorSupabase } = context.value;
   const requestedBranchId = req.nextUrl.searchParams.get("branchId");
   const branchScope = resolveBranchScope(context.value, requestedBranchId);
-  if (!branchScope.ok) return jsonError(branchScope.message, branchScope.status);
+  if (!branchScope.ok)
+    return jsonError(branchScope.message, branchScope.status);
 
   const effectiveBranchId = branchScope.value.branchId ?? actorBranchId;
   const db = actorSupabase;
 
   // ── Parallel fetches ─────────────────────────────────────────────────────
 
-  const [teachersResult, studentsResult, paymentsResult, expensesResult, classesResult] =
-    await Promise.all([
-      // Teachers for this branch
-      applyBranchScopeToQuery(
-        db
-          .from("teachers")
-          .select("id, full_name, subject, salary_type, app_status, hire_date, contract_type"),
-        branchScope.value,
-      )
+  const [
+    teachersResult,
+    studentsResult,
+    paymentsResult,
+    expensesResult,
+    classesResult,
+  ] = await Promise.all([
+    // Teachers for this branch
+    applyBranchScopeToQuery(
+      db
+        .from("teachers")
+        .select(
+          "id, full_name, subject, salary_type, app_status, hire_date, contract_type",
+        ),
+      branchScope.value,
+    )
+      .eq("school_id", targetSchoolId)
+      .neq("status", "deleted"),
+
+    // Students counts by status
+    applyBranchScopeToQuery(
+      excludeDeletedStudents(db.from("students").select("status")),
+      branchScope.value,
+    )
+      .eq("school_id", targetSchoolId)
+      .neq("status", "deleted"),
+
+    // Recent payments
+    (() => {
+      let q = db
+        .from("payments")
+        .select(
+          "id, amount, created_at, student_id, students(full_name, class_name)",
+        )
         .eq("school_id", targetSchoolId)
-        .neq("status", "deleted"),
+        .order("created_at", { ascending: false })
+        .limit(10);
+      if (effectiveBranchId) q = q.eq("branch_id", effectiveBranchId);
+      return q;
+    })(),
 
-      // Students counts by status
-      applyBranchScopeToQuery(
-        db.from("students").select("status"),
-        branchScope.value,
-      ).eq("school_id", targetSchoolId).neq("status", "deleted"),
-
-      // Recent payments
-      (() => {
-        let q = db
-          .from("payments")
-          .select("id, amount, created_at, student_id, students(full_name, class_name)")
-          .eq("school_id", targetSchoolId)
-          .order("created_at", { ascending: false })
-          .limit(10);
-        if (effectiveBranchId) q = q.eq("branch_id", effectiveBranchId);
-        return q;
-      })(),
-
-      // Expenses this month
-      (() => {
-        const now = new Date();
-        const monthStart = new Date(now.getFullYear(), now.getMonth(), 1).toISOString();
-        let q = db
-          .from("expenses")
-          .select("amount")
-          .eq("school_id", targetSchoolId)
-          .gte("created_at", monthStart);
-        if (effectiveBranchId) q = q.eq("branch_id", effectiveBranchId);
-        return q;
-      })(),
-
-      // Classes (branch-scoped)
-      applyBranchScopeToQuery(
-        db.from("classes").select("id, name, grade, section"),
-        branchScope.value,
-      )
+    // Expenses this month
+    (() => {
+      const now = new Date();
+      const monthStart = new Date(
+        now.getFullYear(),
+        now.getMonth(),
+        1,
+      ).toISOString();
+      let q = db
+        .from("expenses")
+        .select("amount")
         .eq("school_id", targetSchoolId)
-        .order("grade")
-        .order("name"),
-    ]);
+        .gte("created_at", monthStart);
+      if (effectiveBranchId) q = q.eq("branch_id", effectiveBranchId);
+      return q;
+    })(),
+
+    // Classes (branch-scoped)
+    applyBranchScopeToQuery(
+      db.from("classes").select("id, name, grade, section"),
+      branchScope.value,
+    )
+      .eq("school_id", targetSchoolId)
+      .order("grade")
+      .order("name"),
+  ]);
 
   // ── Process teachers by subject ──────────────────────────────────────────
 
@@ -124,15 +147,18 @@ export async function GET(req: NextRequest) {
   type StudentRow = { status: string | null };
   const students = (studentsResult.data ?? []) as StudentRow[];
   const ACTIVE_STATUSES = ["active", "graduated", "suspended", "withdrawn"];
-  const activeCount = students.filter((s) => ACTIVE_STATUSES.includes(s.status ?? "")).length;
-  const transferredCount = students.filter((s) => s.status === "transferred").length;
+  const activeCount = students.filter((s) =>
+    ACTIVE_STATUSES.includes(s.status ?? ""),
+  ).length;
+  const transferredCount = students.filter(
+    (s) => s.status === "transferred",
+  ).length;
 
   // ── Process finance ──────────────────────────────────────────────────────
 
-  const expensesThisMonth = ((expensesResult.data ?? []) as { amount: number }[]).reduce(
-    (sum, e) => sum + (e.amount ?? 0),
-    0,
-  );
+  const expensesThisMonth = (
+    (expensesResult.data ?? []) as { amount: number }[]
+  ).reduce((sum, e) => sum + (e.amount ?? 0), 0);
 
   // ── Process recent payments ──────────────────────────────────────────────
 
@@ -143,7 +169,9 @@ export async function GET(req: NextRequest) {
     student_id: string | null;
     students: { full_name: string | null; class_name: string | null } | null;
   };
-  const recentPayments = ((paymentsResult.data ?? []) as unknown as PaymentRow[]).map((p) => ({
+  const recentPayments = (
+    (paymentsResult.data ?? []) as unknown as PaymentRow[]
+  ).map((p) => ({
     id: p.id,
     amount: p.amount ?? 0,
     created_at: p.created_at,
@@ -153,12 +181,18 @@ export async function GET(req: NextRequest) {
 
   // ── Process classes ──────────────────────────────────────────────────────
 
-  type ClassRow = { id: string; name: string | null; grade: number | null; section: string | null };
+  type ClassRow = {
+    id: string;
+    name: string | null;
+    grade: number | null;
+    section: string | null;
+  };
   const classes = (classesResult.data ?? []) as unknown as ClassRow[];
 
   const classesList = classes.map((c) => ({
     id: c.id,
-    name: c.name ?? `الصف ${c.grade ?? ""}${c.section ? ` - ${c.section}` : ""}`,
+    name:
+      c.name ?? `الصف ${c.grade ?? ""}${c.section ? ` - ${c.section}` : ""}`,
     grade: c.grade,
     section: c.section,
   }));
@@ -167,10 +201,16 @@ export async function GET(req: NextRequest) {
 
   // Fetch by branch_id first; fall back to school_id (many logs don't carry branch_id)
   let activityLogs = effectiveBranchId
-    ? await getRecentAuditLogs({ branch_id: effectiveBranchId, limit: 30 }).catch(() => [])
+    ? await getRecentAuditLogs({
+        branch_id: effectiveBranchId,
+        limit: 30,
+      }).catch(() => [])
     : [];
   if (activityLogs.length === 0) {
-    activityLogs = await getRecentAuditLogs({ school_id: targetSchoolId, limit: 30 }).catch(() => []);
+    activityLogs = await getRecentAuditLogs({
+      school_id: targetSchoolId,
+      limit: 30,
+    }).catch(() => []);
   }
 
   // ── Response ─────────────────────────────────────────────────────────────

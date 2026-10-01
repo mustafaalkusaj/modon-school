@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 
 import { resolveAdminMobileRouteContext } from "@/lib/mobile-admin-server";
+import { excludeDeletedStudents } from "@/lib/students/soft-delete";
 
 export async function GET(req: NextRequest) {
   try {
@@ -69,14 +70,13 @@ export async function GET(req: NextRequest) {
     }
 
     // Fallback: query students table directly
-    let studentsQuery = serviceSupabase
+    let studentsQuery = excludeDeletedStudents(serviceSupabase
       .from("students")
       .select(
         "id, full_name, class_name, section, total_fee, paid_fee, remaining_fee",
         { count: "exact" },
-      )
+      ))
       .eq("school_id", schoolId)
-      .is("deleted_at", null)
       .order("remaining_fee", { ascending: false })
       .range(from, to);
 
@@ -175,12 +175,11 @@ export async function POST(req: NextRequest) {
     }
 
     // The service client bypasses RLS: confirm the student is in this school.
-    const { data: student, error: studentError } = await serviceSupabase
+    const { data: student, error: studentError } = await excludeDeletedStudents(serviceSupabase
       .from("students")
-      .select("id, branch_id")
+      .select("id, branch_id"))
       .eq("id", studentId)
       .eq("school_id", schoolId)
-      .is("deleted_at", null)
       .maybeSingle();
 
     if (studentError || !student?.id) {

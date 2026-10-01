@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { resolveSchoolScopedActorContext } from "@/lib/managed-users-server";
+import { jsonServerError } from "@/lib/route-utils";
 
 export const dynamic = "force-dynamic";
 
@@ -102,7 +103,7 @@ export async function POST(
       );
     }
 
-    await actorSupabase
+    const { error: gradeError } = await actorSupabase
       .from("student_answers")
       .update({
         marks_awarded: marksAwarded,
@@ -110,13 +111,29 @@ export async function POST(
       })
       .eq("attempt_id", body.attemptId)
       .eq("question_id", grade.questionId);
+
+    if (gradeError) {
+      return jsonServerError(
+        "web/exams/[examId]/grade",
+        gradeError,
+        "تعذر حفظ إحدى الدرجات؛ لم تُغلق المحاولة.",
+      );
+    }
   }
 
   // Recalculate total score
-  const { data: allAnswers } = await actorSupabase
+  const { data: allAnswers, error: answersError } = await actorSupabase
     .from("student_answers")
     .select("marks_awarded")
     .eq("attempt_id", body.attemptId);
+
+  if (answersError) {
+    return jsonServerError(
+      "web/exams/[examId]/grade",
+      answersError,
+      "تعذر احتساب الدرجة النهائية.",
+    );
+  }
 
   const totalScore = (allAnswers ?? []).reduce(
     (sum: number, a: { marks_awarded: unknown }) => sum + (Number(a.marks_awarded) || 0),
@@ -135,7 +152,7 @@ export async function POST(
     .eq("id", body.attemptId);
 
   if (updateError) {
-    return NextResponse.json({ ok: false, error: updateError.message }, { status: 500 });
+    return jsonServerError("web/exams/[examId]/grade", updateError, "تعذر إتمام العملية. حاول مرة أخرى.");
   }
 
   return NextResponse.json({

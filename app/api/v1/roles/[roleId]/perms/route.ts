@@ -3,7 +3,10 @@ import { z } from "zod";
 import { resolveSchoolScopedActorContext } from "@/lib/managed-users-server";
 import { createServiceSupabaseClient } from "@/lib/supabase-server";
 import { loadDeepPermissionsForUser } from "@/lib/authorization/deep-permissions";
-import { effectivePermissionKeys, isSuperAdminOnlyPermissionKey } from "@/lib/authorization/permission-ceiling";
+import {
+  effectivePermissionKeys,
+  isSuperAdminOnlyPermissionKey,
+} from "@/lib/authorization/permission-ceiling";
 import { jsonError } from "@/lib/route-utils";
 
 const updatePermsSchema = z.object({
@@ -22,7 +25,10 @@ export async function PUT(
     req.headers.get("authorization"),
   );
   if (!context.ok) {
-    return jsonError("message" in context ? context.message : "غير مصرح", "status" in context ? context.status : 403);
+    return jsonError(
+      "message" in context ? context.message : "غير مصرح",
+      "status" in context ? context.status : 403,
+    );
   }
 
   const body = await req.json().catch(() => null);
@@ -35,12 +41,16 @@ export async function PUT(
   // Verify role belongs to this school
   const { data: role } = await service
     .from("school_roles")
-    .select("id")
+    .select("id, is_system")
     .eq("id", roleId)
     .eq("school_id", targetSchoolId)
     .maybeSingle();
 
   if (!role) return jsonError("الدور غير موجود", 404);
+  // System roles carry fixed permission sets; rewriting them would let a
+  // tenant admin escalate a built-in role for everyone assigned to it.
+  if (role.is_system)
+    return jsonError("لا يمكن تعديل صلاحيات الأدوار الافتراضية للنظام", 403);
 
   const requestedIds = Array.from(new Set(parsed.data.permissionIds));
   const isSuperAdmin = context.value.actorRole === "super_admin";
@@ -55,7 +65,9 @@ export async function PUT(
 
     if (defsError) return jsonError("تعذر التحقق من الصلاحيات", 500);
 
-    const defById = new Map((defs ?? []).map((d) => [d.id as string, d.key as string]));
+    const defById = new Map(
+      (defs ?? []).map((d) => [d.id as string, d.key as string]),
+    );
     if (defById.size !== requestedIds.length) {
       return jsonError("صلاحية غير معروفة ضمن الطلب", 400);
     }

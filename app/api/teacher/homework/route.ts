@@ -7,6 +7,7 @@ import {
 } from "@/lib/academic-records-server";
 import { resolveTeacherHomeworkContext } from "@/lib/homework-web-server";
 import { enforceRateLimit } from "@/lib/rate-limit";
+import { jsonServerError } from "@/lib/route-utils";
 
 /** GET — the current teacher's own homework list. */
 export async function GET(req: NextRequest) {
@@ -27,7 +28,7 @@ export async function GET(req: NextRequest) {
     .order("created_at", { ascending: false });
 
   if (error) {
-    return NextResponse.json({ ok: false, error: error.message }, { status: 500 });
+    return jsonServerError("teacher/homework", error, "تعذر إتمام العملية. حاول مرة أخرى.");
   }
 
   const rows = (data ?? []) as Record<string, unknown>[];

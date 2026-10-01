@@ -1,10 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
 
-import { applyBranchScopeToQuery, resolveBranchScope } from "@/lib/branch-scope";
+import {
+  applyBranchScopeToQuery,
+  resolveBranchScope,
+} from "@/lib/branch-scope";
 import { resolveSchoolScopedActorContext } from "@/lib/managed-users-server";
 import { enforceRateLimit } from "@/lib/rate-limit";
 import { routeUserHasPermission } from "@/lib/route-permissions";
+import { jsonServerError } from "@/lib/route-utils";
 import { addDaysBaghdadIso, todayBaghdadIso } from "@/lib/tz";
+import { excludeDeletedStudents } from "@/lib/students/soft-delete";
 
 type AttendanceStatus = "present" | "absent" | "late" | "excused";
 type AttendanceStatusFilter = AttendanceStatus | "all";
@@ -69,7 +74,10 @@ function buildCounts(records: AttendanceRecordRow[]) {
   return next;
 }
 
-export async function GET(req: NextRequest, { params }: { params: Promise<{ studentId: string }> }) {
+export async function GET(
+  req: NextRequest,
+  { params }: { params: Promise<{ studentId: string }> },
+) {
   const { studentId } = await params;
   const schoolId = req.nextUrl.searchParams.get("schoolId");
 
@@ -84,7 +92,9 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ stud
 
   if (!context.ok) {
     return jsonError(
-      "message" in context ? context.message : "تعذر التحقق من صلاحيات المستخدم.",
+      "message" in context
+        ? context.message
+        : "تعذر التحقق من صلاحيات المستخدم.",
       "status" in context ? context.status : 500,
     );
   }
@@ -110,7 +120,8 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ stud
 
   const defaultTo = todayBaghdadIso();
   const defaultFrom = addDaysBaghdadIso(-90);
-  const fromDate = normalizeDate(req.nextUrl.searchParams.get("from")) ?? defaultFrom;
+  const fromDate =
+    normalizeDate(req.nextUrl.searchParams.get("from")) ?? defaultFrom;
   const toDate = normalizeDate(req.nextUrl.searchParams.get("to")) ?? defaultTo;
   const status = normalizeStatus(req.nextUrl.searchParams.get("status"));
 
@@ -119,7 +130,10 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ stud
   }
 
   if (daysBetween(fromDate, toDate) > 366) {
-    return jsonError("نطاق التاريخ كبير جدًا. يرجى تقليص الفترة إلى سنة واحدة كحد أقصى.", 400);
+    return jsonError(
+      "نطاق التاريخ كبير جدًا. يرجى تقليص الفترة إلى سنة واحدة كحد أقصى.",
+      400,
+    );
   }
 
   const branchScope = resolveBranchScope(context.value);
@@ -128,16 +142,23 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ stud
   }
 
   const { data: student, error: studentError } = await applyBranchScopeToQuery(
-    context.value.actorSupabase
-      .from("students")
-      .select("id, full_name, class_name, section")
+    excludeDeletedStudents(
+      context.value.actorSupabase
+        .from("students")
+        .select("id, full_name, class_name, section"),
+    )
       .eq("school_id", context.value.targetSchoolId)
       .eq("id", studentId),
     branchScope.value,
   ).maybeSingle<StudentPreview>();
 
   if (studentError) {
-    return jsonError(studentError.message || "تعذر تحميل بيانات الطالب.", 500);
+    return jsonServerError(
+      "web-attendance-students-studentId-export",
+      studentError,
+      "تعذر تحميل بيانات الطالب.",
+      500,
+    );
   }
 
   if (!student?.id) {
@@ -160,20 +181,48 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ stud
 
   const { data, error } = await query;
   if (error) {
-    return jsonError(error.message || "تعذر تصدير سجل الحضور.", 500);
+    return jsonServerError(
+      "web-attendance-students-studentId-export",
+      error,
+      "تعذر تصدير سجل الحضور.",
+      500,
+    );
   }
 
   const rows = (Array.isArray(data) ? data : [])
     .map((row) => ({
-      attendance_date: String((row as Record<string, unknown>).attendance_date ?? ""),
-      status: String((row as Record<string, unknown>).status ?? "") as AttendanceStatus,
-      note: typeof (row as Record<string, unknown>).note === "string" ? ((row as Record<string, unknown>).note as string) : "",
+      attendance_date: String(
+        (row as Record<string, unknown>).attendance_date ?? "",
+      ),
+      status: String(
+        (row as Record<string, unknown>).status ?? "",
+      ) as AttendanceStatus,
+      note:
+        typeof (row as Record<string, unknown>).note === "string"
+          ? ((row as Record<string, unknown>).note as string)
+          : "",
     }))
-    .filter((row) => row.attendance_date && ["present", "absent", "late", "excused"].includes(row.status));
+    .filter(
+      (row) =>
+        row.attendance_date &&
+        ["present", "absent", "late", "excused"].includes(row.status),
+    );
 
   const summary = buildCounts(rows);
 
-  const header = ["student_id", "student_name", "class_name", "section", "from", "to", "total", "present", "absent", "late", "excused"];
+  const header = [
+    "student_id",
+    "student_name",
+    "class_name",
+    "section",
+    "from",
+    "to",
+    "total",
+    "present",
+    "absent",
+    "late",
+    "excused",
+  ];
   const metaLine = [
     student.id,
     student.full_name,
@@ -189,7 +238,9 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ stud
   ].map(escapeCsv);
 
   const recordsHeader = ["date", "status", "note"];
-  const recordsLines = rows.map((row) => [row.attendance_date, row.status, row.note ?? ""].map(escapeCsv).join(","));
+  const recordsLines = rows.map((row) =>
+    [row.attendance_date, row.status, row.note ?? ""].map(escapeCsv).join(","),
+  );
 
   const csv = [
     header.join(","),

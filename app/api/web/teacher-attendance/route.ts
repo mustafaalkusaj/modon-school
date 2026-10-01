@@ -1,13 +1,18 @@
 import { NextRequest, NextResponse } from "next/server";
 
+import { teacherAttendanceBulkSchema } from "@/lib/api-schemas";
 import {
-  teacherAttendanceBulkSchema,
-} from "@/lib/api-schemas";
-import { applyBranchScopeToQuery, resolveBranchScope } from "@/lib/branch-scope";
+  applyBranchScopeToQuery,
+  resolveBranchScope,
+} from "@/lib/branch-scope";
 import { resolveSchoolScopedActorContext } from "@/lib/managed-users-server";
 import { enforceRateLimit } from "@/lib/rate-limit";
 import { routeUserHasPermission } from "@/lib/route-permissions";
-import { jsonError, jsonValidationError, logRouteError } from "@/lib/route-utils";
+import {
+  jsonError,
+  jsonValidationError,
+  logRouteError,
+} from "@/lib/route-utils";
 
 export async function GET(req: NextRequest) {
   const schoolId = req.nextUrl.searchParams.get("schoolId");
@@ -28,12 +33,16 @@ export async function GET(req: NextRequest) {
 
   if (!context.ok) {
     return jsonError(
-      "message" in context ? context.message : "تعذر التحقق من صلاحيات المستخدم.",
+      "message" in context
+        ? context.message
+        : "تعذر التحقق من صلاحيات المستخدم.",
       "status" in context ? context.status : 500,
     );
   }
 
-  const requestedBranchId = req.nextUrl.searchParams.get("branchId") ?? req.nextUrl.searchParams.get("branch_id");
+  const requestedBranchId =
+    req.nextUrl.searchParams.get("branchId") ??
+    req.nextUrl.searchParams.get("branch_id");
   const branchScope = resolveBranchScope(context.value, requestedBranchId);
   if (!branchScope.ok) {
     return jsonError(branchScope.message, branchScope.status);
@@ -48,7 +57,11 @@ export async function GET(req: NextRequest) {
       maxHits: 60,
       identifier: actorUserId,
     }),
-    routeUserHasPermission(actorSupabase, actorUserId, "view_teacher_attendance"),
+    routeUserHasPermission(
+      actorSupabase,
+      actorUserId,
+      "view_teacher_attendance",
+    ),
   ]);
 
   if (rateLimited) return rateLimited;
@@ -57,7 +70,7 @@ export async function GET(req: NextRequest) {
   }
 
   try {
-    let q = applyBranchScopeToQuery(
+    const q = applyBranchScopeToQuery(
       actorSupabase
         .from("teacher_attendance")
         .select(
@@ -90,7 +103,10 @@ export async function POST(req: NextRequest) {
   const parsed = teacherAttendanceBulkSchema.safeParse(body);
 
   if (!parsed.success) {
-    return jsonValidationError(parsed.error, "تحقق من البيانات المرسلة ثم أعد المحاولة.");
+    return jsonValidationError(
+      parsed.error,
+      "تحقق من البيانات المرسلة ثم أعد المحاولة.",
+    );
   }
 
   const context = await resolveSchoolScopedActorContext(
@@ -104,12 +120,17 @@ export async function POST(req: NextRequest) {
 
   if (!context.ok) {
     return jsonError(
-      "message" in context ? context.message : "تعذر التحقق من صلاحيات المستخدم.",
+      "message" in context
+        ? context.message
+        : "تعذر التحقق من صلاحيات المستخدم.",
       "status" in context ? context.status : 500,
     );
   }
 
-  const branchScope = resolveBranchScope(context.value, parsed.data.branchId ?? null);
+  const branchScope = resolveBranchScope(
+    context.value,
+    parsed.data.branchId ?? null,
+  );
   if (!branchScope.ok) {
     return jsonError(branchScope.message, branchScope.status);
   }
@@ -123,7 +144,11 @@ export async function POST(req: NextRequest) {
       maxHits: 60,
       identifier: actorUserId,
     }),
-    routeUserHasPermission(actorSupabase, actorUserId, "take_teacher_attendance"),
+    routeUserHasPermission(
+      actorSupabase,
+      actorUserId,
+      "take_teacher_attendance",
+    ),
   ]);
 
   if (rateLimited) return rateLimited;
@@ -133,6 +158,31 @@ export async function POST(req: NextRequest) {
 
   try {
     const branchId = branchScope.value.branchId ?? parsed.data.branchId ?? null;
+
+    // Every teacher_id in the payload must belong to the actor's school (and
+    // branch scope) — otherwise a caller could write attendance rows for
+    // teachers of another tenant.
+    const requestedTeacherIds = Array.from(
+      new Set(parsed.data.records.map((rec) => rec.teacher_id)),
+    );
+    const { data: allowedTeachers, error: teachersError } =
+      await applyBranchScopeToQuery(
+        actorSupabase
+          .from("teachers")
+          .select("id")
+          .eq("school_id", targetSchoolId)
+          .in("id", requestedTeacherIds),
+        branchScope.value,
+      );
+    if (teachersError) {
+      throw teachersError;
+    }
+    const allowedTeacherIds = new Set(
+      (allowedTeachers ?? []).map((t) => t.id as string),
+    );
+    if (allowedTeacherIds.size !== requestedTeacherIds.length) {
+      return jsonError("أحد الأساتذة غير موجود ضمن نطاقك.", 403);
+    }
 
     const upsertRows = parsed.data.records.map((rec) => ({
       school_id: targetSchoolId,
@@ -151,7 +201,9 @@ export async function POST(req: NextRequest) {
         onConflict: "school_id,teacher_id,attendance_date",
         ignoreDuplicates: false,
       })
-      .select("id, teacher_id, attendance_date, status, check_in_time, check_out_time, notes");
+      .select(
+        "id, teacher_id, attendance_date, status, check_in_time, check_out_time, notes",
+      );
 
     if (error) {
       throw error;

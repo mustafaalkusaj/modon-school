@@ -47,6 +47,7 @@ import { AcademicYearModal } from "./_components/AcademicYearModal";
 import { QuickPayModal } from "./_components/QuickPayModal";
 import { ChangeClassModal } from "./_components/ChangeClassModal";
 import { ExportFieldsModal, type ExportFieldKey } from "./_components/ExportFieldsModal";
+import { DuplicateStudentsModal } from "./_components/DuplicateStudentsModal";
 
 export default function StudentsPage() {
   const pathname = usePathname();
@@ -74,6 +75,7 @@ export default function StudentsPage() {
   const [filterSection, setFilterSection] = useState("");
   const [debouncedSearch, setDebouncedSearch] = useState("");
   const [showBulkImport, setShowBulkImport] = useState(false);
+  const [showDuplicates, setShowDuplicates] = useState(false);
   const [resettingPassword, setResettingPassword] = useState(false);
 
 
@@ -547,6 +549,7 @@ export default function StudentsPage() {
                           modals.setShowModal(true);
                         }}
                         onBulkImport={() => setShowBulkImport(true)}
+                        onShowDuplicates={() => setShowDuplicates(true)}
                       />
                       <StudentsTable
                         pagedStudents={archiveMode.isArchiveMode ? archiveStudentsAsStudents : pagedStudents}
@@ -708,6 +711,12 @@ export default function StudentsPage() {
           onClose={() => setShowExportModal(false)}
           onExport={handleExportWithFields}
           loading={exportLoading}
+        />
+        <DuplicateStudentsModal
+          show={showDuplicates}
+          onClose={() => setShowDuplicates(false)}
+          schoolId={schoolScope.selectedSchoolId}
+          branchId={effectiveBranchId}
         />
         <AcademicYearModal
           isOpen={showAcademicYearModal}

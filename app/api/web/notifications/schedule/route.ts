@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { resolveSchoolScopedActorContext } from "@/lib/managed-users-server";
 import { enforceRateLimit } from "@/lib/rate-limit";
+import { jsonServerError } from "@/lib/route-utils";
 
 export const dynamic = "force-dynamic";
 
@@ -31,7 +32,7 @@ export async function GET(request: NextRequest) {
     .limit(50);
 
   if (error) {
-    return NextResponse.json({ ok: false, error: error.message }, { status: 500 });
+    return jsonServerError("web/notifications/schedule", error, "تعذر إتمام العملية. حاول مرة أخرى.");
   }
 
   return NextResponse.json({ ok: true, data: data ?? [] });
@@ -91,7 +92,7 @@ export async function POST(request: NextRequest) {
     .single();
 
   if (error) {
-    return NextResponse.json({ ok: false, error: error.message }, { status: 500 });
+    return jsonServerError("web/notifications/schedule", error, "تعذر إتمام العملية. حاول مرة أخرى.");
   }
 
   return NextResponse.json({ ok: true, data }, { status: 201 });
@@ -119,7 +120,7 @@ export async function DELETE(request: NextRequest) {
     .eq("status", "pending");
 
   if (error) {
-    return NextResponse.json({ ok: false, error: error.message }, { status: 500 });
+    return jsonServerError("web/notifications/schedule", error, "تعذر إتمام العملية. حاول مرة أخرى.");
   }
 
   return NextResponse.json({ ok: true });

@@ -11,6 +11,7 @@ import { SchoolScopeBanner, SchoolScopeEmptyState } from "@/components/SchoolSco
 import { useSchoolScope } from "@/hooks/useSchoolScope";
 import { useRole } from "@/hooks/useRole";
 import { fetchJsonWithAuthorizedSession } from "@/lib/authorized-api";
+import { useAutoRefresh } from "@/hooks/useAutoRefresh";
 import {
   ClipboardList, Plus, Trash2, RefreshCw, Filter, X, Loader2,
   Search, TrendingUp, Users, BarChart3, ChevronDown,
@@ -142,7 +143,7 @@ const PAGE_SIZE = 20;
 export default function BehaviorPage() {
   const pathname = usePathname();
   const locale = getLocaleFromPath(pathname) as Locale;
-  const t = (key: string) => T[key]?.[locale] ?? T[key]?.ar ?? key;
+  const t = useCallback((key: string) => T[key]?.[locale] ?? T[key]?.ar ?? key, [locale]);
 
   const { profile } = useRole();
   const schoolScope = useSchoolScope(profile);
@@ -174,10 +175,14 @@ export default function BehaviorPage() {
   const [loadingSuggestions, setLoadingSuggestions] = useState(false);
 
   // Fetch behavior logs
-  const fetchItems = useCallback(async () => {
+  const fetchItems = useCallback(async (options?: { silent?: boolean }) => {
     if (!schoolId) return;
-    setLoading(true);
-    setError(null);
+    // Background refreshes keep the current list on screen and ignore failures.
+    const silent = options?.silent === true;
+    if (!silent) {
+      setLoading(true);
+      setError(null);
+    }
     try {
       const params = new URLSearchParams({ schoolId, page: String(page), limit: String(PAGE_SIZE) });
       if (typeFilter) params.set("type", typeFilter);
@@ -191,11 +196,16 @@ export default function BehaviorPage() {
       setItems(payload.items ?? []);
       setTotal(payload.total ?? payload.items?.length ?? 0);
     } catch (err) {
-      setError(err instanceof Error ? err.message : t("unexpectedError"));
+      if (!silent) setError(err instanceof Error ? err.message : t("unexpectedError"));
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
-  }, [schoolId, typeFilter, page]);
+  }, [schoolId, typeFilter, page, t]);
+
+  useAutoRefresh({
+    enabled: Boolean(schoolId),
+    onRefresh: useCallback(() => fetchItems({ silent: true }), [fetchItems]),
+  });
 
   useEffect(() => {
     void fetchItems();

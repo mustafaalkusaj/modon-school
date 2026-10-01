@@ -5,6 +5,7 @@ import {
   persistSchoolArchiveSnapshot,
 } from "@/lib/school-archives";
 import { resolveSuperAdminActorContext } from "@/lib/super-admin-server";
+import { jsonServerError } from "@/lib/route-utils";
 
 function jsonError(message: string, status: number) {
   return NextResponse.json({ error: { message } }, { status });
@@ -15,7 +16,9 @@ export async function GET(
   { params }: { params: Promise<{ schoolId: string }> },
 ) {
   const { schoolId } = await params;
-  const context = await resolveSuperAdminActorContext(req.headers.get("authorization"));
+  const context = await resolveSuperAdminActorContext(
+    req.headers.get("authorization"),
+  );
   if (!context.ok) {
     return jsonError(context.message, context.status);
   }
@@ -28,7 +31,10 @@ export async function GET(
   const { dataSupabase, actorUserId } = context.value;
 
   try {
-    const payload = await buildSchoolArchivePayload(dataSupabase, normalizedSchoolId);
+    const payload = await buildSchoolArchivePayload(
+      dataSupabase,
+      normalizedSchoolId,
+    );
     const schoolName =
       typeof payload.school.name === "string" && payload.school.name.trim()
         ? payload.school.name.trim()
@@ -63,8 +69,10 @@ export async function GET(
     });
   } catch (error) {
     console.error("school export error", error);
-    return jsonError(
-      error instanceof Error ? error.message : "تعذر تصدير بيانات المدرسة.",
+    return jsonServerError(
+      "web-super-admin-schools-schoolId-export",
+      error,
+      "تعذر تصدير بيانات المدرسة.",
       500,
     );
   }

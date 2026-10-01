@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { isOpsTokenAuthorized } from "@/lib/ops/security";
 import { createServiceSupabaseClient } from "@/lib/supabase-server";
 import { resolveSuperAdminActorContext } from "@/lib/super-admin-server";
+import { logRouteError } from "@/lib/route-utils";
 
 function notFound() {
   return NextResponse.json(
@@ -33,10 +34,11 @@ export async function GET(request: NextRequest) {
   ]);
 
   if (reportResult.error) {
+    logRouteError("ops/latest", reportResult.error);
     return NextResponse.json(
       {
         ok: false,
-        error: reportResult.error.message,
+        error: "تعذر تحميل تقرير الصحة.",
       },
       {
         status: 500,

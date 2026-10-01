@@ -6,6 +6,8 @@ import {
   type MobileRouteContext,
 } from "@/lib/mobile-api-server";
 import { resolveAdminMobileRouteContext } from "@/lib/mobile-admin-server";
+import { isValidUUID } from "@/lib/route-utils";
+import { excludeDeletedStudents } from "@/lib/students/soft-delete";
 
 export async function GET(req: NextRequest) {
   try {
@@ -49,7 +51,7 @@ export async function POST(req: NextRequest) {
     if (context.ok === false) return context.response;
 
     const { schoolId, serviceSupabase } = context.value;
-    const body = (await req.json()) as {
+    const body = ((await req.json().catch(() => null)) ?? {}) as {
       student_id?: string;
       student_name?: string;
       behavior_type?: string;
@@ -70,6 +72,29 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    // `behavior_type` is NOT NULL — passing null turned a bad request into a 500.
+    if (
+      !behavior_type ||
+      typeof behavior_type !== "string" ||
+      !behavior_type.trim()
+    ) {
+      return NextResponse.json(
+        { ok: false, error: "نوع السلوك مطلوب.", field: "behavior_type" },
+        { status: 400 },
+      );
+    }
+
+    if (
+      student_id !== undefined &&
+      student_id !== null &&
+      (typeof student_id !== "string" || !isValidUUID(student_id))
+    ) {
+      return NextResponse.json(
+        { ok: false, error: "معرّف الطالب غير صالح.", field: "student_id" },
+        { status: 400 },
+      );
+    }
+
     if (
       typeof points !== "number" ||
       !Number.isInteger(points) ||
@@ -83,13 +108,42 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    // The service client bypasses RLS, so school ownership of a body-supplied
+    // student id is enforced here.
+    if (student_id) {
+      const { data: student, error: studentError } =
+        await excludeDeletedStudents(
+          serviceSupabase.from("students").select("id"),
+        )
+          .eq("id", student_id)
+          .eq("school_id", schoolId)
+          .maybeSingle();
+
+      if (studentError) {
+        return NextResponse.json(
+          { ok: false, error: "تعذر التحقق من الطالب." },
+          { status: 500 },
+        );
+      }
+      if (!student) {
+        return NextResponse.json(
+          {
+            ok: false,
+            error: "الطالب غير موجود في مدرستك.",
+            field: "student_id",
+          },
+          { status: 403 },
+        );
+      }
+    }
+
     const { data, error } = await serviceSupabase
       .from("behavior_logs")
       .insert({
         school_id: schoolId,
         student_id: student_id ?? null,
         student_name: student_name.trim(),
-        behavior_type: behavior_type ?? null,
+        behavior_type: behavior_type.trim(),
         points,
         note: note ?? null,
         // eslint-disable-next-line @typescript-eslint/no-explicit-any

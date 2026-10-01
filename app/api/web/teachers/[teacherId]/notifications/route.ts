@@ -1,9 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
-import { applyBranchScopeToQuery, resolveBranchScope } from "@/lib/branch-scope";
+import {
+  applyBranchScopeToQuery,
+  resolveBranchScope,
+} from "@/lib/branch-scope";
 import { resolveSchoolScopedActorContext } from "@/lib/managed-users-server";
 import { enforceRateLimit } from "@/lib/rate-limit";
 import { routeUserHasPermission } from "@/lib/route-permissions";
-import { jsonError, logRouteError } from "@/lib/route-utils";
+import { jsonError, jsonServerError, logRouteError } from "@/lib/route-utils";
 
 export async function GET(
   req: NextRequest,
@@ -23,7 +26,9 @@ export async function GET(
 
   if (!context.ok) {
     return jsonError(
-      "message" in context ? context.message : "تعذر التحقق من صلاحيات المستخدم.",
+      "message" in context
+        ? context.message
+        : "تعذر التحقق من صلاحيات المستخدم.",
       "status" in context ? context.status : 500,
     );
   }
@@ -52,8 +57,11 @@ export async function GET(
 
   // Branch isolation: verify teacher belongs to this school and branch
   const { data: teacherCheck } = await applyBranchScopeToQuery(
-    actorSupabase.from("teachers").select("id")
-      .eq("id", teacherId).eq("school_id", targetSchoolId),
+    actorSupabase
+      .from("teachers")
+      .select("id")
+      .eq("id", teacherId)
+      .eq("school_id", targetSchoolId),
     branchScope.value,
   ).maybeSingle();
   if (!teacherCheck) {
@@ -85,7 +93,10 @@ export async function POST(
   { params }: { params: Promise<{ teacherId: string }> },
 ) {
   const { teacherId } = await params;
-  const body = (await req.json().catch(() => null)) as Record<string, unknown> | null;
+  const body = (await req.json().catch(() => null)) as Record<
+    string,
+    unknown
+  > | null;
   const schoolId = typeof body?.school_id === "string" ? body.school_id : null;
 
   const context = await resolveSchoolScopedActorContext(
@@ -99,7 +110,9 @@ export async function POST(
 
   if (!context.ok) {
     return jsonError(
-      "message" in context ? context.message : "تعذر التحقق من صلاحيات المستخدم.",
+      "message" in context
+        ? context.message
+        : "تعذر التحقق من صلاحيات المستخدم.",
       "status" in context ? context.status : 500,
     );
   }
@@ -128,8 +141,11 @@ export async function POST(
 
   // Branch isolation: verify teacher belongs to this school and branch
   const { data: teacherCheckPost } = await applyBranchScopeToQuery(
-    actorSupabase.from("teachers").select("id")
-      .eq("id", teacherId).eq("school_id", targetSchoolId),
+    actorSupabase
+      .from("teachers")
+      .select("id")
+      .eq("id", teacherId)
+      .eq("school_id", targetSchoolId),
     branchScope.value,
   ).maybeSingle();
   if (!teacherCheckPost) {
@@ -138,7 +154,8 @@ export async function POST(
 
   try {
     const title = typeof body?.title === "string" ? body.title.trim() : "";
-    const message = typeof body?.message === "string" ? body.message.trim() : "";
+    const message =
+      typeof body?.message === "string" ? body.message.trim() : "";
     const type = typeof body?.type === "string" ? body.type : "general";
 
     if (!title) {
@@ -162,13 +179,26 @@ export async function POST(
       .single();
 
     if (error || !data) {
-      logRouteError("teachers-notifications-post", error, { teacherId, actorUserId, schoolId: targetSchoolId });
-      return jsonError(error?.message || "تعذر إرسال الإشعار.", 500);
+      logRouteError("teachers-notifications-post", error, {
+        teacherId,
+        actorUserId,
+        schoolId: targetSchoolId,
+      });
+      return jsonServerError(
+        "web-teachers-teacherId-notifications",
+        error,
+        "تعذر إرسال الإشعار.",
+        500,
+      );
     }
 
     return NextResponse.json({ ok: true, notification: data }, { status: 201 });
   } catch (error) {
-    logRouteError("teachers-notifications-post", error, { teacherId, actorUserId, schoolId: targetSchoolId });
+    logRouteError("teachers-notifications-post", error, {
+      teacherId,
+      actorUserId,
+      schoolId: targetSchoolId,
+    });
     return jsonError("تعذر إرسال الإشعار.", 500);
   }
 }

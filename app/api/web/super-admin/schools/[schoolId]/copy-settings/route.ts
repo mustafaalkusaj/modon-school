@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { resolveSuperAdminActorContext } from "@/lib/super-admin-server";
+import { jsonServerError } from "@/lib/route-utils";
 
 function jsonError(message: string, status: number) {
   return NextResponse.json({ error: { message } }, { status });
@@ -10,9 +11,16 @@ export async function POST(
   { params }: { params: Promise<{ schoolId: string }> },
 ) {
   const { schoolId } = await params;
-  const context = await resolveSuperAdminActorContext(req.headers.get("authorization"));
+  const context = await resolveSuperAdminActorContext(
+    req.headers.get("authorization"),
+  );
   if (!context.ok) {
-    return jsonError("message" in context ? context.message : "تعذر التحقق من صلاحيات المستخدم.", "status" in context ? context.status : 500);
+    return jsonError(
+      "message" in context
+        ? context.message
+        : "تعذر التحقق من صلاحيات المستخدم.",
+      "status" in context ? context.status : 500,
+    );
   }
 
   const sourceSchoolId = schoolId.trim();
@@ -63,8 +71,10 @@ export async function POST(
 
   // Copy branding settings (colors + logo) to target school
   const updatePayload: Record<string, unknown> = {};
-  if (sourceSchool.primary_color) updatePayload.primary_color = sourceSchool.primary_color;
-  if (sourceSchool.secondary_color) updatePayload.secondary_color = sourceSchool.secondary_color;
+  if (sourceSchool.primary_color)
+    updatePayload.primary_color = sourceSchool.primary_color;
+  if (sourceSchool.secondary_color)
+    updatePayload.secondary_color = sourceSchool.secondary_color;
   if (sourceSchool.logo_url) updatePayload.logo_url = sourceSchool.logo_url;
 
   if (Object.keys(updatePayload).length === 0) {
@@ -77,7 +87,12 @@ export async function POST(
     .eq("id", normalizedTarget);
 
   if (updateError) {
-    return jsonError(updateError.message || "تعذر نسخ الإعدادات.", 500);
+    return jsonServerError(
+      "web-super-admin-schools-schoolId-copy-settings",
+      updateError,
+      "تعذر نسخ الإعدادات.",
+      500,
+    );
   }
 
   return NextResponse.json({

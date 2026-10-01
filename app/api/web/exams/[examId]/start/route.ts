@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { resolveSchoolScopedActorContext } from "@/lib/managed-users-server";
+import { jsonServerError } from "@/lib/route-utils";
+import { excludeDeletedStudents } from "@/lib/students/soft-delete";
 
 export const dynamic = "force-dynamic";
 
@@ -48,9 +50,9 @@ export async function POST(
   // Without this check a staff member could pass any studentId and impersonate
   // another student's exam attempt.
   if (studentId !== actorUserId) {
-    const { data: studentCheck } = await actorSupabase
+    const { data: studentCheck } = await excludeDeletedStudents(actorSupabase
       .from("students")
-      .select("id")
+      .select("id"))
       .eq("id", studentId)
       .eq("school_id", targetSchoolId)
       .maybeSingle();
@@ -92,9 +94,9 @@ export async function POST(
   // has a class_name set). This prevents any employee from starting an exam on
   // behalf of a student that isn't enrolled in the target class.
   if (exam.class_name) {
-    const { data: studentRecord } = await actorSupabase
+    const { data: studentRecord } = await excludeDeletedStudents(actorSupabase
       .from("students")
-      .select("id, class_name")
+      .select("id, class_name"))
       .eq("id", studentId)
       .eq("school_id", targetSchoolId)
       .maybeSingle();
@@ -205,7 +207,7 @@ export async function POST(
         });
       }
     }
-    return NextResponse.json({ ok: false, error: attemptError.message }, { status: 500 });
+    return jsonServerError("web/exams/[examId]/start", attemptError, "تعذر إتمام العملية. حاول مرة أخرى.");
   }
 
   // Fetch questions

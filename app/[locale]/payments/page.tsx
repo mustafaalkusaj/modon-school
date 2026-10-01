@@ -24,10 +24,12 @@ import {
   ArchiveDetailModal,
   PaymentModal,
   ArchiveModeBanner,
+  EditDiscountModal,
 } from "./_components";
 import { PaymentExportFieldsModal, type PaymentExportFieldKey } from "./_components/PaymentExportFieldsModal";
 import { AcademicYearModal } from "../students/_components/AcademicYearModal";
-import { fetchJsonWithAuthorizedSession } from "@/lib/authorized-api";
+import { fetchJsonWithAuthorizedSession, withJsonHeaders } from "@/lib/authorized-api";
+import type { Student } from "./_types";
 import { usePaymentsPage } from "./_hooks";
 import { getArchivePayments } from "./_hooks/useArchiveOperations";
 import "./_components/payments.css";
@@ -40,6 +42,9 @@ export default function PaymentsPage() {
   const [pendingArchiveConfirm, setPendingArchiveConfirm] = React.useState(false);
   const [showPromoteYearModal, setShowPromoteYearModal] = React.useState(false);
   const [showExportModal, setShowExportModal] = React.useState(false);
+  const [editDiscountStudent, setEditDiscountStudent] = React.useState<Student | null>(null);
+  const [discountSaving, setDiscountSaving] = React.useState(false);
+  const [discountError, setDiscountError] = React.useState("");
   const {
     canAddPayments,
     canDeletePayments,
@@ -107,6 +112,38 @@ export default function PaymentsPage() {
     ? paymentOpsHook.paymentsByStudent[paymentOpsHook.payStudent.id]?.reduce((sum, p) => sum + (Number(p.amount) || 0), 0) ?? 0
     : undefined;
 
+  const handleEditDiscount = React.useCallback(
+    async (studentId: string, discountValue: number) => {
+      setDiscountSaving(true);
+      setDiscountError("");
+      try {
+        const { response, payload } = await fetchJsonWithAuthorizedSession(
+          `/api/web/students/${studentId}`,
+          {
+            method: "PATCH",
+            headers: withJsonHeaders(),
+            body: JSON.stringify({ discount_value: discountValue }),
+          }
+        );
+        const body = payload as Record<string, unknown>;
+        if (!response.ok) {
+          throw new Error((body.error as Record<string, string>)?.message || "فشل تحديث التخفيض");
+        }
+        const updated = body.student as Record<string, unknown>;
+        studentsHook.updateStudentFinancials(studentId, {
+          paid_fee: Number(updated?.paid_fee ?? 0),
+          remaining_fee: Number(updated?.remaining_fee ?? 0),
+        });
+        setEditDiscountStudent(null);
+      } catch (err: unknown) {
+        setDiscountError(err instanceof Error ? err.message : "حدث خطأ غير متوقع");
+      } finally {
+        setDiscountSaving(false);
+      }
+    },
+    [studentsHook]
+  );
+
   return (
     <ProtectedRoute roles={["super_admin", "admin", "employee"]}>
       <div className="flex min-h-screen bg-[var(--surface-soft)]">
@@ -120,23 +157,36 @@ export default function PaymentsPage() {
             fixed
           />
 
+          {/* Toast notifications — fixed above everything (z-[60] > panel z-50) */}
+          <AnimatePresence>
+            {success && (
+              <motion.div
+                key="success"
+                initial={{ opacity: 0, y: -10, scale: 0.97 }}
+                animate={{ opacity: 1, y: 0, scale: 1 }}
+                exit={{ opacity: 0, y: -8, scale: 0.97 }}
+                transition={{ duration: 0.25 }}
+                className="fixed top-4 start-1/2 -translate-x-1/2 z-[60] max-w-md w-[calc(100%-2rem)] rounded-2xl border border-[var(--success)]/20 bg-[var(--success)]/10 p-4 text-[var(--success)] font-bold text-sm shadow-lg backdrop-blur-sm"
+              >
+                {success}
+              </motion.div>
+            )}
+            {error && (
+              <motion.div
+                key="error"
+                initial={{ opacity: 0, y: -10, scale: 0.97 }}
+                animate={{ opacity: 1, y: 0, scale: 1 }}
+                exit={{ opacity: 0, y: -8, scale: 0.97 }}
+                transition={{ duration: 0.25 }}
+                className="fixed top-4 start-1/2 -translate-x-1/2 z-[60] max-w-md w-[calc(100%-2rem)] rounded-2xl border border-[var(--danger)]/20 bg-[var(--danger)]/10 p-4 text-[var(--danger)] font-bold text-sm shadow-lg backdrop-blur-sm"
+              >
+                {error}
+              </motion.div>
+            )}
+          </AnimatePresence>
+
           <main className="app-shell-frame--with-fixed-topbar flex-1 overflow-y-auto custom-scrollbar">
             <div className="p-4 sm:p-6 space-y-6">
-
-              <AnimatePresence>
-                {success && (
-                  <motion.div key="success" initial={{ opacity: 0, y: -10, scale: 0.97 }} animate={{ opacity: 1, y: 0, scale: 1 }} exit={{ opacity: 0, y: -8, scale: 0.97 }} transition={{ duration: 0.25 }}
-                    className="rounded-2xl border border-[var(--success)]/20 bg-[var(--success)]/10 p-4 text-[var(--success)] font-bold text-sm">
-                    {success}
-                  </motion.div>
-                )}
-                {error && (
-                  <motion.div key="error" initial={{ opacity: 0, y: -10, scale: 0.97 }} animate={{ opacity: 1, y: 0, scale: 1 }} exit={{ opacity: 0, y: -8, scale: 0.97 }} transition={{ duration: 0.25 }}
-                    className="rounded-2xl border border-[var(--danger)]/20 bg-[var(--danger)]/10 p-4 text-[var(--danger)] font-bold text-sm">
-                    {error}
-                  </motion.div>
-                )}
-              </AnimatePresence>
 
               <SchoolScopeBanner scope={schoolScope} showSelector={false} />
 
@@ -258,6 +308,10 @@ export default function PaymentsPage() {
                         onPageChange={studentsHook.setPage}
                         onStudentClick={isArchiveMode ? openArchiveStudentDetail : openStudentDetail}
                         onAddPayment={isArchiveMode ? undefined : paymentOpsHook.openPaymentModal}
+                        onEditDiscount={isArchiveMode ? undefined : (s) => {
+                          setDiscountError("");
+                          setEditDiscountStudent(s);
+                        }}
                         currency={currency}
                       />
                     </div>
@@ -294,6 +348,40 @@ export default function PaymentsPage() {
           onAddPayment={openPaymentForStudent}
           onDeletePayment={(paymentId) => paymentOpsHook.setPendingDeletePaymentId(paymentId)}
           onPrintReceipt={printReceipt}
+          onAuditPayment={async (paymentId) => {
+            const sid = schoolScope.selectedSchoolId;
+            if (!sid) return;
+            const current = Object.values(paymentOpsHook.paymentsByStudent)
+              .flat()
+              .find((p) => p.id === paymentId);
+            try {
+              const { response, payload } = await fetchJsonWithAuthorizedSession<{
+                ok?: boolean;
+                audited_at?: string | null;
+              }>(`/api/web/payments/records/${paymentId}`, {
+                method: "PATCH",
+                headers: withJsonHeaders(),
+                // Send the target state, not a toggle, so a double click cannot undo itself.
+                body: JSON.stringify({
+                  school_id: sid,
+                  audited: !current?.audited_at,
+                }),
+              });
+              if (response.ok && payload?.ok) {
+                paymentOpsHook.setPaymentsByStudent((prev) => {
+                  const next = { ...prev };
+                  for (const key of Object.keys(next)) {
+                    next[key] = next[key].map((p) =>
+                      p.id === paymentId ? { ...p, audited_at: payload.audited_at ?? null } : p
+                    );
+                  }
+                  return next;
+                });
+              }
+            } catch {
+              // silent — toggle is non-critical
+            }
+          }}
           onPrintStatement={(student) => printStatement(student, detailPayments)}
           canAddPayments={isArchiveMode ? false : canAddPayments}
           canDeletePayments={isArchiveMode ? false : canDeletePayments}
@@ -337,6 +425,16 @@ export default function PaymentsPage() {
           setShowDropdown={paymentOpsHook.setShowDropdown}
           searchRef={paymentOpsHook.searchRef}
           onSelectStudent={paymentOpsHook.selectStudentForPayment}
+        />
+
+        {/* Edit Discount Modal */}
+        <EditDiscountModal
+          show={!!editDiscountStudent}
+          student={editDiscountStudent}
+          saving={discountSaving}
+          error={discountError}
+          onClose={() => setEditDiscountStudent(null)}
+          onSubmit={handleEditDiscount}
         />
 
         {/* Archive Confirmation Dialog */}

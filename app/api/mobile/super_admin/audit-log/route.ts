@@ -32,6 +32,40 @@ export async function GET(req: NextRequest) {
     if (action) filterQuery = filterQuery.eq("action", action);
     if (schoolId) filterQuery = filterQuery.eq("school_id", schoolId);
 
+    // The mobile timeline filters by *category*, which the client derives from
+    // action + entity_type. Applying it here (instead of on the already-fetched
+    // page) keeps pagination honest: previously a category with no hits on the
+    // loaded page rendered as "no results" even when matches existed further
+    // down the log. The branches below mirror the client's precedence exactly:
+    // LOGIN wins, then settings/config, then DELETE, then security.
+    const SETTINGS_MATCH =
+      "entity_type.ilike.%setting%,entity_type.ilike.%config%";
+    const SECURITY_MATCH =
+      "entity_type.ilike.%security%,entity_type.ilike.%auth%";
+    const type = url.searchParams.get("type");
+
+    if (type === "login") {
+      filterQuery = filterQuery.eq("action", "LOGIN");
+    } else if (type === "settingsChange") {
+      filterQuery = filterQuery.neq("action", "LOGIN").or(SETTINGS_MATCH);
+    } else if (type === "security") {
+      filterQuery = filterQuery
+        .neq("action", "LOGIN")
+        .neq("action", "DELETE")
+        .not("entity_type", "ilike", "%setting%")
+        .not("entity_type", "ilike", "%config%")
+        .or(SECURITY_MATCH);
+    } else if (type === "dataEdit") {
+      filterQuery = filterQuery.neq("action", "LOGIN").or(
+        // Anything that is neither a settings change nor a security event.
+        // `entity_type` may be null, which the client also treats as dataEdit.
+        "entity_type.is.null," +
+          "action.eq.DELETE," +
+          "and(entity_type.not.ilike.%setting%,entity_type.not.ilike.%config%," +
+          "entity_type.not.ilike.%security%,entity_type.not.ilike.%auth%)",
+      );
+    }
+
     const query = filterQuery
       .order("created_at", { ascending: false })
       .range(offset, offset + limit - 1)

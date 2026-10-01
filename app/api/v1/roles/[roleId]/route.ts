@@ -6,7 +6,11 @@ import { jsonError } from "@/lib/route-utils";
 
 const patchRoleSchema = z.object({
   name_ar: z.string().min(2).max(100).optional(),
-  color: z.string().regex(/^#[0-9a-fA-F]{3,8}$/).nullable().optional(),
+  color: z
+    .string()
+    .regex(/^#[0-9a-fA-F]{3,8}$/)
+    .nullable()
+    .optional(),
   dashboard_sections: z.record(z.string(), z.boolean()).optional(),
 });
 
@@ -21,7 +25,10 @@ export async function GET(
     req.headers.get("authorization"),
   );
   if (!context.ok) {
-    return jsonError("message" in context ? context.message : "غير مصرح", "status" in context ? context.status : 403);
+    return jsonError(
+      "message" in context ? context.message : "غير مصرح",
+      "status" in context ? context.status : 403,
+    );
   }
 
   const { targetSchoolId } = context.value;
@@ -42,7 +49,9 @@ export async function GET(
     .select("permission_id")
     .eq("role_id", roleId);
 
-  const permissionIds = (assignments ?? []).map((r) => r.permission_id as string);
+  const permissionIds = (assignments ?? []).map(
+    (r) => r.permission_id as string,
+  );
 
   return NextResponse.json({ ok: true, role, permissionIds });
 }
@@ -58,7 +67,10 @@ export async function DELETE(
     req.headers.get("authorization"),
   );
   if (!context.ok) {
-    return jsonError("message" in context ? context.message : "غير مصرح", "status" in context ? context.status : 403);
+    return jsonError(
+      "message" in context ? context.message : "غير مصرح",
+      "status" in context ? context.status : 403,
+    );
   }
 
   const { targetSchoolId } = context.value;
@@ -72,7 +84,8 @@ export async function DELETE(
     .maybeSingle();
 
   if (!role) return jsonError("الدور غير موجود", 404);
-  if (role.is_system) return jsonError("لا يمكن حذف الأدوار الافتراضية للنظام", 403);
+  if (role.is_system)
+    return jsonError("لا يمكن حذف الأدوار الافتراضية للنظام", 403);
 
   const { error } = await service
     .from("school_roles")
@@ -96,7 +109,10 @@ export async function PATCH(
     req.headers.get("authorization"),
   );
   if (!context.ok) {
-    return jsonError("message" in context ? context.message : "غير مصرح", "status" in context ? context.status : 403);
+    return jsonError(
+      "message" in context ? context.message : "غير مصرح",
+      "status" in context ? context.status : 403,
+    );
   }
 
   const body = await req.json().catch(() => null);
@@ -109,15 +125,32 @@ export async function PATCH(
   const updates: Record<string, unknown> = {};
   if (parsed.data.name_ar !== undefined) updates.name_ar = parsed.data.name_ar;
   if (parsed.data.color !== undefined) updates.color = parsed.data.color;
-  if (parsed.data.dashboard_sections !== undefined) updates.dashboard_sections = parsed.data.dashboard_sections;
-  if (Object.keys(updates).length === 0) return jsonError("لا يوجد شيء للتحديث", 400);
+  if (parsed.data.dashboard_sections !== undefined)
+    updates.dashboard_sections = parsed.data.dashboard_sections;
+  if (Object.keys(updates).length === 0)
+    return jsonError("لا يوجد شيء للتحديث", 400);
+
+  // System roles are part of the product's authorization model — a tenant
+  // admin may neither rename nor re-scope them (same rule as DELETE).
+  const { data: existingRole } = await service
+    .from("school_roles")
+    .select("is_system")
+    .eq("id", roleId)
+    .eq("school_id", targetSchoolId)
+    .maybeSingle();
+
+  if (!existingRole) return jsonError("الدور غير موجود", 404);
+  if (existingRole.is_system)
+    return jsonError("لا يمكن تعديل الأدوار الافتراضية للنظام", 403);
 
   const { data, error } = await service
     .from("school_roles")
     .update(updates)
     .eq("id", roleId)
     .eq("school_id", targetSchoolId)
-    .select("id, key, name_ar, is_system, color, created_at, dashboard_sections")
+    .select(
+      "id, key, name_ar, is_system, color, created_at, dashboard_sections",
+    )
     .single();
 
   if (error) return jsonError("تعذر تحديث الدور", 500);

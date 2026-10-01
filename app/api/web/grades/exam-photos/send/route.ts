@@ -3,6 +3,7 @@ import { resolveSchoolScopedActorContext } from "@/lib/managed-users-server";
 import { enforceRateLimit } from "@/lib/rate-limit";
 import { routeUserHasPermission } from "@/lib/route-permissions";
 import { applyBranchScopeToQuery, resolveBranchScope } from "@/lib/branch-scope";
+import { excludeDeletedStudents } from "@/lib/students/soft-delete";
 
 function jsonError(message: string, status: number) {
   return NextResponse.json({ error: { message } }, { status });
@@ -48,7 +49,7 @@ export async function POST(req: NextRequest) {
     const studentId = (entry as Record<string, unknown>).student_id as string | null;
     if (studentId) {
       const { data: studentCheck } = await applyBranchScopeToQuery(
-        actorSupabase.from("students").select("id").eq("id", studentId),
+        excludeDeletedStudents(actorSupabase.from("students").select("id")).eq("id", studentId),
         branchScope.value,
       ).limit(1);
       if (!studentCheck || (studentCheck as unknown[]).length === 0) {

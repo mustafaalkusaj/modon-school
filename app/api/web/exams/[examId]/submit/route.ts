@@ -1,10 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 import { resolveSchoolScopedActorContext } from "@/lib/managed-users-server";
 import { resolveBranchScope } from "@/lib/branch-scope";
+import { jsonServerError } from "@/lib/route-utils";
 
 export const dynamic = "force-dynamic";
 
 const ALLOWED_ROLES = ["admin", "super_admin", "employee"] as const;
+/** Slack allowed past the exam duration to cover upload/round-trip latency. */
+const SUBMIT_GRACE_SECONDS = 60;
 const OBJECTIVE_TYPES = ["multiple_choice", "true_false", "fill_blank", "matching", "ordering"];
 
 function jsonError(message: string, status: number) {
@@ -89,6 +92,28 @@ export async function POST(
     }
   }
 
+  // Time-limit enforcement: duration_minutes is handed to the client on start
+  // but was never checked here, so a client that ignored its own timer could
+  // submit arbitrarily late. Reject anything past the allowance (plus a small
+  // grace window for the request round-trip).
+  const { data: examSettings } = await actorSupabase
+    .from("exam_settings")
+    .select("duration_minutes")
+    .eq("exam_id", examId)
+    .maybeSingle();
+
+  const durationMinutes = Number(examSettings?.duration_minutes) || 0;
+  if (durationMinutes > 0 && attempt.started_at) {
+    const elapsedSeconds =
+      (Date.now() - new Date(attempt.started_at).getTime()) / 1000;
+    if (elapsedSeconds > durationMinutes * 60 + SUBMIT_GRACE_SECONDS) {
+      return NextResponse.json(
+        { ok: false, error: "time limit exceeded" },
+        { status: 400 },
+      );
+    }
+  }
+
   // Get exam questions with correct answers
   const { data: examQuestions } = await actorSupabase
     .from("exam_questions")
@@ -142,7 +167,7 @@ export async function POST(
     .upsert(studentAnswerRows as any, { onConflict: "attempt_id,question_id" });
 
   if (answersError) {
-    return NextResponse.json({ ok: false, error: answersError.message }, { status: 500 });
+    return jsonServerError("web/exams/[examId]/submit", answersError, "تعذر إتمام العملية. حاول مرة أخرى.");
   }
 
   // Calculate time spent
@@ -165,7 +190,7 @@ export async function POST(
     .eq("id", body.attemptId);
 
   if (updateError) {
-    return NextResponse.json({ ok: false, error: updateError.message }, { status: 500 });
+    return jsonServerError("web/exams/[examId]/submit", updateError, "تعذر إتمام العملية. حاول مرة أخرى.");
   }
 
   // Update question usage stats

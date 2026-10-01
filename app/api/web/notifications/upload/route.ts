@@ -2,6 +2,7 @@ import "server-only";
 import { NextRequest, NextResponse } from "next/server";
 import { resolveSchoolScopedActorContext } from "@/lib/managed-users-server";
 import { sanitizeStorageFilename } from "@/lib/upload-validation";
+import { jsonServerError } from "@/lib/route-utils";
 
 const ALLOWED_IMAGE_MIME = ["image/jpeg", "image/png", "image/webp", "image/gif"] as const;
 const ALLOWED_VIDEO_MIME = ["video/mp4", "video/webm", "video/quicktime"] as const;
@@ -111,7 +112,7 @@ export async function POST(request: NextRequest) {
     .upload(objectPath, bytes, { upsert: false, contentType: mime });
 
   if (uploadError) {
-    return NextResponse.json({ ok: false, error: uploadError.message }, { status: 500 });
+    return jsonServerError("web/notifications/upload", uploadError, "تعذر إتمام العملية. حاول مرة أخرى.");
   }
 
   const { data } = actorSupabase.storage.from(BUCKET).getPublicUrl(objectPath);

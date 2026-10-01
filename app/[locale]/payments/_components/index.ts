@@ -8,3 +8,4 @@ export { ArchiveDetailModal } from "./ArchiveDetailModal";
 export { PaymentModal } from "./PaymentModal";
 export { ArchiveModeBanner } from "./ArchiveModeBanner";
 export { ArchiveCompareModal } from "./ArchiveCompareModal";
+export { EditDiscountModal } from "./EditDiscountModal";

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 
 import { resolveMobileRouteContext } from "@/lib/mobile-api-server";
+import { excludeDeletedStudents } from "@/lib/students/soft-delete";
 
 export async function GET(req: NextRequest) {
   try {
@@ -12,9 +13,9 @@ export async function GET(req: NextRequest) {
     const { schoolId, serviceSupabase } = context.value;
 
     // Fetch all students in the school (cap at 500 for safety)
-    const { data: students, error: studentsError } = await serviceSupabase
+    const { data: students, error: studentsError } = await excludeDeletedStudents(serviceSupabase
       .from("students")
-      .select("id, full_name, class_name, section")
+      .select("id, full_name, class_name, section"))
       .eq("school_id", schoolId)
       .limit(500);
 

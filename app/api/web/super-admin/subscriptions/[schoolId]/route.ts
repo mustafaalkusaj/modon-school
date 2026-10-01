@@ -1,12 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 
 import { resolveSuperAdminActorContext } from "@/lib/super-admin-server";
+import { jsonServerError } from "@/lib/route-utils";
 import { addDaysBaghdadIso, todayBaghdadIso } from "@/lib/tz";
 
 const VALID_PLANS = ["basic", "premium", "enterprise"] as const;
 const VALID_STATUSES = ["active", "suspended", "inactive", "expired"] as const;
-type SchoolPlan = typeof VALID_PLANS[number];
-type SubscriptionStatus = typeof VALID_STATUSES[number];
+type SchoolPlan = (typeof VALID_PLANS)[number];
+type SubscriptionStatus = (typeof VALID_STATUSES)[number];
 
 function jsonError(message: string, status: number) {
   return NextResponse.json({ error: { message } }, { status });
@@ -17,9 +18,16 @@ export async function POST(
   { params }: { params: Promise<{ schoolId: string }> },
 ) {
   const { schoolId } = await params;
-  const context = await resolveSuperAdminActorContext(req.headers.get("authorization"));
+  const context = await resolveSuperAdminActorContext(
+    req.headers.get("authorization"),
+  );
   if (!context.ok) {
-    return jsonError("message" in context ? context.message : "تعذر التحقق من صلاحيات المستخدم.", "status" in context ? context.status : 500);
+    return jsonError(
+      "message" in context
+        ? context.message
+        : "تعذر التحقق من صلاحيات المستخدم.",
+      "status" in context ? context.status : 500,
+    );
   }
 
   const normalizedSchoolId = schoolId.trim();
@@ -28,28 +36,35 @@ export async function POST(
   }
 
   const { dataSupabase } = context.value;
-  const [{ data: school, error: schoolError }, { data: latestSubscription, error: subscriptionLookupError }] =
-    await Promise.all([
-      dataSupabase
-        .from("schools")
-        .select("id, plan")
-        .eq("id", normalizedSchoolId)
-        .maybeSingle(),
-      dataSupabase
-        .from("subscriptions")
-        .select("id, plan")
-        .eq("school_id", normalizedSchoolId)
-        .order("created_at", { ascending: false })
-        .limit(1)
-        .maybeSingle(),
-    ]);
+  const [
+    { data: school, error: schoolError },
+    { data: latestSubscription, error: subscriptionLookupError },
+  ] = await Promise.all([
+    dataSupabase
+      .from("schools")
+      .select("id, plan")
+      .eq("id", normalizedSchoolId)
+      .maybeSingle(),
+    dataSupabase
+      .from("subscriptions")
+      .select("id, plan")
+      .eq("school_id", normalizedSchoolId)
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle(),
+  ]);
 
   if (schoolError || !school?.id) {
     return jsonError("المدرسة المطلوبة غير موجودة.", 404);
   }
 
   if (subscriptionLookupError) {
-    return jsonError(subscriptionLookupError.message || "تعذر الوصول إلى الاشتراك الحالي.", 500);
+    return jsonServerError(
+      "web-super-admin-subscriptions-schoolId",
+      subscriptionLookupError,
+      "تعذر الوصول إلى الاشتراك الحالي.",
+      500,
+    );
   }
 
   const endDate = addDaysBaghdadIso(365);
@@ -76,7 +91,12 @@ export async function POST(
         .single();
 
   if (response.error || !response.data) {
-    return jsonError(response.error?.message || "تعذر تجديد الاشتراك.", 500);
+    return jsonServerError(
+      "web-super-admin-subscriptions-schoolId",
+      response.error,
+      "تعذر تجديد الاشتراك.",
+      500,
+    );
   }
 
   return NextResponse.json({
@@ -91,9 +111,16 @@ export async function PATCH(
   { params }: { params: Promise<{ schoolId: string }> },
 ) {
   const { schoolId } = await params;
-  const context = await resolveSuperAdminActorContext(req.headers.get("authorization"));
+  const context = await resolveSuperAdminActorContext(
+    req.headers.get("authorization"),
+  );
   if (!context.ok) {
-    return jsonError("message" in context ? context.message : "تعذر التحقق من صلاحيات المستخدم.", "status" in context ? context.status : 500);
+    return jsonError(
+      "message" in context
+        ? context.message
+        : "تعذر التحقق من صلاحيات المستخدم.",
+      "status" in context ? context.status : 500,
+    );
   }
 
   const normalizedSchoolId = schoolId.trim();
@@ -108,19 +135,45 @@ export async function PATCH(
     return jsonError("طلب غير صالح.", 400);
   }
 
-  const parsed = body as { plan?: string; start_date?: string | null; end_date?: string | null; status?: string };
-  const plan: SchoolPlan | undefined = (VALID_PLANS as readonly string[]).includes(parsed.plan ?? "") ? parsed.plan as SchoolPlan : undefined;
-  const status: SubscriptionStatus | undefined = (VALID_STATUSES as readonly string[]).includes(parsed.status ?? "") ? parsed.status as SubscriptionStatus : undefined;
+  const parsed = body as {
+    plan?: string;
+    start_date?: string | null;
+    end_date?: string | null;
+    status?: string;
+  };
+  const plan: SchoolPlan | undefined = (
+    VALID_PLANS as readonly string[]
+  ).includes(parsed.plan ?? "")
+    ? (parsed.plan as SchoolPlan)
+    : undefined;
+  const status: SubscriptionStatus | undefined = (
+    VALID_STATUSES as readonly string[]
+  ).includes(parsed.status ?? "")
+    ? (parsed.status as SubscriptionStatus)
+    : undefined;
 
-  if (!plan && !status && parsed.end_date === undefined && parsed.start_date === undefined) {
+  if (
+    !plan &&
+    !status &&
+    parsed.end_date === undefined &&
+    parsed.start_date === undefined
+  ) {
     return jsonError("يجب تحديد حقل واحد على الأقل للتحديث.", 400);
   }
 
   const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
-  if (parsed.end_date !== undefined && parsed.end_date !== null && !DATE_RE.test(parsed.end_date)) {
+  if (
+    parsed.end_date !== undefined &&
+    parsed.end_date !== null &&
+    !DATE_RE.test(parsed.end_date)
+  ) {
     return jsonError("end_date يجب أن يكون بصيغة YYYY-MM-DD أو null.", 400);
   }
-  if (parsed.start_date !== undefined && parsed.start_date !== null && !DATE_RE.test(parsed.start_date)) {
+  if (
+    parsed.start_date !== undefined &&
+    parsed.start_date !== null &&
+    !DATE_RE.test(parsed.start_date)
+  ) {
     return jsonError("start_date يجب أن يكون بصيغة YYYY-MM-DD أو null.", 400);
   }
 
@@ -135,7 +188,12 @@ export async function PATCH(
     .maybeSingle();
 
   if (lookupError) {
-    return jsonError(lookupError.message || "تعذر الوصول إلى الاشتراك.", 500);
+    return jsonServerError(
+      "web-super-admin-subscriptions-schoolId",
+      lookupError,
+      "تعذر الوصول إلى الاشتراك.",
+      500,
+    );
   }
 
   if (!latestSub?.id) {
@@ -145,8 +203,10 @@ export async function PATCH(
   const updatePayload: Record<string, unknown> = {};
   if (plan) updatePayload.plan = plan;
   if (status) updatePayload.status = status;
-  if (parsed.start_date !== undefined) updatePayload.start_date = parsed.start_date || null;
-  if (parsed.end_date !== undefined) updatePayload.end_date = parsed.end_date || null;
+  if (parsed.start_date !== undefined)
+    updatePayload.start_date = parsed.start_date || null;
+  if (parsed.end_date !== undefined)
+    updatePayload.end_date = parsed.end_date || null;
 
   const { data, error } = await dataSupabase
     .from("subscriptions")
@@ -157,7 +217,12 @@ export async function PATCH(
     .single();
 
   if (error || !data) {
-    return jsonError(error?.message || "تعذر تحديث الاشتراك.", 500);
+    return jsonServerError(
+      "web-super-admin-subscriptions-schoolId",
+      error,
+      "تعذر تحديث الاشتراك.",
+      500,
+    );
   }
 
   return NextResponse.json({ ok: true, subscription: data });

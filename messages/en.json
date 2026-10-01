@@ -275,6 +275,7 @@
     "notifications": {
       "title": "Notifications",
       "unread": "{count} unread",
+      "markAllRead": "Mark all read",
       "refresh": "Refresh",
       "loading": "Loading notifications...",
       "disabled": "Notifications table is currently disabled.",
@@ -508,6 +509,7 @@
       "netSalaries": "Net Salaries",
       "netBalance": "Net Balance",
       "transferredRevenue": "Transferred Students Revenue",
+      "netProfit": "Net Profit",
       "profitDetails": "Collected + Revenue + Transferred − Expenses − Salaries"
     },
     "detailedReports": "Detailed Reports",
@@ -692,6 +694,7 @@
       "exportCurrentTitle": "Export current page only (50 students)",
       "exportAllTitle": "Export all students regardless of page or filter",
       "printFiltered": "Print Filtered Students",
+      "duplicates": "Duplicate students",
       "printAllCards": "Print All Student Cards",
       "preparing": "Preparing...",
       "preparingCards": "Preparing cards..."
@@ -927,6 +930,7 @@
       "progress": "Progress",
       "addPayment": "Add payment",
       "viewDetails": "View details",
+      "editDiscount": "Edit discount",
       "registeredPayments": "{count} recorded payments",
       "columns": {
         "studentName": "Student name",
@@ -989,6 +993,8 @@
       "printReceipt": "Print receipt",
       "printStatement": "Full account statement",
       "deletePayment": "Delete payment",
+      "auditPayment": "Audit receipt",
+      "audit": "Audit",
       "date": "Date",
       "paperReceipt": "Paper receipt",
       "digitalReceipt": "Digital receipt",

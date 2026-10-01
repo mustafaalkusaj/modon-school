@@ -1,5 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 import { resolveStudentContext, unauthorized } from "@/lib/student-api";
+
+const submitAssignmentSchema = z.object({
+  notes: z.string().trim().max(5000, "notes_too_long").nullish(),
+  file_url: z.string().trim().max(1000, "file_url_too_long").nullish(),
+  file_name: z.string().trim().max(255, "file_name_too_long").nullish(),
+  file_mime_type: z.string().trim().max(255, "file_mime_type_too_long").nullish(),
+});
 
 export async function POST(
   req: NextRequest,
@@ -12,27 +20,19 @@ export async function POST(
   const { supabase, schoolId, studentId, className } = ctx;
 
   /* ── validate body ── */
-  let body: {
-    notes?: string;
-    file_url?: string;
-    file_name?: string;
-    file_mime_type?: string;
-  };
-  try {
-    body = (await req.json()) as typeof body;
-  } catch {
+  const raw = await req.json().catch(() => null);
+  const parsed = submitAssignmentSchema.safeParse(raw);
+  if (!parsed.success) {
     return NextResponse.json(
-      { ok: false, error: "invalid_body" },
+      { ok: false, error: parsed.error.issues[0]?.message ?? "invalid_body" },
       { status: 400 },
     );
   }
 
-  const notes = typeof body.notes === "string" ? body.notes.trim() : "";
-  const fileUrl = typeof body.file_url === "string" ? body.file_url.trim() : "";
-  const fileName =
-    typeof body.file_name === "string" ? body.file_name.trim() : "";
-  const fileMimeType =
-    typeof body.file_mime_type === "string" ? body.file_mime_type.trim() : "";
+  const notes = parsed.data.notes ?? "";
+  const fileUrl = parsed.data.file_url ?? "";
+  const fileName = parsed.data.file_name ?? "";
+  const fileMimeType = parsed.data.file_mime_type ?? "";
 
   if (notes.length === 0 && fileUrl.length === 0) {
     return NextResponse.json(

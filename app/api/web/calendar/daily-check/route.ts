@@ -5,6 +5,7 @@ import { isOpsTokenAuthorized } from "@/lib/ops/security";
 import type { NotificationCategory } from "@/lib/notifications/types";
 import { addDaysBaghdadIso } from "@/lib/tz";
 
+import { logRouteError } from "@/lib/route-utils";
 export const dynamic = "force-dynamic";
 
 // Called by Vercel Cron daily at 21:00 UTC (00:00 Baghdad GMT+3)
@@ -27,7 +28,8 @@ export async function GET(request: NextRequest) {
 
   if (eventsError) {
     console.error("[calendar/daily-check] Events fetch error:", eventsError.message);
-    return NextResponse.json({ ok: false, error: eventsError.message }, { status: 500 });
+    logRouteError("web-calendar-daily-check", eventsError);
+    return NextResponse.json({ ok: false, error: "تعذر إكمال العملية. حاول مرة أخرى لاحقاً." }, { status: 500 });
   }
 
   if (!events || events.length === 0) {
@@ -41,7 +43,8 @@ export async function GET(request: NextRequest) {
 
   if (schoolsError) {
     console.error("[calendar/daily-check] Schools fetch error:", schoolsError.message);
-    return NextResponse.json({ ok: false, error: schoolsError.message }, { status: 500 });
+    logRouteError("web-calendar-daily-check", schoolsError);
+    return NextResponse.json({ ok: false, error: "تعذر إكمال العملية. حاول مرة أخرى لاحقاً." }, { status: 500 });
   }
 
   let notified = 0;

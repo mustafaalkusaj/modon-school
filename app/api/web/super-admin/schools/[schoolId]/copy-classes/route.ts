@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { resolveSuperAdminActorContext } from "@/lib/super-admin-server";
+import { jsonServerError } from "@/lib/route-utils";
 
 function jsonError(message: string, status: number) {
   return NextResponse.json({ error: { message } }, { status });
@@ -10,9 +11,16 @@ export async function POST(
   { params }: { params: Promise<{ schoolId: string }> },
 ) {
   const { schoolId } = await params;
-  const context = await resolveSuperAdminActorContext(req.headers.get("authorization"));
+  const context = await resolveSuperAdminActorContext(
+    req.headers.get("authorization"),
+  );
   if (!context.ok) {
-    return jsonError("message" in context ? context.message : "تعذر التحقق من صلاحيات المستخدم.", "status" in context ? context.status : 500);
+    return jsonError(
+      "message" in context
+        ? context.message
+        : "تعذر التحقق من صلاحيات المستخدم.",
+      "status" in context ? context.status : 500,
+    );
   }
 
   const sourceSchoolId = schoolId.trim();
@@ -57,7 +65,12 @@ export async function POST(
     .eq("school_id", sourceSchoolId);
 
   if (classesError) {
-    return jsonError(classesError.message || "تعذر تحميل صفوف المدرسة المصدر.", 500);
+    return jsonServerError(
+      "web-super-admin-schools-schoolId-copy-classes",
+      classesError,
+      "تعذر تحميل صفوف المدرسة المصدر.",
+      500,
+    );
   }
 
   if (!sourceClasses || sourceClasses.length === 0) {
@@ -77,7 +90,12 @@ export async function POST(
     .select("id");
 
   if (insertError) {
-    return jsonError(insertError.message || "تعذر نسخ الصفوف.", 500);
+    return jsonServerError(
+      "web-super-admin-schools-schoolId-copy-classes",
+      insertError,
+      "تعذر نسخ الصفوف.",
+      500,
+    );
   }
 
   return NextResponse.json({

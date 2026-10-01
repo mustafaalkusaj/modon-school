@@ -4,6 +4,8 @@ import { enforceRateLimit } from '@/lib/rate-limit'
 import { routeUserHasPermission } from '@/lib/route-permissions'
 import { applyBranchScopeToQuery, resolveBranchScope } from '@/lib/branch-scope'
 import type { StudentGoal, GoalStatus } from '@/lib/grades/types'
+import { excludeDeletedStudents } from "@/lib/students/soft-delete";
+import { jsonServerError } from "@/lib/route-utils"
 
 function jsonError(message: string, status: number) {
   return NextResponse.json({ error: { message } }, { status })
@@ -84,9 +86,9 @@ export async function GET(req: NextRequest) {
 
   // التحقق أن الطالب ينتمي لهذا الفرع
   const { data: studentCheck } = await applyBranchScopeToQuery(
-    actorSupabase
+    excludeDeletedStudents(actorSupabase
       .from('students')
-      .select('id')
+      .select('id'))
       .eq('id', studentId)
       .eq('school_id', targetSchoolId),
     branchScope.value,
@@ -112,7 +114,7 @@ export async function GET(req: NextRequest) {
         count: 0,
       })
     }
-    return jsonError(`تعذر جلب الأهداف: ${error.message}`, 500)
+    return jsonServerError("web/grades/goals", error, "تعذر جلب الأهداف.")
   }
 
   const goals = (data ?? []) as StudentGoal[]
@@ -224,9 +226,9 @@ export async function POST(req: NextRequest) {
 
   // التحقق أن الطالب ينتمي لهذا الفرع
   const { data: studentCheckPost } = await applyBranchScopeToQuery(
-    actorSupabase
+    excludeDeletedStudents(actorSupabase
       .from('students')
-      .select('id')
+      .select('id'))
       .eq('id', studentId!)
       .eq('school_id', targetSchoolId),
     branchScopePost.value,
@@ -257,7 +259,7 @@ export async function POST(req: NextRequest) {
     if (insertError.message?.includes('could not find the table')) {
       return jsonError('جدول student_goals غير جاهز بعد.', 503)
     }
-    return jsonError(`تعذر إنشاء الهدف: ${insertError.message}`, 500)
+    return jsonServerError("web/grades/goals", insertError, "تعذر إنشاء الهدف.")
   }
 
   return NextResponse.json(

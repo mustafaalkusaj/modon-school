@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { resolveSuperAdminActorContext } from "@/lib/super-admin-server";
+import { jsonServerError } from "@/lib/route-utils";
+import { excludeDeletedStudents } from "@/lib/students/soft-delete";
 
 function jsonError(message: string, status: number) {
   return NextResponse.json({ error: { message } }, { status });
@@ -10,7 +12,9 @@ export async function GET(
   { params }: { params: Promise<{ schoolId: string }> },
 ) {
   const { schoolId } = await params;
-  const context = await resolveSuperAdminActorContext(req.headers.get("authorization"));
+  const context = await resolveSuperAdminActorContext(
+    req.headers.get("authorization"),
+  );
   if (!context.ok) {
     return jsonError(
       "message" in context ? context.message : "تعذر التحقق من الصلاحيات.",
@@ -23,23 +27,43 @@ export async function GET(
 
   const db = context.value.dataSupabase;
 
-  const [schoolRes, studentsRes, usersRes, branchesRes, subRes] = await Promise.all([
-    db.from("schools")
-      .select("id, name, address, phone, owner_email, city, logo_url, plan, is_active, created_at")
-      .eq("id", normalizedId)
-      .maybeSingle(),
-    db.from("students").select("id", { count: "exact", head: true }).eq("school_id", normalizedId),
-    db.from("user_profiles").select("id", { count: "exact", head: true }).eq("school_id", normalizedId).neq("role", "super_admin"),
-    db.from("branches").select("id", { count: "exact", head: true }).eq("school_id", normalizedId),
-    db.from("subscriptions")
-      .select("id, plan, status, start_date, end_date, created_at")
-      .eq("school_id", normalizedId)
-      .order("created_at", { ascending: false })
-      .limit(1)
-      .maybeSingle(),
-  ]);
+  const [schoolRes, studentsRes, usersRes, branchesRes, subRes] =
+    await Promise.all([
+      db
+        .from("schools")
+        .select(
+          "id, name, address, phone, owner_email, city, logo_url, plan, is_active, created_at",
+        )
+        .eq("id", normalizedId)
+        .maybeSingle(),
+      excludeDeletedStudents(
+        db.from("students").select("id", { count: "exact", head: true }),
+      ).eq("school_id", normalizedId),
+      db
+        .from("user_profiles")
+        .select("id", { count: "exact", head: true })
+        .eq("school_id", normalizedId)
+        .neq("role", "super_admin"),
+      db
+        .from("branches")
+        .select("id", { count: "exact", head: true })
+        .eq("school_id", normalizedId),
+      db
+        .from("subscriptions")
+        .select("id, plan, status, start_date, end_date, created_at")
+        .eq("school_id", normalizedId)
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle(),
+    ]);
 
-  if (schoolRes.error) return jsonError(schoolRes.error.message || "تعذر تحميل بيانات المدرسة.", 500);
+  if (schoolRes.error)
+    return jsonServerError(
+      "web-super-admin-schools-schoolId-stats",
+      schoolRes.error,
+      "تعذر تحميل بيانات المدرسة.",
+      500,
+    );
   if (!schoolRes.data) return jsonError("المدرسة غير موجودة.", 404);
 
   return NextResponse.json({

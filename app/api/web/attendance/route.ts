@@ -1,11 +1,18 @@
+import { fetchAllRows } from "@/lib/supabase-fetch-all";
 import { NextRequest, NextResponse } from "next/server";
 
-import { applyBranchScopeToQuery, resolveBranchIdForWrite, resolveBranchScope } from "@/lib/branch-scope";
+import {
+  applyBranchScopeToQuery,
+  resolveBranchIdForWrite,
+  resolveBranchScope,
+} from "@/lib/branch-scope";
 import { resolveSchoolScopedActorContext } from "@/lib/managed-users-server";
 import { enforceRateLimit } from "@/lib/rate-limit";
 import { invalidateSchoolCacheDomains } from "@/lib/server-cache";
 import { routeUserHasPermission } from "@/lib/route-permissions";
+import { jsonServerError } from "@/lib/route-utils";
 import { baghdadIsoDate } from "@/lib/tz";
+import { excludeDeletedStudents } from "@/lib/students/soft-delete";
 
 type AttendanceStatus = "present" | "absent" | "late" | "excused";
 
@@ -46,7 +53,9 @@ function getBaghdadIsoDate(date: Date = new Date()): string {
   return baghdadIsoDate(date);
 }
 
-function buildHistory(rows: Array<{ attendance_date: string; status: AttendanceStatus }>) {
+function buildHistory(
+  rows: Array<{ attendance_date: string; status: AttendanceStatus }>,
+) {
   const grouped: Record<
     string,
     { present: number; absent: number; late: number; excused: number }
@@ -64,13 +73,21 @@ function buildHistory(rows: Array<{ attendance_date: string; status: AttendanceS
     .sort((left, right) => (left > right ? -1 : 1))
     .map((date) => {
       const counts = grouped[date];
-      const total = counts.present + counts.absent + counts.late + counts.excused;
-      const rate = total ? Math.round(((counts.present + counts.late) / total) * 100) : 0;
+      const total =
+        counts.present + counts.absent + counts.late + counts.excused;
+      const rate = total
+        ? Math.round(((counts.present + counts.late) / total) * 100)
+        : 0;
       return { date, ...counts, total, rate };
     });
 }
 
-async function resolveAttendanceContext(req: NextRequest, schoolId: string | null, namespace: string, maxHits: number) {
+async function resolveAttendanceContext(
+  req: NextRequest,
+  schoolId: string | null,
+  namespace: string,
+  maxHits: number,
+) {
   const context = await resolveSchoolScopedActorContext(
     schoolId,
     {
@@ -84,7 +101,9 @@ async function resolveAttendanceContext(req: NextRequest, schoolId: string | nul
     return {
       ok: false as const,
       response: jsonError(
-        "message" in context ? context.message : "تعذر التحقق من صلاحيات المستخدم.",
+        "message" in context
+          ? context.message
+          : "تعذر التحقق من صلاحيات المستخدم.",
         "status" in context ? context.status : 500,
       ),
     };
@@ -106,78 +125,120 @@ async function resolveAttendanceContext(req: NextRequest, schoolId: string | nul
 
 export async function GET(req: NextRequest) {
   const schoolId = req.nextUrl.searchParams.get("schoolId");
-  const date = normalizeDate(req.nextUrl.searchParams.get("date")) ?? getBaghdadIsoDate();
+  const date =
+    normalizeDate(req.nextUrl.searchParams.get("date")) ?? getBaghdadIsoDate();
 
-  const context = await resolveAttendanceContext(req, schoolId, "attendance-snapshot", 120);
+  const context = await resolveAttendanceContext(
+    req,
+    schoolId,
+    "attendance-snapshot",
+    120,
+  );
   if (!context.ok) {
     return context.response;
   }
 
-  const requestedBranchId = req.nextUrl.searchParams.get("branchId") ?? req.nextUrl.searchParams.get("branch_id");
+  const requestedBranchId =
+    req.nextUrl.searchParams.get("branchId") ??
+    req.nextUrl.searchParams.get("branch_id");
   const branchScope = resolveBranchScope(context.value, requestedBranchId);
   if (!branchScope.ok) {
     return jsonError(branchScope.message, branchScope.status);
   }
 
   const { actorSupabase, targetSchoolId } = context.value;
-  const fromDate = getBaghdadIsoDate(new Date(new Date(`${date}T00:00:00`).getTime() - 30 * 24 * 60 * 60 * 1000));
+  const fromDate = getBaghdadIsoDate(
+    new Date(new Date(`${date}T00:00:00`).getTime() - 30 * 24 * 60 * 60 * 1000),
+  );
 
   // Run permission check and all data queries in parallel
-  const [canViewAttendance, studentsResult, recordsResult, historyResult] = await Promise.all([
-    routeUserHasPermission(actorSupabase, context.value.actorUserId, "view_attendance"),
-    applyBranchScopeToQuery(
-      actorSupabase
-      .from("students")
-      .select("id, full_name, class_name, section, status, school_id, branch_id")
-      .eq("school_id", targetSchoolId)
-      .neq("status", "deleted")
-      .order("class_name", { ascending: true })
-      .order("full_name", { ascending: true })
-      .limit(3000),
-      branchScope.value,
-    ),
-    applyBranchScopeToQuery(
-      actorSupabase
-      .from("attendance_records")
-      .select("id, student_id, status, note, updated_at")
-      .eq("school_id", targetSchoolId)
-      .eq("attendance_date", date),
-      branchScope.value,
-    ),
-    applyBranchScopeToQuery(
-      actorSupabase
-      .from("attendance_records")
-      .select("attendance_date, status")
-      .eq("school_id", targetSchoolId)
-      .gte("attendance_date", fromDate)
-      .lte("attendance_date", date)
-      .limit(10_000),
-      branchScope.value,
-    ),
-  ]);
+  const [canViewAttendance, studentsResult, recordsResult, historyResult] =
+    await Promise.all([
+      routeUserHasPermission(
+        actorSupabase,
+        context.value.actorUserId,
+        "view_attendance",
+      ),
+      applyBranchScopeToQuery(
+        excludeDeletedStudents(
+          actorSupabase
+            .from("students")
+            .select(
+              "id, full_name, class_name, section, status, school_id, branch_id",
+            ),
+        )
+          .eq("school_id", targetSchoolId)
+          .neq("status", "deleted")
+          .order("class_name", { ascending: true })
+          .order("full_name", { ascending: true })
+          .limit(3000),
+        branchScope.value,
+      ),
+      applyBranchScopeToQuery(
+        actorSupabase
+          .from("attendance_records")
+          .select("id, student_id, status, note, updated_at")
+          .eq("school_id", targetSchoolId)
+          .eq("attendance_date", date),
+        branchScope.value,
+      ),
+      // Paged: `.limit(10_000)` was silently capped at 1000 rows, which a
+      // school of ~650 students passes in two days of attendance.
+      fetchAllRows(() =>
+        applyBranchScopeToQuery(
+          actorSupabase
+            .from("attendance_records")
+            .select("attendance_date, status")
+            .eq("school_id", targetSchoolId)
+            .gte("attendance_date", fromDate)
+            .lte("attendance_date", date),
+          branchScope.value,
+        ).order("id"),
+      ),
+    ]);
 
   if (!canViewAttendance) {
     return jsonError("ليس لديك صلاحية عرض الحضور.", 403);
   }
 
   if (studentsResult.error) {
-    return jsonError(studentsResult.error.message || "تعذر تحميل قائمة الطلاب.", 500);
+    return jsonServerError(
+      "web-attendance",
+      studentsResult.error,
+      "تعذر تحميل قائمة الطلاب.",
+      500,
+    );
   }
 
   if (recordsResult.error) {
-    return jsonError(recordsResult.error.message || "تعذر تحميل سجلات حضور اليوم.", 500);
+    return jsonServerError(
+      "web-attendance",
+      recordsResult.error,
+      "تعذر تحميل سجلات حضور اليوم.",
+      500,
+    );
   }
 
   if (historyResult.error) {
-    return jsonError(historyResult.error.message || "تعذر تحميل سجل الحضور السابق.", 500);
+    return jsonServerError(
+      "web-attendance",
+      historyResult.error,
+      "تعذر تحميل سجل الحضور السابق.",
+      500,
+    );
   }
 
-  const historyRows = ((historyResult.data ?? []) as Array<Record<string, unknown>>)
+  const historyRows = (
+    (historyResult.data ?? []) as Array<Record<string, unknown>>
+  )
     .map((row) => ({
       attendance_date: String(row.attendance_date ?? ""),
       status: normalizeAttendanceStatus(row.status),
     }))
-    .filter((row): row is { attendance_date: string; status: AttendanceStatus } => Boolean(row.attendance_date && row.status));
+    .filter(
+      (row): row is { attendance_date: string; status: AttendanceStatus } =>
+        Boolean(row.attendance_date && row.status),
+    );
 
   return NextResponse.json({
     ok: true,
@@ -188,24 +249,37 @@ export async function GET(req: NextRequest) {
 }
 
 export async function POST(req: NextRequest) {
-  const body = (await req.json().catch(() => null)) as
-    | { school_id?: unknown; attendance_date?: unknown; entries?: unknown; branch_id?: unknown }
-    | null;
+  const body = (await req.json().catch(() => null)) as {
+    school_id?: unknown;
+    attendance_date?: unknown;
+    entries?: unknown;
+    branch_id?: unknown;
+  } | null;
 
-  const schoolId = typeof body?.school_id === "string" ? body.school_id.trim() : null;
-  const attendanceDate = normalizeDate(typeof body?.attendance_date === "string" ? body.attendance_date : null);
+  const schoolId =
+    typeof body?.school_id === "string" ? body.school_id.trim() : null;
+  const attendanceDate = normalizeDate(
+    typeof body?.attendance_date === "string" ? body.attendance_date : null,
+  );
 
   if (!schoolId || !attendanceDate) {
     return jsonError("بيانات الحضور غير مكتملة.", 400);
   }
 
-  const context = await resolveAttendanceContext(req, schoolId, "attendance-save", 45);
+  const context = await resolveAttendanceContext(
+    req,
+    schoolId,
+    "attendance-save",
+    45,
+  );
   if (!context.ok) {
     return context.response;
   }
 
   const requestedBranchId =
-    typeof body?.branch_id === "string" && body.branch_id.trim().length > 0 ? body.branch_id.trim() : null;
+    typeof body?.branch_id === "string" && body.branch_id.trim().length > 0
+      ? body.branch_id.trim()
+      : null;
   const branchScope = resolveBranchScope(context.value, requestedBranchId);
   if (!branchScope.ok) {
     return jsonError(branchScope.message, branchScope.status);
@@ -217,7 +291,8 @@ export async function POST(req: NextRequest) {
   for (const rawEntry of rawEntries) {
     if (!rawEntry || typeof rawEntry !== "object") continue;
     const entry = rawEntry as Record<string, unknown>;
-    const studentId = typeof entry.student_id === "string" ? entry.student_id.trim() : "";
+    const studentId =
+      typeof entry.student_id === "string" ? entry.student_id.trim() : "";
     const status = normalizeAttendanceStatus(entry.status);
     if (!studentId || !status) continue;
     dedupedEntries.set(studentId, {
@@ -233,7 +308,11 @@ export async function POST(req: NextRequest) {
   }
 
   const { actorSupabase, targetSchoolId } = context.value;
-  const canSaveAttendance = await routeUserHasPermission(actorSupabase, context.value.actorUserId, "take_attendance");
+  const canSaveAttendance = await routeUserHasPermission(
+    actorSupabase,
+    context.value.actorUserId,
+    "take_attendance",
+  );
   if (!canSaveAttendance) {
     return jsonError("ليس لديك صلاحية تسجيل الحضور.", 403);
   }
@@ -252,24 +331,34 @@ export async function POST(req: NextRequest) {
       .select("role")
       .eq("id", context.value.actorUserId)
       .maybeSingle();
-    const actorRole = (actorProfile as { role?: string } | null)?.role ?? "employee";
+    const actorRole =
+      (actorProfile as { role?: string } | null)?.role ?? "employee";
     if (actorRole === "employee") {
-      return jsonError("لا يمكن تعديل سجلات الحضور لأيام سابقة. تواصل مع المشرف.", 403);
+      return jsonError(
+        "لا يمكن تعديل سجلات الحضور لأيام سابقة. تواصل مع المشرف.",
+        403,
+      );
     }
   }
   const studentIds = entries.map((entry) => entry.student_id);
-  const { data: students, error: studentsError } = await applyBranchScopeToQuery(
-    actorSupabase
-      .from("students")
-      .select("id, branch_id")
-      .eq("school_id", targetSchoolId)
-      .in("id", studentIds)
-      .neq("status", "deleted"),
-    branchScope.value,
-  );
+  const { data: students, error: studentsError } =
+    await applyBranchScopeToQuery(
+      excludeDeletedStudents(
+        actorSupabase.from("students").select("id, branch_id"),
+      )
+        .eq("school_id", targetSchoolId)
+        .in("id", studentIds)
+        .neq("status", "deleted"),
+      branchScope.value,
+    );
 
   if (studentsError) {
-    return jsonError(studentsError.message || "تعذر التحقق من الطلاب قبل الحفظ.", 500);
+    return jsonServerError(
+      "web-attendance",
+      studentsError,
+      "تعذر التحقق من الطلاب قبل الحفظ.",
+      500,
+    );
   }
 
   const branchByStudentId = new Map(
@@ -280,10 +369,16 @@ export async function POST(req: NextRequest) {
   );
 
   if (branchByStudentId.size !== studentIds.length) {
-    return jsonError("بعض سجلات الحضور تشير إلى طلاب خارج نطاق المدرسة الحالية.", 400);
+    return jsonError(
+      "بعض سجلات الحضور تشير إلى طلاب خارج نطاق المدرسة الحالية.",
+      400,
+    );
   }
 
-  const writeBranch = resolveBranchIdForWrite(branchScope.value, requestedBranchId);
+  const writeBranch = resolveBranchIdForWrite(
+    branchScope.value,
+    requestedBranchId,
+  );
   if (!writeBranch.ok) {
     return jsonError(writeBranch.message, writeBranch.status);
   }
@@ -291,7 +386,8 @@ export async function POST(req: NextRequest) {
   const now = new Date().toISOString();
   const payload = entries.map((entry) => ({
     school_id: targetSchoolId,
-    branch_id: writeBranch.value ?? branchByStudentId.get(entry.student_id) ?? null,
+    branch_id:
+      writeBranch.value ?? branchByStudentId.get(entry.student_id) ?? null,
     student_id: entry.student_id,
     attendance_date: attendanceDate,
     status: entry.status,
@@ -305,10 +401,18 @@ export async function POST(req: NextRequest) {
     .upsert(payload, { onConflict: "school_id,student_id,attendance_date" });
 
   if (error) {
-    return jsonError(error.message || "تعذر حفظ سجلات الحضور.", 500);
+    return jsonServerError(
+      "web-attendance",
+      error,
+      "تعذر حفظ سجلات الحضور.",
+      500,
+    );
   }
 
-  invalidateSchoolCacheDomains(targetSchoolId, ["dashboard-overview", "reports-overview"]);
+  invalidateSchoolCacheDomains(targetSchoolId, [
+    "dashboard-overview",
+    "reports-overview",
+  ]);
 
   // Event-driven notifications for absent/late students — additive, never blocks the write.
   try {
@@ -322,7 +426,10 @@ export async function POST(req: NextRequest) {
           notifyAbsence({
             supabase: actorSupabase,
             schoolId: targetSchoolId,
-            branchId: writeBranch.value ?? branchByStudentId.get(entry.student_id) ?? null,
+            branchId:
+              writeBranch.value ??
+              branchByStudentId.get(entry.student_id) ??
+              null,
             studentId: entry.student_id,
             attendanceDate,
             status: entry.status,

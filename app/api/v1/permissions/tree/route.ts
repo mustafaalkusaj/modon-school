@@ -12,7 +12,10 @@ export async function GET(req: NextRequest) {
     req.headers.get("authorization"),
   );
   if (!context.ok) {
-    return jsonError("message" in context ? context.message : "غير مصرح", "status" in context ? context.status : 403);
+    return jsonError(
+      "message" in context ? context.message : "غير مصرح",
+      "status" in context ? context.status : 403,
+    );
   }
 
   const service = createServiceSupabaseClient();
@@ -21,7 +24,13 @@ export async function GET(req: NextRequest) {
     const tree = await loadPermissionTree(service);
     return NextResponse.json(
       { ok: true, tree },
-      { headers: { "Cache-Control": "public, s-maxage=300, stale-while-revalidate=60" } },
+      {
+        headers: {
+          // Auth-gated, tenant-specific: a shared CDN must never be able to
+          // serve one tenant's permission tree to another.
+          "Cache-Control": "private, no-store",
+        },
+      },
     );
   } catch {
     return jsonError("تعذر تحميل شجرة الصلاحيات", 500);

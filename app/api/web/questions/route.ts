@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { resolveSchoolScopedActorContext } from "@/lib/managed-users-server";
 
+import { logRouteError } from "@/lib/route-utils";
 export const dynamic = "force-dynamic";
 
 const ALLOWED_ROLES = ["admin", "super_admin", "employee"] as const;
@@ -46,10 +47,8 @@ export async function GET(request: NextRequest) {
 
   const { data, error } = await query;
   if (error) {
-    return NextResponse.json(
-      { ok: false, error: error.message },
-      { status: 500 },
-    );
+    logRouteError("web-questions", error);
+    return NextResponse.json({ ok: false, error: "تعذر إكمال العملية. حاول مرة أخرى لاحقاً." }, { status: 500 });
   }
 
   return NextResponse.json({ ok: true, items: data ?? [] });
@@ -103,10 +102,8 @@ export async function POST(request: NextRequest) {
     .single();
 
   if (error) {
-    return NextResponse.json(
-      { ok: false, error: error.message },
-      { status: 500 },
-    );
+    logRouteError("web-questions", error);
+    return NextResponse.json({ ok: false, error: "تعذر إكمال العملية. حاول مرة أخرى لاحقاً." }, { status: 500 });
   }
 
   return NextResponse.json({ ok: true, item: data }, { status: 201 });
@@ -145,10 +142,8 @@ export async function DELETE(request: NextRequest) {
     .eq("school_id", targetSchoolId);
 
   if (error) {
-    return NextResponse.json(
-      { ok: false, error: error.message },
-      { status: 500 },
-    );
+    logRouteError("web-questions", error);
+    return NextResponse.json({ ok: false, error: "تعذر إكمال العملية. حاول مرة أخرى لاحقاً." }, { status: 500 });
   }
 
   return NextResponse.json({ ok: true });

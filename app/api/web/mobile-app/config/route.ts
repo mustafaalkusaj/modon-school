@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { resolveSuperAdminActorContext } from "@/lib/super-admin-server";
 import { createServiceSupabaseClient } from "@/lib/supabase-server";
 import { buildSchoolCacheTag, invalidateCacheTags } from "@/lib/server-cache";
+import { isValidUUID, jsonServerError } from "@/lib/route-utils";
 
 const ENDPOINT_PUT = "PUT /api/web/mobile-app/config";
 const APP_VERSION_KEY = "app_version";
@@ -18,11 +19,15 @@ type AppVersionValue = {
 };
 
 function normalizeVersionValue(raw: unknown): AppVersionValue {
-  const obj = raw && typeof raw === "object" ? (raw as Record<string, unknown>) : {};
+  const obj =
+    raw && typeof raw === "object" ? (raw as Record<string, unknown>) : {};
   return {
     min_supported_version:
-      typeof obj.min_supported_version === "string" ? obj.min_supported_version.trim() : "",
-    latest_version: typeof obj.latest_version === "string" ? obj.latest_version.trim() : "",
+      typeof obj.min_supported_version === "string"
+        ? obj.min_supported_version.trim()
+        : "",
+    latest_version:
+      typeof obj.latest_version === "string" ? obj.latest_version.trim() : "",
     force_update: Boolean(obj.force_update),
   };
 }
@@ -33,30 +38,69 @@ function normalizeVersionValue(raw: unknown): AppVersionValue {
  * (with the global fallback applied when reading a school override).
  */
 export async function GET(request: NextRequest) {
-  const context = await resolveSuperAdminActorContext(request.headers.get("authorization"));
+  const context = await resolveSuperAdminActorContext(
+    request.headers.get("authorization"),
+  );
   if (!context.ok) {
     return jsonError(
-      "message" in context ? context.message : "تعذر التحقق من صلاحيات المستخدم.",
+      "message" in context
+        ? context.message
+        : "تعذر التحقق من صلاحيات المستخدم.",
       "status" in context ? context.status : 500,
     );
   }
 
-  const schoolIdParam = (new URL(request.url).searchParams.get("schoolId") ?? "").trim();
+  const schoolIdParam = (
+    new URL(request.url).searchParams.get("schoolId") ?? ""
+  ).trim();
   const schoolId = schoolIdParam || null;
 
-  const supabase = createServiceSupabaseClient();
-  let query = supabase.from("app_config").select("school_id, value").eq("key", APP_VERSION_KEY);
-  query = schoolId
-    ? query.or(`school_id.eq.${schoolId},school_id.is.null`)
-    : query.is("school_id", null);
-
-  const { data, error } = await query;
-  if (error) {
-    return jsonError(`تعذر تحميل إعدادات الإصدار: ${error.message}`, 500);
+  if (schoolId && !isValidUUID(schoolId)) {
+    return jsonError("معرف المدرسة غير صالح.", 400);
   }
 
-  const rows = (data ?? []) as Array<{ school_id: string | null; value: unknown }>;
-  const scoped = schoolId ? rows.find((r) => r.school_id === schoolId) : undefined;
+  const supabase = createServiceSupabaseClient();
+
+  // The scoped override and the global fallback are two separate rows; fetch
+  // them with plain equality filters instead of building a PostgREST `or()`
+  // string out of caller-supplied input.
+  const globalQuery = supabase
+    .from("app_config")
+    .select("school_id, value")
+    .eq("key", APP_VERSION_KEY)
+    .is("school_id", null);
+
+  const [globalResult, scopedResult] = await Promise.all([
+    globalQuery,
+    schoolId
+      ? supabase
+          .from("app_config")
+          .select("school_id, value")
+          .eq("key", APP_VERSION_KEY)
+          .eq("school_id", schoolId)
+      : Promise.resolve({ data: [], error: null } as const),
+  ]);
+
+  const error = globalResult.error ?? scopedResult.error;
+  if (error) {
+    return jsonServerError(
+      "web-mobile-app-config",
+      error,
+      "تعذر تحميل إعدادات الإصدار",
+      500,
+    );
+  }
+
+  const rows = [
+    ...(scopedResult.data ?? []),
+    ...(globalResult.data ?? []),
+  ] as Array<{
+    school_id: string | null;
+    value: unknown;
+  }>;
+  const scoped = schoolId
+    ? rows.find((r) => r.school_id === schoolId)
+    : undefined;
   const global = rows.find((r) => r.school_id === null);
   const chosen = scoped ?? global;
 
@@ -74,10 +118,14 @@ export async function GET(request: NextRequest) {
  * Upserts the app_version config row (global when schoolId is empty/null).
  */
 export async function PUT(request: NextRequest) {
-  const context = await resolveSuperAdminActorContext(request.headers.get("authorization"));
+  const context = await resolveSuperAdminActorContext(
+    request.headers.get("authorization"),
+  );
   if (!context.ok) {
     return jsonError(
-      "message" in context ? context.message : "تعذر التحقق من صلاحيات المستخدم.",
+      "message" in context
+        ? context.message
+        : "تعذر التحقق من صلاحيات المستخدم.",
       "status" in context ? context.status : 500,
     );
   }
@@ -89,7 +137,10 @@ export async function PUT(request: NextRequest) {
     return jsonError(`${ENDPOINT_PUT}: جسم الطلب غير صالح.`, 400);
   }
 
-  const schoolId = body.schoolId && String(body.schoolId).trim() ? String(body.schoolId).trim() : null;
+  const schoolId =
+    body.schoolId && String(body.schoolId).trim()
+      ? String(body.schoolId).trim()
+      : null;
   const value = normalizeVersionValue(body);
 
   if (!value.latest_version) {
@@ -101,7 +152,10 @@ export async function PUT(request: NextRequest) {
   // Manual upsert: partial unique indexes (one for school rows, one for the
   // global row) are not addressable by a single onConflict target, so we
   // check-then-write to keep a single row per (school_id, key).
-  let existingQuery = supabase.from("app_config").select("id").eq("key", APP_VERSION_KEY);
+  let existingQuery = supabase
+    .from("app_config")
+    .select("id")
+    .eq("key", APP_VERSION_KEY);
   existingQuery = schoolId
     ? existingQuery.eq("school_id", schoolId)
     : existingQuery.is("school_id", null);
@@ -113,12 +167,27 @@ export async function PUT(request: NextRequest) {
       .from("app_config")
       .update({ value, updated_at: nowIso })
       .eq("id", (existing as { id: string }).id);
-    if (error) return jsonError(`تعذر حفظ إعدادات الإصدار: ${error.message}`, 500);
+    if (error)
+      return jsonServerError(
+        "web-mobile-app-config",
+        error,
+        "تعذر حفظ إعدادات الإصدار",
+        500,
+      );
   } else {
-    const { error } = await supabase
-      .from("app_config")
-      .insert({ school_id: schoolId, key: APP_VERSION_KEY, value, updated_at: nowIso });
-    if (error) return jsonError(`تعذر حفظ إعدادات الإصدار: ${error.message}`, 500);
+    const { error } = await supabase.from("app_config").insert({
+      school_id: schoolId,
+      key: APP_VERSION_KEY,
+      value,
+      updated_at: nowIso,
+    });
+    if (error)
+      return jsonServerError(
+        "web-mobile-app-config",
+        error,
+        "تعذر حفظ إعدادات الإصدار",
+        500,
+      );
   }
 
   // Clear cached app-config reads (global + this school's override path).

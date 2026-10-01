@@ -6,7 +6,7 @@
     "dev": "next dev --turbopack",
     "build": "next build --webpack",
     "start": "next start",
-    "lint": "eslint",
+    "lint": "eslint .",
     "typecheck": "node -e \"const fs=require('node:fs'); for (const path of ['.next/types','.next/dev/types','tsconfig.tsbuildinfo']) fs.rmSync(path,{recursive:true,force:true});\" && npx next typegen && tsc --noEmit --incremental false",
     "test": "vitest run",
     "test:watch": "vitest",
@@ -27,7 +27,7 @@
     "check:schema": "node scripts/check-schema-drift.mjs",
     "db:preflight": "node scripts/check-supabase-target.mjs",
     "db:push:safe": "npm run db:preflight && npx supabase db push",
-    "db:validate-migrations": "node scripts/validate-migrations-rollback.mjs supabase/migrations/20260713171635_teacher_mobile_release_security.sql supabase/migrations/20260713171933_messaging_safety_and_account_deletion.sql supabase/migrations/20260713191144_exam_atomic_creation.sql"
+    "db:validate-migrations": "node scripts/validate-migrations-rollback.mjs supabase/migrations/20261001090000_branch_isolation_columns_and_triggers.sql supabase/migrations/20261001090100_private_schema_rls_helper_functions.sql supabase/migrations/20261001090200_storage_buckets_and_policies.sql supabase/migrations/MANUAL_20261001090300_storage_bucket_privacy_flip.sql supabase/migrations/20261001090400_audit_logs_append_only.sql supabase/migrations/20261001090500_managed_credentials_bcrypt.sql supabase/migrations/20261001090600_finance_schema_and_totals.sql supabase/migrations/20261001090700_finance_rpcs.sql supabase/migrations/20261001090800_grade_entries_triggers.sql supabase/migrations/20261001090900_exam_attempts_and_rpcs.sql supabase/migrations/20261001091000_distribution_tables.sql supabase/migrations/20261001091100_app_management_tables.sql supabase/migrations/20261001091200_account_deletion_pipeline.sql supabase/migrations/20261001091300_qr_login_tokens_additive_columns.sql supabase/migrations/20261001091400_schema_gaps_triggers_indexes.sql supabase/migrations/20261001091500_security_hardening.sql"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "0.96.0",
@@ -40,6 +40,7 @@
     "exceljs": "4.4.0",
     "framer-motion": "12.40.0",
     "html5-qrcode": "^2.3.8",
+    "ioredis": "^6.0.0",
     "lucide-react": "0.577.0",
     "next": "16.3.6",
     "next-intl": "^4.13.2",

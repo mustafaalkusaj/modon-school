@@ -418,7 +418,7 @@ export default function TeacherAttendancePage() {
       if (!response.ok) throw new Error(getApiError(payload, t("daily.errorLoadTeachers")));
       setTeachers(payload?.teachers ?? []);
     } catch { setTeachers([]); }
-  }, [getSchoolAndBranch]);
+  }, [getSchoolAndBranch, t]);
 
   // ── Fetch daily ────────────────────────────────────────────────────────────
   const fetchDailyRecords = useCallback(async (forDate: string, teacherList: Teacher[]) => {
@@ -441,7 +441,7 @@ export default function TeacherAttendancePage() {
       setRecords(initial);
     } catch (e) { setDailyError(e instanceof Error ? e.message : t("daily.errorLoad"));
     } finally { setLoading(false); }
-  }, [getSchoolAndBranch]);
+  }, [getSchoolAndBranch, t]);
 
   // ── Copy yesterday ─────────────────────────────────────────────────────────
   const copyYesterday = useCallback(async () => {
@@ -466,7 +466,7 @@ export default function TeacherAttendancePage() {
       });
     } catch (e) { setDailyError(e instanceof Error ? e.message : t("daily.errorYesterday"));
     } finally { setLoading(false); }
-  }, [getSchoolAndBranch]);
+  }, [getSchoolAndBranch, t]);
 
   // ── Save ───────────────────────────────────────────────────────────────────
   const saveAllRecords = useCallback(async () => {
@@ -492,7 +492,7 @@ export default function TeacherAttendancePage() {
       setTimeout(() => setDailySuccess(""), 3000);
     } catch (e) { setDailyError(e instanceof Error ? e.message : t("daily.errorSave"));
     } finally { setSaving(false); }
-  }, [getSchoolAndBranch, records, date]);
+  }, [getSchoolAndBranch, t, records, date]);
 
   // ── Monthly summary ────────────────────────────────────────────────────────
   const fetchMonthlySummary = useCallback(async (year: number, month: number) => {
@@ -507,7 +507,7 @@ export default function TeacherAttendancePage() {
       setSummaryData(payload?.teachers ?? []);
     } catch (e) { setSummaryError(e instanceof Error ? e.message : t("monthly.errorLoad")); setSummaryData([]);
     } finally { setSummaryLoading(false); }
-  }, [getSchoolAndBranch]);
+  }, [getSchoolAndBranch, t]);
 
   // ── Report ─────────────────────────────────────────────────────────────────
   const fetchReport = useCallback(async () => {
@@ -547,7 +547,7 @@ export default function TeacherAttendancePage() {
       setReportDetails(allDetails.sort((a, b) => a.date.localeCompare(b.date)));
     } catch (e) { setReportError(e instanceof Error ? e.message : t("reports.errorLoad")); setReportData([]); setReportDetails([]);
     } finally { setReportLoading(false); }
-  }, [getSchoolAndBranch, reportFromYear, reportFromMonth, reportToYear, reportToMonth, reportTeacherFilter]);
+  }, [getSchoolAndBranch, t, reportFromYear, reportFromMonth, reportToYear, reportToMonth, reportTeacherFilter]);
 
   // ── Settings ───────────────────────────────────────────────────────────────
   const fetchSettings = useCallback(async () => {
@@ -562,7 +562,7 @@ export default function TeacherAttendancePage() {
       if (payload?.settings) setSettings(payload.settings);
     } catch (e) { setSettingsError(e instanceof Error ? e.message : t("settings.errorLoad"));
     } finally { setSettingsLoading(false); }
-  }, [getSchoolAndBranch]);
+  }, [getSchoolAndBranch, t]);
 
   const saveSettings = useCallback(async () => {
     const { schoolId, branchId } = await getSchoolAndBranch();
@@ -578,7 +578,7 @@ export default function TeacherAttendancePage() {
       setTimeout(() => setSettingsSuccess(""), 3000);
     } catch (e) { setSettingsError(e instanceof Error ? e.message : t("settings.errorSave"));
     } finally { setSettingsSaving(false); }
-  }, [getSchoolAndBranch, settings]);
+  }, [getSchoolAndBranch, t, settings]);
 
   // ── Effects ────────────────────────────────────────────────────────────────
   useEffect(() => {

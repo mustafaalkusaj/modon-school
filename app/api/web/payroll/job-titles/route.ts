@@ -3,7 +3,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { applyBranchScopeToQuery, resolveBranchIdForWrite, resolveBranchScope } from "@/lib/branch-scope";
 import { resolveSchoolScopedActorContext } from "@/lib/managed-users-server";
 import { enforceRateLimit } from "@/lib/rate-limit";
-import { jsonError, logRouteError } from "@/lib/route-utils";
+import { jsonError, logRouteError, jsonServerError } from "@/lib/route-utils";
 import { routeUserHasPermission } from "@/lib/route-permissions";
 
 export async function GET(req: NextRequest) {
@@ -66,7 +66,7 @@ export async function GET(req: NextRequest) {
   const { data, error } = await query;
 
   if (error) {
-    return jsonError(error.message || "تعذر تحميل المسميات الوظيفية.", 500);
+    return jsonServerError("web/payroll/job-titles", error, "تعذر تحميل المسميات الوظيفية.");
   }
 
   return NextResponse.json({ ok: true, jobTitles: data ?? [] });
@@ -157,7 +157,7 @@ export async function POST(req: NextRequest) {
 
   if (error) {
     logRouteError("payroll-job-titles-post", error, { actorUserId, schoolId: targetSchoolId });
-    return jsonError(error.message || "تعذر إضافة المسمى الوظيفي.", 500);
+    return jsonServerError("web/payroll/job-titles", error, "تعذر إضافة المسمى الوظيفي.");
   }
 
   return NextResponse.json({ ok: true, jobTitle: data }, { status: 201 });

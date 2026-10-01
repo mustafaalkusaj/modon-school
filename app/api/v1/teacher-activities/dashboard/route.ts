@@ -11,7 +11,10 @@ export async function GET(req: NextRequest) {
     req.headers.get("authorization"),
   );
   if (!context.ok)
-    return jsonError("message" in context ? context.message : "غير مصرح", "status" in context ? context.status : 403);
+    return jsonError(
+      "message" in context ? context.message : "غير مصرح",
+      "status" in context ? context.status : 403,
+    );
 
   const { targetSchoolId } = context.value;
   const url = new URL(req.url);
@@ -22,7 +25,11 @@ export async function GET(req: NextRequest) {
   const now = new Date();
   let dateFrom: string;
   if (period === "today") {
-    dateFrom = new Date(now.getFullYear(), now.getMonth(), now.getDate()).toISOString();
+    dateFrom = new Date(
+      now.getFullYear(),
+      now.getMonth(),
+      now.getDate(),
+    ).toISOString();
   } else if (period === "month") {
     dateFrom = new Date(now.getFullYear(), now.getMonth(), 1).toISOString();
   } else {
@@ -47,7 +54,14 @@ export async function GET(req: NextRequest) {
 
   const { count: reportsCount } = await service
     .from("activity_reports")
-    .select("id", { count: "exact", head: true })
+    // activity_reports carries no school_id of its own — it is scoped through
+    // the reported activity. Without this inner join the count leaks the
+    // pending-report volume of every other tenant.
+    .select("id, teacher_activities!inner(school_id)", {
+      count: "exact",
+      head: true,
+    })
+    .eq("teacher_activities.school_id", targetSchoolId)
     .eq("status", "pending");
 
   const { data: allTeachers } = await service
@@ -64,9 +78,11 @@ export async function GET(req: NextRequest) {
     .gte("created_at", dateFrom)
     .order("created_at", { ascending: false });
 
-  const teacherCounts: Record<string, { count: number; teacher_id: string }> = {};
+  const teacherCounts: Record<string, { count: number; teacher_id: string }> =
+    {};
   for (const a of teacherActivity ?? []) {
-    if (!teacherCounts[a.teacher_id]) teacherCounts[a.teacher_id] = { count: 0, teacher_id: a.teacher_id };
+    if (!teacherCounts[a.teacher_id])
+      teacherCounts[a.teacher_id] = { count: 0, teacher_id: a.teacher_id };
     teacherCounts[a.teacher_id].count++;
   }
 
@@ -79,7 +95,8 @@ export async function GET(req: NextRequest) {
 
   const lastActivityByTeacher: Record<string, string> = {};
   for (const a of lastActivities ?? []) {
-    if (!lastActivityByTeacher[a.teacher_id]) lastActivityByTeacher[a.teacher_id] = a.created_at ?? "";
+    if (!lastActivityByTeacher[a.teacher_id])
+      lastActivityByTeacher[a.teacher_id] = a.created_at ?? "";
   }
 
   const sevenDaysAgo = new Date();
@@ -106,14 +123,23 @@ export async function GET(req: NextRequest) {
     }));
 
   const weeklyChart: Array<{ date: string; count: number; label: string }> = [];
-  const dayNames = ["الأحد", "الاثنين", "الثلاثاء", "الأربعاء", "الخميس", "الجمعة", "السبت"];
+  const dayNames = [
+    "الأحد",
+    "الاثنين",
+    "الثلاثاء",
+    "الأربعاء",
+    "الخميس",
+    "الجمعة",
+    "السبت",
+  ];
   for (let i = 6; i >= 0; i--) {
     const dateStr = addDaysBaghdadIso(-i);
     const count = (typeCounts ?? []).filter((a) => {
       const ad = new Date(a.created_at ?? "");
       return baghdadIsoDate(ad) === dateStr;
     }).length;
-    weeklyChart.push({ date: dateStr, count, label: dayNames[new Date(`${dateStr}T00:00:00Z`).getUTCDay()] });
+    const weekday = new Date(`${dateStr}T00:00:00Z`).getUTCDay();
+    weeklyChart.push({ date: dateStr, count, label: dayNames[weekday] });
   }
 
   return NextResponse.json({

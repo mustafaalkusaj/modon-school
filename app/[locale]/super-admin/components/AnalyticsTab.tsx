@@ -7,6 +7,8 @@ import { PLAN_LABELS } from "../_components/types";
 import type { ActiveTab } from "../_components";
 
 interface AnalyticsTabProps {
+  /** Navigates the super-admin shell to another tab. The headline stat tiles
+   *  are links to their underlying tab; without this they render inert. */
   onNavigate?: (tab: ActiveTab) => void;
 }
 
@@ -73,7 +75,7 @@ function CSSBarChart({ segments }: { segments: { label: string; count: number; c
   );
 }
 
-export function AnalyticsTab(_props: AnalyticsTabProps = {}) {
+export function AnalyticsTab({ onNavigate }: AnalyticsTabProps = {}) {
   const [schools, setSchools] = useState<SchoolRecord[]>([]);
   const [users, setUsers] = useState<UserRecord[]>([]);
   const [subscriptions, setSubscriptions] = useState<SubscriptionRecord[]>([]);
@@ -282,12 +284,13 @@ export function AnalyticsTab(_props: AnalyticsTabProps = {}) {
             { label: "المستخدمون النشطون",   value: `${stats.uActive}/${stats.totalUsers}`,     icon: Users,         tab: "users"         },
             { label: "الاشتراكات النشطة",    value: stats.activeSubs,                           icon: CreditCard,    tab: "subscriptions" },
             { label: "ينتهي خلال 30 يوم",   value: `${stats.expiring} مدرسة`,                 icon: AlertTriangle, tab: "subscriptions" },
-          ].map(({ label, value, icon: Icon }) => (
+          ].map(({ label, value, icon: Icon, tab }) => (
             <button
               key={label}
               type="button"
-              onClick={() => {}}
-              className="rounded-md border border-[var(--border)] bg-[var(--card-bg)] p-3 text-start w-full transition-all hover:border-[var(--primary)]"
+              onClick={() => onNavigate?.(tab as ActiveTab)}
+              disabled={!onNavigate}
+              className="rounded-md border border-[var(--border)] bg-[var(--card-bg)] p-3 text-start w-full transition-all enabled:hover:border-[var(--primary)] enabled:cursor-pointer disabled:cursor-default"
             >
               <div className="flex items-center justify-between gap-2">
                 <div>

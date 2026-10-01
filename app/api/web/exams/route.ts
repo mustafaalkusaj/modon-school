@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { resolveSchoolScopedActorContext } from "@/lib/managed-users-server";
 import { toBaghdadTimestamp } from "@/lib/tz";
+import { jsonServerError } from "@/lib/route-utils";
 
 export const dynamic = "force-dynamic";
 
@@ -44,7 +45,7 @@ export async function GET(request: NextRequest) {
 
   const { data, error, count } = await query;
   if (error) {
-    return NextResponse.json({ ok: false, error: error.message }, { status: 500 });
+    return jsonServerError("web/exams", error, "تعذر إتمام العملية. حاول مرة أخرى.");
   }
 
   return NextResponse.json({ ok: true, items: data ?? [], page, limit, total: count ?? 0 });
@@ -83,7 +84,7 @@ export async function POST(request: NextRequest) {
     .single();
 
   if (error) {
-    return NextResponse.json({ ok: false, error: error.message }, { status: 500 });
+    return jsonServerError("web/exams", error, "تعذر إتمام العملية. حاول مرة أخرى.");
   }
   return NextResponse.json({ ok: true, item: data }, { status: 201 });
 }
@@ -113,7 +114,7 @@ export async function DELETE(request: NextRequest) {
     .eq("exam_id", id);
 
   if (countError) {
-    return NextResponse.json({ ok: false, error: countError.message }, { status: 500 });
+    return jsonServerError("web/exams", countError, "تعذر إتمام العملية. حاول مرة أخرى.");
   }
 
   if ((attemptCount ?? 0) > 0) {
@@ -125,7 +126,7 @@ export async function DELETE(request: NextRequest) {
 
   const { error } = await actorSupabase.from("exams").delete().eq("id", id).eq("school_id", targetSchoolId);
   if (error) {
-    return NextResponse.json({ ok: false, error: error.message }, { status: 500 });
+    return jsonServerError("web/exams", error, "تعذر إتمام العملية. حاول مرة أخرى.");
   }
   return NextResponse.json({ ok: true });
 }

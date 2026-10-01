@@ -9,7 +9,11 @@ import {
 import type { DeepPermissionMap, SidebarModuleNode } from "@/types/deep-permissions";
 
 export const RBAC_COOKIE_NAME = "school_rbac";
-export const RBAC_SESSION_MAX_AGE = 60 * 60 * 24 * 300;
+// 12 hours, sliding: proxy.ts renews the cookie past half-life on page loads
+// and RoleProvider re-issues it from the database (POST /api/rbac/session) on
+// every page load and Supabase token refresh. A stolen or stale cookie (e.g.
+// a deactivated user) now dies after 12 idle hours instead of ~10 months.
+export const RBAC_SESSION_MAX_AGE = 60 * 60 * 12;
 let devFallbackSecret = "";
 
 export interface RBACSessionPayload {

@@ -43,8 +43,14 @@ export default function StudentLoginPage() {
           too_many_attempts: locale === "ar"
             ? "محاولات كثيرة، حاول لاحقاً"
             : "Too many attempts, try later",
+          server_error: locale === "ar"
+            ? "خطأ في الخادم، حاول لاحقاً"
+            : "Server error, try again later",
         };
-        setError(messages[data.reason] ?? messages.invalid_credentials);
+        const fallback = res.status >= 500
+          ? messages.server_error
+          : messages.invalid_credentials;
+        setError(messages[data.reason] ?? fallback);
         return;
       }
 

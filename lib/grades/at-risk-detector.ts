@@ -39,11 +39,13 @@ export function detectAtRiskStudents(
 
   const atRiskStudents: AtRiskStudent[] = entries
     .filter((entry) => {
-      const total = entry.percentage ?? 0;
-      return total < passScore;
+      // No grade entered yet is not a failing grade: `percentage ?? 0` used to
+      // flag every ungraded student as "critical".
+      const total = entry.percentage;
+      return typeof total === "number" && Number.isFinite(total) && total < passScore;
     })
     .map((entry) => {
-      const total = entry.percentage ?? 0;
+      const total = entry.percentage as number;
       const deficit = passScore - total;
       return {
         studentId: entry.student_id,

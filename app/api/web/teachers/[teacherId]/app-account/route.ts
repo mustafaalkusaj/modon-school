@@ -1,7 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { randomBytes } from "node:crypto";
 
-import { applyBranchScopeToQuery, resolveBranchScope } from "@/lib/branch-scope";
+import {
+  applyBranchScopeToQuery,
+  resolveBranchScope,
+} from "@/lib/branch-scope";
+import { generatePassword } from "@/lib/generate-password";
 import {
   ensureManagedUserProfileLink,
   hashPassword,
@@ -10,11 +14,13 @@ import {
 } from "@/lib/managed-users-server";
 import { enforceRateLimit } from "@/lib/rate-limit";
 import { routeUserHasPermission } from "@/lib/route-permissions";
-import { jsonError, logRouteError } from "@/lib/route-utils";
+import { jsonError, jsonServerError, logRouteError } from "@/lib/route-utils";
 import { createServiceSupabaseClient } from "@/lib/supabase-server";
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-async function generateUsername(supabase: any, schoolId: string): Promise<string> {
+async function generateUsername(
+  supabase: ReturnType<typeof createServiceSupabaseClient>,
+  schoolId: string,
+): Promise<string> {
   for (let attempt = 0; attempt < 20; attempt++) {
     const bytes = randomBytes(2);
     const digits = String(((bytes[0] * 256 + bytes[1]) % 9000) + 1000);
@@ -28,18 +34,8 @@ async function generateUsername(supabase: any, schoolId: string): Promise<string
     if (!data) return candidate;
   }
   const fb = randomBytes(3);
-  const n = (fb[0] * 65536 + fb[1] * 256 + fb[2]) % 900000 + 100000;
+  const n = ((fb[0] * 65536 + fb[1] * 256 + fb[2]) % 900000) + 100000;
   return `t${n}`;
-}
-
-function generatePassword(): string {
-  const charset = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789";
-  const bytes = randomBytes(12);
-  let password = "";
-  for (let i = 0; i < 12; i++) {
-    password += charset[bytes[i] % charset.length];
-  }
-  return password;
 }
 
 async function resolveAppAccountContext(
@@ -60,13 +56,20 @@ async function resolveAppAccountContext(
     return {
       ok: false as const,
       status: "status" in context ? context.status : 500,
-      message: "message" in context ? context.message : "تعذر التحقق من صلاحيات المستخدم.",
+      message:
+        "message" in context
+          ? context.message
+          : "تعذر التحقق من صلاحيات المستخدم.",
     };
   }
 
   const branchScope = resolveBranchScope(context.value, requestedBranchId);
   if (!branchScope.ok) {
-    return { ok: false as const, status: branchScope.status, message: branchScope.message };
+    return {
+      ok: false as const,
+      status: branchScope.status,
+      message: branchScope.message,
+    };
   }
 
   const { actorSupabase, actorUserId, targetSchoolId } = context.value;
@@ -82,16 +85,30 @@ async function resolveAppAccountContext(
   ]);
 
   if (rateLimited) {
-    return { ok: false as const, status: 429, message: "تم تجاوز عدد المحاولات المسموح بها.", response: rateLimited };
+    return {
+      ok: false as const,
+      status: 429,
+      message: "تم تجاوز عدد المحاولات المسموح بها.",
+      response: rateLimited,
+    };
   }
 
   if (!canManage) {
-    return { ok: false as const, status: 403, message: "ليس لديك صلاحية إدارة حسابات الأساتذة." };
+    return {
+      ok: false as const,
+      status: 403,
+      message: "ليس لديك صلاحية إدارة حسابات الأساتذة.",
+    };
   }
 
   return {
     ok: true as const,
-    value: { actorSupabase, actorUserId, targetSchoolId, branchScope: branchScope.value },
+    value: {
+      actorSupabase,
+      actorUserId,
+      targetSchoolId,
+      branchScope: branchScope.value,
+    },
   };
 }
 
@@ -101,9 +118,13 @@ export async function POST(
   { params }: { params: Promise<{ teacherId: string }> },
 ) {
   const { teacherId } = await params;
-  const body = (await req.json().catch(() => null)) as Record<string, unknown> | null;
+  const body = (await req.json().catch(() => null)) as Record<
+    string,
+    unknown
+  > | null;
   const schoolId = typeof body?.school_id === "string" ? body.school_id : null;
-  const requestedBranchId = typeof body?.branch_id === "string" ? body.branch_id : null;
+  const requestedBranchId =
+    typeof body?.branch_id === "string" ? body.branch_id : null;
 
   const ctx = await resolveAppAccountContext(req, schoolId, requestedBranchId);
   if (!ctx.ok) {
@@ -138,20 +159,30 @@ export async function POST(
 
     // 1. Create Supabase auth user via service role
     const serviceSupabase = createServiceSupabaseClient();
-    const { data: authData, error: authError } = await serviceSupabase.auth.admin.createUser({
-      email: authEmail,
-      password,
-      email_confirm: true,
-      user_metadata: {
-        full_name: teacher.full_name,
-        role: "teacher",
-        school_id: targetSchoolId,
-      },
-    });
+    const { data: authData, error: authError } =
+      await serviceSupabase.auth.admin.createUser({
+        email: authEmail,
+        password,
+        email_confirm: true,
+        user_metadata: {
+          full_name: teacher.full_name,
+          role: "teacher",
+          school_id: targetSchoolId,
+        },
+      });
 
     if (authError || !authData?.user) {
-      logRouteError("teachers-app-account-create", authError, { teacherId, actorUserId, schoolId: targetSchoolId });
-      return jsonError(authError?.message || "تعذر إنشاء مستخدم المصادقة.", 500);
+      logRouteError("teachers-app-account-create", authError, {
+        teacherId,
+        actorUserId,
+        schoolId: targetSchoolId,
+      });
+      return jsonServerError(
+        "web-teachers-teacherId-app-account",
+        authError,
+        "تعذر إنشاء مستخدم المصادقة.",
+        500,
+      );
     }
 
     const authUserId = authData.user.id;
@@ -171,13 +202,23 @@ export async function POST(
     if (credError) {
       // Cleanup auth user on failure
       await serviceSupabase.auth.admin.deleteUser(authUserId);
-      logRouteError("teachers-app-account-create", credError, { teacherId, actorUserId, schoolId: targetSchoolId });
-      return jsonError(credError.message || "تعذر إنشاء بيانات الدخول.", 500);
+      logRouteError("teachers-app-account-create", credError, {
+        teacherId,
+        actorUserId,
+        schoolId: targetSchoolId,
+      });
+      return jsonServerError(
+        "web-teachers-teacherId-app-account",
+        credError,
+        "تعذر إنشاء بيانات الدخول.",
+        500,
+      );
     }
 
     // 3. Update teacher record with username, auth_user_id (NOT the plaintext
     // password). The password is returned once in the HTTP response below.
     // The hashed credential lives in managed_user_credentials (step 2).
+    // TODO(C1-MIGRATION): drop the unused app_password_plain DB column.
     const { data, error } = await applyBranchScopeToQuery(
       actorSupabase
         .from("teachers")
@@ -195,8 +236,17 @@ export async function POST(
       .maybeSingle();
 
     if (error || !data) {
-      logRouteError("teachers-app-account-create", error, { teacherId, actorUserId, schoolId: targetSchoolId });
-      return jsonError(error?.message || "تعذر إنشاء حساب التطبيق.", 500);
+      logRouteError("teachers-app-account-create", error, {
+        teacherId,
+        actorUserId,
+        schoolId: targetSchoolId,
+      });
+      return jsonServerError(
+        "web-teachers-teacherId-app-account",
+        error,
+        "تعذر إنشاء حساب التطبيق.",
+        500,
+      );
     }
 
     // 4. Create managed user profile link
@@ -212,7 +262,10 @@ export async function POST(
       teacherId,
       createdBy: actorUserId,
     }).catch((err: unknown) => {
-      logRouteError("teachers-app-account-profile-link", err, { teacherId, authUserId });
+      logRouteError("teachers-app-account-profile-link", err, {
+        teacherId,
+        authUserId,
+      });
     });
 
     const qrData = JSON.stringify({
@@ -222,9 +275,16 @@ export async function POST(
       school: targetSchoolId,
     });
 
-    return NextResponse.json({ ok: true, username, password, qrData }, { status: 201 });
+    return NextResponse.json(
+      { ok: true, username, password, qrData },
+      { status: 201 },
+    );
   } catch (error) {
-    logRouteError("teachers-app-account-create", error, { teacherId, actorUserId, schoolId: targetSchoolId });
+    logRouteError("teachers-app-account-create", error, {
+      teacherId,
+      actorUserId,
+      schoolId: targetSchoolId,
+    });
     return jsonError("تعذر إنشاء حساب التطبيق.", 500);
   }
 }
@@ -235,9 +295,13 @@ export async function DELETE(
   { params }: { params: Promise<{ teacherId: string }> },
 ) {
   const { teacherId } = await params;
-  const body = (await req.json().catch(() => null)) as Record<string, unknown> | null;
+  const body = (await req.json().catch(() => null)) as Record<
+    string,
+    unknown
+  > | null;
   const schoolId = typeof body?.school_id === "string" ? body.school_id : null;
-  const requestedBranchId = typeof body?.branch_id === "string" ? body.branch_id : null;
+  const requestedBranchId =
+    typeof body?.branch_id === "string" ? body.branch_id : null;
 
   const ctx = await resolveAppAccountContext(req, schoolId, requestedBranchId);
   if (!ctx.ok) {
@@ -276,13 +340,26 @@ export async function DELETE(
     );
 
     if (error) {
-      logRouteError("teachers-app-account-delete", error, { teacherId, actorUserId, schoolId: targetSchoolId });
-      return jsonError(error.message || "تعذر حذف حساب التطبيق.", 500);
+      logRouteError("teachers-app-account-delete", error, {
+        teacherId,
+        actorUserId,
+        schoolId: targetSchoolId,
+      });
+      return jsonServerError(
+        "web-teachers-teacherId-app-account",
+        error,
+        "تعذر حذف حساب التطبيق.",
+        500,
+      );
     }
 
     return NextResponse.json({ ok: true });
   } catch (error) {
-    logRouteError("teachers-app-account-delete", error, { teacherId, actorUserId, schoolId: targetSchoolId });
+    logRouteError("teachers-app-account-delete", error, {
+      teacherId,
+      actorUserId,
+      schoolId: targetSchoolId,
+    });
     return jsonError("تعذر حذف حساب التطبيق.", 500);
   }
 }
@@ -293,9 +370,13 @@ export async function PATCH(
   { params }: { params: Promise<{ teacherId: string }> },
 ) {
   const { teacherId } = await params;
-  const body = (await req.json().catch(() => null)) as Record<string, unknown> | null;
+  const body = (await req.json().catch(() => null)) as Record<
+    string,
+    unknown
+  > | null;
   const schoolId = typeof body?.school_id === "string" ? body.school_id : null;
-  const requestedBranchId = typeof body?.branch_id === "string" ? body.branch_id : null;
+  const requestedBranchId =
+    typeof body?.branch_id === "string" ? body.branch_id : null;
 
   const ctx = await resolveAppAccountContext(req, schoolId, requestedBranchId);
   if (!ctx.ok) {
@@ -324,8 +405,11 @@ export async function PATCH(
   }
 
   try {
-    const action = typeof body?.action === "string" ? body.action : "reset_password";
-    const updatePayload: Record<string, unknown> = { updated_at: new Date().toISOString() };
+    const action =
+      typeof body?.action === "string" ? body.action : "reset_password";
+    const updatePayload: Record<string, unknown> = {
+      updated_at: new Date().toISOString(),
+    };
     let newPassword: string | undefined;
 
     if (action === "reset_password") {
@@ -340,12 +424,22 @@ export async function PATCH(
       // credential, then persist the bcrypt hash to managed_user_credentials.
       // The plaintext is returned once in the HTTP response below.
       const serviceSupabase = createServiceSupabaseClient();
-      const { error: authError } = await serviceSupabase.auth.admin.updateUserById(authUserId, {
-        password: newPassword,
-      });
+      const { error: authError } =
+        await serviceSupabase.auth.admin.updateUserById(authUserId, {
+          password: newPassword,
+        });
       if (authError) {
-        logRouteError("teachers-app-account-reset", authError, { teacherId, actorUserId, schoolId: targetSchoolId });
-        return jsonError(authError.message || "تعذر إعادة تعيين كلمة المرور.", 500);
+        logRouteError("teachers-app-account-reset", authError, {
+          teacherId,
+          actorUserId,
+          schoolId: targetSchoolId,
+        });
+        return jsonServerError(
+          "web-teachers-teacherId-app-account",
+          authError,
+          "تعذر إعادة تعيين كلمة المرور.",
+          500,
+        );
       }
 
       await upsertManagedUserCredential(actorSupabase, {
@@ -356,8 +450,12 @@ export async function PATCH(
       });
     } else if (action === "toggle_status") {
       const currentStatus = teacher.app_status as string | null;
-      updatePayload.app_status = currentStatus === "active" ? "suspended" : "active";
-    } else if (action === "set_status" && typeof body?.app_status === "string") {
+      updatePayload.app_status =
+        currentStatus === "active" ? "suspended" : "active";
+    } else if (
+      action === "set_status" &&
+      typeof body?.app_status === "string"
+    ) {
       const validStatuses = ["active", "inactive", "suspended"];
       if (!validStatuses.includes(body.app_status)) {
         return jsonError("حالة الحساب غير صالحة.", 400);
@@ -379,8 +477,17 @@ export async function PATCH(
       .maybeSingle();
 
     if (error || !data) {
-      logRouteError("teachers-app-account-patch", error, { teacherId, actorUserId, schoolId: targetSchoolId });
-      return jsonError(error?.message || "تعذر تحديث حساب التطبيق.", 500);
+      logRouteError("teachers-app-account-patch", error, {
+        teacherId,
+        actorUserId,
+        schoolId: targetSchoolId,
+      });
+      return jsonServerError(
+        "web-teachers-teacherId-app-account",
+        error,
+        "تعذر تحديث حساب التطبيق.",
+        500,
+      );
     }
 
     return NextResponse.json({
@@ -389,7 +496,11 @@ export async function PATCH(
       ...(newPassword ? { password: newPassword } : {}),
     });
   } catch (error) {
-    logRouteError("teachers-app-account-patch", error, { teacherId, actorUserId, schoolId: targetSchoolId });
+    logRouteError("teachers-app-account-patch", error, {
+      teacherId,
+      actorUserId,
+      schoolId: targetSchoolId,
+    });
     return jsonError("تعذر تحديث حساب التطبيق.", 500);
   }
 }

@@ -1,14 +1,20 @@
 import { NextRequest, NextResponse } from "next/server";
 
-import { applyBranchScopeToQuery, resolveBranchScope, type ResolvedBranchScope } from "@/lib/branch-scope";
+import {
+  applyBranchScopeToQuery,
+  resolveBranchScope,
+  type ResolvedBranchScope,
+} from "@/lib/branch-scope";
 import { enforceRateLimit } from "@/lib/rate-limit";
 import { resolveSchoolScopedActorContext } from "@/lib/managed-users-server";
 import type { RouteSupabaseClient } from "@/lib/managed-users/types";
 import { routeUserHasPermission } from "@/lib/route-permissions";
 import { buildSchoolCacheTag, rememberWithTtl } from "@/lib/server-cache";
 import { createServiceSupabaseClient } from "@/lib/supabase-server";
+import { fetchAllRows } from "@/lib/supabase-fetch-all";
 import { buildResolvedStudentFinancials } from "@/lib/students/financials";
 import { todayBaghdadIso } from "@/lib/tz";
+import { excludeDeletedStudents } from "@/lib/students/soft-delete";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -74,44 +80,58 @@ function jsonError(message: string, status: number) {
   return NextResponse.json({ error: { message } }, { status });
 }
 
-
+type SettledQueryValue = {
+  data: unknown;
+  error: { message?: string } | null;
+  count?: number | null;
+};
+type SettledQueryResult = PromiseSettledResult<SettledQueryValue>;
 
 /** Helper: safely unwrap a settled Supabase result. */
 function unwrapSettled<T>(
-  result: PromiseSettledResult<{ data: T | null; error: unknown; count?: number | null }>,
+  result: PromiseSettledResult<{
+    data: T | null;
+    error: unknown;
+    count?: number | null;
+  }>,
 ): { data: T | null; count: number; ok: boolean; errorMessage: string | null } {
   if (result.status !== "fulfilled") {
     return { data: null, count: 0, ok: false, errorMessage: null };
   }
   const { data, error, count } = result.value;
   if (error) {
-    const msg = typeof (error as any)?.message === "string" ? (error as any).message : null;
+    const msg =
+      typeof error === "object" &&
+      error !== null &&
+      "message" in error &&
+      typeof error.message === "string"
+        ? error.message
+        : null;
     return { data: null, count: 0, ok: false, errorMessage: msg };
   }
   return { data, count: count ?? 0, ok: true, errorMessage: null };
 }
 
 /**
- * Sum the `amount` column across returned rows.
+ * Manually sum a numeric field across fetched rows.
  *
- * PostgREST aggregate functions (`amount.sum()`) are DISABLED on this project
- * — the API rejects them with PGRST123 "Use of aggregate functions is not
- * allowed", which silently zeroed every financial total on the reports page.
- * Summing row-level in JS is the portable path; row counts stay bounded by
- * MAX_FINANCIAL_ROWS.
+ * NOTE: We intentionally do NOT use PostgREST embedded aggregate syntax
+ * (`.select("amount.sum()")`) here. That syntax requires `db_aggregates_enabled`
+ * on the Supabase project and otherwise fails with PGRST123 ("aggregate
+ * functions disabled"), which silently zeroes financial totals when the
+ * error is swallowed upstream (this exact bug has bitten sibling projects
+ * before). Instead we fetch the raw `amount` column — already scoped tightly
+ * by school_id + deleted_at IS NULL (and branch scope) below — and reduce it
+ * in JS, which works regardless of the project's aggregate-function setting.
  */
-function sumAmounts(data: unknown): number {
+function sumAmountField(data: unknown, field: string = "amount"): number {
   if (!Array.isArray(data)) return 0;
-  let total = 0;
-  for (const row of data) {
-    if (typeof row !== "object" || row === null) continue;
-    total += Number((row as Record<string, unknown>).amount ?? 0);
-  }
-  return total;
+  return data.reduce((total: number, row) => {
+    if (typeof row !== "object" || row === null) return total;
+    const val = (row as Record<string, unknown>)[field];
+    return total + (Number(val) || 0);
+  }, 0);
 }
-
-/** Upper bound on rows pulled for a single financial aggregate. */
-const MAX_FINANCIAL_ROWS = 20_000;
 
 async function loadFallbackMetrics(
   actorSupabase: RouteSupabaseClient,
@@ -130,9 +150,15 @@ async function loadFallbackMetrics(
   // ---------------------------------------------------------------------------
   // Fire all queries in parallel.
   //
-  // Payments / expenses / incomes use SQL COUNT (via { count: "exact" }) plus a
-  // row-level amount fetch that is summed in JS. PostgREST aggregate functions
-  // are disabled on this project (PGRST123), so `amount.sum()` cannot be used.
+  // Payments / expenses / incomes use SQL COUNT (via `{ count: "exact" }`,
+  // a real supabase-js feature that returns a row count from the response
+  // headers) but sum `amount` in JS rather than via PostgREST embedded
+  // aggregate syntax (`.select("amount.sum()")`). That syntax requires
+  // `db_aggregates_enabled` on the Supabase project and otherwise fails with
+  // PGRST123, which can silently zero these totals — see sumAmountField()
+  // above. Each query is already scoped to a single school_id (+ soft-delete
+  // filter + branch scope), so fetching the raw rows and reducing them in JS
+  // is safe and not a real memory/perf concern.
   //
   // Students + class_fees stay row-level because the resolved-fee logic
   // (COALESCE class_fee vs student.total_fee) cannot be expressed in the
@@ -153,37 +179,37 @@ async function loadFallbackMetrics(
     incomesAggResult,
   ] = await Promise.allSettled([
     // 0 — Students (row-level: needs class_fees resolution)
-    applyBranchScopeToQuery(
-      actorSupabase
-        .from("students")
-        .select("class_name, total_fee, paid_fee, discount_value, status")
-        .eq("school_id", schoolId)
-        .neq("status", "deleted")
-        // A soft-deleted student keeps its old status, so filtering on status
-        // alone leaves it in every reports total while it is hidden from the
-        // students page, the exports and the mobile app.
-        .is("deleted_at", null)
-        .limit(MAX_FINANCIAL_ROWS),
-      branchScope,
+    fetchAllRows(() =>
+      applyBranchScopeToQuery(
+        excludeDeletedStudents(
+          actorSupabase
+            .from("students")
+            .select("class_name, total_fee, paid_fee, discount_value, status"),
+        )
+          .eq("school_id", schoolId)
+          .neq("status", "deleted"),
+        branchScope,
+      ).order("id"),
     ),
     // 1 — Class fees lookup (small table)
     applyBranchScopeToQuery(
       actorSupabase
         .from("class_fees")
         .select("class_name, total_fee")
-        .eq("school_id", schoolId)
-        .limit(MAX_FINANCIAL_ROWS),
+        .eq("school_id", schoolId),
       branchScope,
     ),
-    // 2 — Payments: amounts + COUNT via { count: "exact" }
-    applyBranchScopeToQuery(
-      actorSupabase
-        .from("payments")
-        .select("amount", { count: "exact" })
-        .eq("school_id", schoolId)
-        .is("deleted_at", null)
-        .limit(MAX_FINANCIAL_ROWS),
-      branchScope,
+    // 2 — Payments: COUNT via { count: "exact" }; amount summed in JS below
+    //     across every page (fetchAllRows), not just the first 1000 rows.
+    fetchAllRows(() =>
+      applyBranchScopeToQuery(
+        actorSupabase
+          .from("payments")
+          .select("amount", { count: "exact" })
+          .eq("school_id", schoolId)
+          .is("deleted_at", null),
+        branchScope,
+      ).order("id"),
     ),
     // 3 — Today's payments: SQL COUNT only (head: true = no data transferred)
     applyBranchScopeToQuery(
@@ -192,38 +218,44 @@ async function loadFallbackMetrics(
         .select("*", { count: "exact", head: true })
         .eq("school_id", schoolId)
         .is("deleted_at", null)
-        .gte("created_at", todayDate)
-        .lt("created_at", tomorrowDate),
+        // Baghdad day bounds; bare dates were read as UTC midnight, so
+        // payments made 00:00–03:00 Baghdad time counted as yesterday.
+        .gte("created_at", `${todayDate}T00:00:00+03:00`)
+        .lt("created_at", `${tomorrowDate}T00:00:00+03:00`),
       branchScope,
     ),
-    // 4 — Expenses: amounts + COUNT
-    applyBranchScopeToQuery(
-      actorSupabase
-        .from("expenses")
-        .select("amount", { count: "exact" })
-        .eq("school_id", schoolId)
-        .is("deleted_at", null)
-        .limit(MAX_FINANCIAL_ROWS),
-      branchScope,
+    // 4 — Expenses: COUNT via { count: "exact" }; amount summed in JS below
+    fetchAllRows(() =>
+      applyBranchScopeToQuery(
+        actorSupabase
+          .from("expenses")
+          .select("amount", { count: "exact" })
+          .eq("school_id", schoolId)
+          .is("deleted_at", null),
+        branchScope,
+      ).order("id"),
     ),
-    // 5 — Expenses with their type, grouped in JS
-    applyBranchScopeToQuery(
-      actorSupabase
-        .from("expenses")
-        .select("amount, expense_types(name)")
-        .eq("school_id", schoolId)
-        .is("deleted_at", null)
-        .limit(MAX_FINANCIAL_ROWS),
-      branchScope,
+    // 5 — Expenses grouped by type: fetch rows and group+sum in JS below
+    //     (avoids PostgREST embedded aggregate syntax, see sumAmountField)
+    fetchAllRows(() =>
+      applyBranchScopeToQuery(
+        actorSupabase
+          .from("expenses")
+          .select("expense_types(name), amount")
+          .eq("school_id", schoolId)
+          .is("deleted_at", null),
+        branchScope,
+      ).order("id"),
     ),
     // 6 — Salaries (row-level: needs per-row net = gross - deductions)
-    applyBranchScopeToQuery(
-      actorSupabase
-        .from("salaries")
-        .select("gross_salary, deductions, month")
-        .eq("school_id", schoolId)
-        .limit(MAX_FINANCIAL_ROWS),
-      branchScope,
+    fetchAllRows(() =>
+      applyBranchScopeToQuery(
+        actorSupabase
+          .from("salaries")
+          .select("gross_salary, deductions, month")
+          .eq("school_id", schoolId),
+        branchScope,
+      ).order("id"),
     ),
     // 7 — Current-month salary: SQL COUNT only
     applyBranchScopeToQuery(
@@ -234,70 +266,85 @@ async function loadFallbackMetrics(
         .eq("month", currentMonth),
       branchScope,
     ),
-    // 8 — Incomes: amounts + COUNT
-    applyBranchScopeToQuery(
-      actorSupabase
-        .from("incomes")
-        .select("amount", { count: "exact" })
-        .eq("school_id", schoolId)
-        .is("deleted_at", null)
-        .limit(MAX_FINANCIAL_ROWS),
-      branchScope,
+    // 8 — Incomes: COUNT via { count: "exact" }; amount summed in JS below
+    fetchAllRows(() =>
+      applyBranchScopeToQuery(
+        actorSupabase
+          .from("incomes")
+          .select("amount", { count: "exact" })
+          .eq("school_id", schoolId)
+          .is("deleted_at", null),
+        branchScope,
+      ).order("id"),
     ),
   ]);
 
   // ---- Unwrap results -------------------------------------------------------
 
-  const studentsU = unwrapSettled(studentsResult as PromiseSettledResult<any>);
-  const classFeesU = unwrapSettled(classFeesResult as PromiseSettledResult<any>);
-  const paymentsAggU = unwrapSettled(paymentsAggResult as PromiseSettledResult<any>);
-  const todayPaymentsU = unwrapSettled(todayPaymentsResult as PromiseSettledResult<any>);
-  const expensesAggU = unwrapSettled(expensesAggResult as PromiseSettledResult<any>);
-  const expensesByTypeU = unwrapSettled(expensesByTypeResult as PromiseSettledResult<any>);
-  const salariesU = unwrapSettled(salariesResult as PromiseSettledResult<any>);
-  const currentMonthSalaryU = unwrapSettled(currentMonthSalaryResult as PromiseSettledResult<any>);
-  const incomesAggU = unwrapSettled(incomesAggResult as PromiseSettledResult<any>);
+  const studentsU = unwrapSettled(studentsResult as SettledQueryResult);
+  const classFeesU = unwrapSettled(classFeesResult as SettledQueryResult);
+  const paymentsAggU = unwrapSettled(paymentsAggResult as SettledQueryResult);
+  const todayPaymentsU = unwrapSettled(
+    todayPaymentsResult as SettledQueryResult,
+  );
+  const expensesAggU = unwrapSettled(expensesAggResult as SettledQueryResult);
+  const expensesByTypeU = unwrapSettled(
+    expensesByTypeResult as SettledQueryResult,
+  );
+  const salariesU = unwrapSettled(salariesResult as SettledQueryResult);
+  const currentMonthSalaryU = unwrapSettled(
+    currentMonthSalaryResult as SettledQueryResult,
+  );
+  const incomesAggU = unwrapSettled(incomesAggResult as SettledQueryResult);
 
   const students = (studentsU.data ?? []) as Array<Record<string, unknown>>;
   const classFees = (classFeesU.data ?? []) as Array<Record<string, unknown>>;
   const salaries = (salariesU.data ?? []) as Array<Record<string, unknown>>;
 
-  // ---- Payments (row-level sum) ---------------------------------------------
+  // ---- Payments (SQL aggregated) --------------------------------------------
 
   const paymentsCount = paymentsAggU.count;
-  const paymentVolume = sumAmounts(paymentsAggU.data);
+  const paymentVolume = sumAmountField(paymentsAggU.data);
   const todayPayments = todayPaymentsU.count;
 
-  // ---- Expenses (row-level sum) ---------------------------------------------
+  // ---- Expenses (JS-aggregated, see sumAmountField) --------------------------
 
   const expensesCount = expensesAggU.count;
-  const expenseVolume = sumAmounts(expensesAggU.data);
+  const expenseVolume = sumAmountField(expensesAggU.data);
 
-  // Expenses grouped by type — one row per expense with { amount, expense_types: {name} }
-  const expensesByTypeRaw = (expensesByTypeU.data ?? []) as Array<Record<string, unknown>>;
+  // Expenses grouped by type — one row per expense with { expense_types: {name}, amount }
+  const expensesByTypeRaw = (expensesByTypeU.data ?? []) as Array<
+    Record<string, unknown>
+  >;
   const expensesByTypeMap = new Map<string, number>();
   for (const row of expensesByTypeRaw) {
-    const typeName = readRelationName((row as any).expense_types) || "أخرى";
-    expensesByTypeMap.set(typeName, (expensesByTypeMap.get(typeName) ?? 0) + Number((row as any).amount ?? 0));
+    const typeName = readRelationName(row.expense_types) || "أخرى";
+    expensesByTypeMap.set(
+      typeName,
+      (expensesByTypeMap.get(typeName) ?? 0) + (Number(row.amount) || 0),
+    );
   }
   const expensesByType = Array.from(expensesByTypeMap.entries())
     .map(([name, total]) => ({ name, total }))
     .sort((a, b) => b.total - a.total);
   const expenseTypeCount = expensesByTypeMap.size;
 
-  // ---- Incomes (row-level sum) ----------------------------------------------
+  // ---- Incomes (JS-aggregated, see sumAmountField) ----------------------------
 
   const incomesCount = incomesAggU.count;
-  const otherRevenueTotal = sumAmounts(incomesAggU.data);
+  const otherRevenueTotal = sumAmountField(incomesAggU.data);
 
   // ---- Salaries (row-level: per-row net needed) -----------------------------
 
   const salaryByMonthMap = new Map<string, number>();
   let salaryVolume = 0;
   for (const s of salaries) {
-    const net = Math.max(0, Number((s as any).gross_salary ?? 0) - Number((s as any).deductions ?? 0));
+    const net = Math.max(
+      0,
+      Number(s.gross_salary ?? 0) - Number(s.deductions ?? 0),
+    );
     salaryVolume += net;
-    const month = String((s as any).month ?? "");
+    const month = String(s.month ?? "");
     if (month) {
       salaryByMonthMap.set(month, (salaryByMonthMap.get(month) ?? 0) + net);
     }
@@ -312,8 +359,8 @@ async function loadFallbackMetrics(
 
   const classFeeMap = new Map<string, number>();
   for (const cf of classFees) {
-    if ((cf as any).class_name && typeof (cf as any).total_fee === "number") {
-      classFeeMap.set(String((cf as any).class_name), (cf as any).total_fee);
+    if (cf.class_name && typeof cf.total_fee === "number") {
+      classFeeMap.set(String(cf.class_name), cf.total_fee);
     }
   }
 
@@ -332,8 +379,8 @@ async function loadFallbackMetrics(
   let transferredStudentsRemaining = 0;
 
   for (const student of students) {
-    const s = student as any;
-    const className = s.class_name;
+    const s = student;
+    const className = typeof s.class_name === "string" ? s.class_name : "";
     const classFeeTotal = className ? classFeeMap.get(className) : undefined;
     const resolved = buildResolvedStudentFinancials(
       {
@@ -409,12 +456,13 @@ async function loadFallbackMetrics(
 
   const finalMetrics = {
     ...metrics,
-    netBalance: metrics.paymentVolume - metrics.expenseVolume - metrics.salaryVolume,
+    netBalance:
+      metrics.paymentVolume - metrics.expenseVolume - metrics.salaryVolume,
   } satisfies ReportsMetrics;
 
   // ---- Warnings for failed queries ------------------------------------------
 
-  const warningInputs: Array<{ result: PromiseSettledResult<any>; label: string }> = [
+  const warningInputs: Array<{ result: SettledQueryResult; label: string }> = [
     { result: studentsResult, label: "بيانات الطلاب" },
     { result: classFeesResult, label: "بيانات رسوم الفئات" },
     { result: paymentsAggResult, label: "بيانات الدفعات" },
@@ -425,14 +473,14 @@ async function loadFallbackMetrics(
   const warnings = warningInputs
     .map(({ result, label }) => {
       if (result.status !== "fulfilled") return `تعذر تحميل ${label} حالياً.`;
-      if (result.value.error) return result.value.error.message || `تعذر تحميل ${label} حالياً.`;
+      if (result.value.error)
+        return result.value.error.message || `تعذر تحميل ${label} حالياً.`;
       return null;
     })
     .filter(Boolean);
 
   return { metrics: finalMetrics, warnings };
 }
-
 
 export async function GET(req: NextRequest) {
   const t0 = performance.now();
@@ -451,19 +499,27 @@ export async function GET(req: NextRequest) {
 
   if (!context.ok) {
     return jsonError(
-      "message" in context ? context.message : "تعذر التحقق من صلاحيات المستخدم.",
+      "message" in context
+        ? context.message
+        : "تعذر التحقق من صلاحيات المستخدم.",
       "status" in context ? context.status : 500,
     );
   }
 
-  const requestedBranchId = req.nextUrl.searchParams.get("branchId") ?? req.nextUrl.searchParams.get("branch_id");
+  const requestedBranchId =
+    req.nextUrl.searchParams.get("branchId") ??
+    req.nextUrl.searchParams.get("branch_id");
   const branchScope = resolveBranchScope(context.value, requestedBranchId);
   if (!branchScope.ok) {
     return jsonError(branchScope.message, branchScope.status);
   }
 
   const { actorSupabase, actorUserId, targetSchoolId } = context.value;
-  const canViewReports = await routeUserHasPermission(actorSupabase, actorUserId, "view_reports");
+  const canViewReports = await routeUserHasPermission(
+    actorSupabase,
+    actorUserId,
+    "view_reports",
+  );
   if (!canViewReports) {
     return jsonError("ليس لديك صلاحية عرض التقارير.", 403);
   }
@@ -488,7 +544,13 @@ export async function GET(req: NextRequest) {
         // Use service role client for data queries (authorization already validated above)
         const dataSupabase = createServiceSupabaseClient();
 
-        const fallback = await loadFallbackMetrics(dataSupabase, targetSchoolId, branchScope.value, currentMonth, todayDate);
+        const fallback = await loadFallbackMetrics(
+          dataSupabase,
+          targetSchoolId,
+          branchScope.value,
+          currentMonth,
+          todayDate,
+        );
         return {
           metrics: fallback.metrics,
           warnings: fallback.warnings,
@@ -512,7 +574,7 @@ export async function GET(req: NextRequest) {
       {
         headers: {
           "Cache-Control": "private, no-store, max-age=0, must-revalidate",
-          "Pragma": "no-cache",
+          Pragma: "no-cache",
           "Server-Timing": `auth;dur=${Math.round(authTime)}, data;dur=${Math.round(dataTime)}, total;dur=${Math.round(totalTime)}`,
         },
       },

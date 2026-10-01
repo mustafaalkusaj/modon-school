@@ -355,6 +355,7 @@ export function DashboardExperience({
                           unreadNotifications={notifications.unreadNotifications}
                           onRefresh={notifications.fetchDashboardNotifications}
                           onMarkAsRead={notifications.markNotificationAsRead}
+                          onMarkAllAsRead={notifications.markAllAsRead}
                         />
                       );
 

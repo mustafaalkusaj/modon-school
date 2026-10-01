@@ -1,13 +1,26 @@
 import { NextRequest, NextResponse } from "next/server";
 
-import { applyBranchScopeToQuery, resolveBranchScope } from "@/lib/branch-scope";
+import {
+  applyBranchScopeToQuery,
+  resolveBranchScope,
+} from "@/lib/branch-scope";
 import { resolveSchoolScopedActorContext } from "@/lib/managed-users-server";
 import { enforceRateLimit } from "@/lib/rate-limit";
 import { routeUserHasPermission } from "@/lib/route-permissions";
-import { applyEffectiveSalaryDeductions, loadSchoolDeductionIndex } from "@/lib/salaries/effective-deductions";
+import {
+  applyEffectiveSalaryDeductions,
+  loadSchoolDeductionIndex,
+} from "@/lib/salaries/effective-deductions";
 import { buildSafeOrFilter } from "@/lib/supabase-query-helpers";
+import { excludeDeletedStudents } from "@/lib/students/soft-delete";
 
-type DatasetType = "students" | "payments" | "expenses" | "salaries" | "incomes" | "all";
+type DatasetType =
+  | "students"
+  | "payments"
+  | "expenses"
+  | "salaries"
+  | "incomes"
+  | "all";
 type StudentDatasetStatus = "active" | "transferred" | "suspended" | "deleted";
 
 function jsonError(message: string, status: number) {
@@ -20,13 +33,22 @@ function normalizeRelation<T>(value: T | T[] | null | undefined): T | null {
 }
 
 function normalizeDatasetType(value: string | null): DatasetType | null {
-  if (value === "students" || value === "payments" || value === "expenses" || value === "salaries" || value === "incomes" || value === "all") {
+  if (
+    value === "students" ||
+    value === "payments" ||
+    value === "expenses" ||
+    value === "salaries" ||
+    value === "incomes" ||
+    value === "all"
+  ) {
     return value;
   }
   return null;
 }
 
-function normalizeStudentDatasetStatus(value: string | null): StudentDatasetStatus {
+function normalizeStudentDatasetStatus(
+  value: string | null,
+): StudentDatasetStatus {
   if (value === "transferred" || value === "suspended" || value === "deleted") {
     return value;
   }
@@ -44,10 +66,18 @@ function normalizeSearchValue(value: string | null, maxLength = 80) {
 export async function GET(req: NextRequest) {
   const schoolId = req.nextUrl.searchParams.get("schoolId");
   const dataset = normalizeDatasetType(req.nextUrl.searchParams.get("type"));
-  const studentStatus = normalizeStudentDatasetStatus(req.nextUrl.searchParams.get("status"));
+  const studentStatus = normalizeStudentDatasetStatus(
+    req.nextUrl.searchParams.get("status"),
+  );
   const search = normalizeSearchValue(req.nextUrl.searchParams.get("search"));
-  const className = normalizeSearchValue(req.nextUrl.searchParams.get("className"), 60);
-  const sectionName = normalizeSearchValue(req.nextUrl.searchParams.get("sectionName"), 20);
+  const className = normalizeSearchValue(
+    req.nextUrl.searchParams.get("className"),
+    60,
+  );
+  const sectionName = normalizeSearchValue(
+    req.nextUrl.searchParams.get("sectionName"),
+    20,
+  );
 
   if (!dataset) {
     return jsonError("نوع التقرير المطلوب غير صالح.", 400);
@@ -64,19 +94,27 @@ export async function GET(req: NextRequest) {
 
   if (!context.ok) {
     return jsonError(
-      "message" in context ? context.message : "تعذر التحقق من صلاحيات المستخدم.",
+      "message" in context
+        ? context.message
+        : "تعذر التحقق من صلاحيات المستخدم.",
       "status" in context ? context.status : 500,
     );
   }
 
-  const requestedBranchId = req.nextUrl.searchParams.get("branchId") ?? req.nextUrl.searchParams.get("branch_id");
+  const requestedBranchId =
+    req.nextUrl.searchParams.get("branchId") ??
+    req.nextUrl.searchParams.get("branch_id");
   const branchScope = resolveBranchScope(context.value, requestedBranchId);
   if (!branchScope.ok) {
     return jsonError(branchScope.message, branchScope.status);
   }
 
   const { actorSupabase, actorUserId, targetSchoolId } = context.value;
-  const canViewReports = await routeUserHasPermission(actorSupabase, actorUserId, "view_reports");
+  const canViewReports = await routeUserHasPermission(
+    actorSupabase,
+    actorUserId,
+    "view_reports",
+  );
   if (!canViewReports) {
     return jsonError("ليس لديك صلاحية فتح بيانات التقارير.", 403);
   }
@@ -91,16 +129,18 @@ export async function GET(req: NextRequest) {
   }
 
   const loadStudents = async () => {
-    let query = actorSupabase
-      .from("students")
-      .select("id, full_name, class_name, section, phone, address, total_fee, paid_fee, remaining_fee, discount_value, status, created_at")
-      .eq("school_id", targetSchoolId);
+    let query = excludeDeletedStudents(
+      actorSupabase
+        .from("students")
+        .select(
+          "id, full_name, class_name, section, phone, address, total_fee, paid_fee, remaining_fee, discount_value, status, created_at",
+        ),
+    ).eq("school_id", targetSchoolId);
 
-    query = applyBranchScopeToQuery(query, branchScope.value).order("created_at", { ascending: false });
-
-    // Soft-deleted students keep their previous status, so status alone is not
-    // enough to hide them.
-    query = query.is("deleted_at", null);
+    query = applyBranchScopeToQuery(query, branchScope.value).order(
+      "created_at",
+      { ascending: false },
+    );
 
     if (studentStatus === "active") {
       // Default view: every student the reports page counts. The page excludes
@@ -132,8 +172,8 @@ export async function GET(req: NextRequest) {
       new Set(
         students
           .map((s) => String(s.class_name ?? ""))
-          .filter((c) => c.length > 0)
-      )
+          .filter((c) => c.length > 0),
+      ),
     );
 
     const classFeeMap = new Map<string, number>();
@@ -177,7 +217,9 @@ export async function GET(req: NextRequest) {
     const { data, error } = await applyBranchScopeToQuery(
       actorSupabase
         .from("payments")
-        .select("id, amount, created_at, payment_method, receipt_number, notes, students(full_name,class_name)")
+        .select(
+          "id, amount, created_at, payment_method, receipt_number, notes, students(full_name,class_name)",
+        )
         .eq("school_id", targetSchoolId)
         .is("deleted_at", null)
         .order("created_at", { ascending: false })
@@ -195,7 +237,9 @@ export async function GET(req: NextRequest) {
     const { data, error } = await applyBranchScopeToQuery(
       actorSupabase
         .from("expenses")
-        .select("id, amount, expense_date, recipient, receipt_number, notes, expense_types(name)")
+        .select(
+          "id, amount, expense_date, recipient, receipt_number, notes, expense_types(name)",
+        )
         .eq("school_id", targetSchoolId)
         .is("deleted_at", null)
         .order("created_at", { ascending: false })
@@ -213,7 +257,9 @@ export async function GET(req: NextRequest) {
     const { data, error } = await applyBranchScopeToQuery(
       actorSupabase
         .from("incomes")
-        .select("id, amount, income_date, source, receipt_number, notes, income_types(name)")
+        .select(
+          "id, amount, income_date, source, receipt_number, notes, income_types(name)",
+        )
         .eq("school_id", targetSchoolId)
         .is("deleted_at", null)
         .order("income_date", { ascending: false })
@@ -231,7 +277,9 @@ export async function GET(req: NextRequest) {
     const { data, error } = await applyBranchScopeToQuery(
       actorSupabase
         .from("salaries")
-        .select("id, gross_salary, deductions, month, paid_at, is_paid, teachers(full_name,subject)")
+        .select(
+          "id, gross_salary, deductions, month, paid_at, is_paid, teachers(full_name,subject)",
+        )
         .eq("school_id", targetSchoolId)
         .order("paid_at", { ascending: false })
         .limit(50_000),
@@ -242,7 +290,10 @@ export async function GET(req: NextRequest) {
       ...item,
       teachers: normalizeRelation(item.teachers),
     }));
-    const deductionIndex = await loadSchoolDeductionIndex(actorSupabase, targetSchoolId);
+    const deductionIndex = await loadSchoolDeductionIndex(
+      actorSupabase,
+      targetSchoolId,
+    );
     return applyEffectiveSalaryDeductions(normalized, deductionIndex);
   };
 
@@ -252,37 +303,57 @@ export async function GET(req: NextRequest) {
     };
 
     if (dataset === "students") {
-      return NextResponse.json({ ok: true, students: await loadStudents() }, { headers: noStoreHeaders });
+      return NextResponse.json(
+        { ok: true, students: await loadStudents() },
+        { headers: noStoreHeaders },
+      );
     }
     if (dataset === "payments") {
-      return NextResponse.json({ ok: true, payments: await loadPayments() }, { headers: noStoreHeaders });
+      return NextResponse.json(
+        { ok: true, payments: await loadPayments() },
+        { headers: noStoreHeaders },
+      );
     }
     if (dataset === "expenses") {
-      return NextResponse.json({ ok: true, expenses: await loadExpenses() }, { headers: noStoreHeaders });
+      return NextResponse.json(
+        { ok: true, expenses: await loadExpenses() },
+        { headers: noStoreHeaders },
+      );
     }
     if (dataset === "salaries") {
-      return NextResponse.json({ ok: true, salaries: await loadSalaries() }, { headers: noStoreHeaders });
+      return NextResponse.json(
+        { ok: true, salaries: await loadSalaries() },
+        { headers: noStoreHeaders },
+      );
     }
     if (dataset === "incomes") {
-      return NextResponse.json({ ok: true, incomes: await loadIncomes() }, { headers: noStoreHeaders });
+      return NextResponse.json(
+        { ok: true, incomes: await loadIncomes() },
+        { headers: noStoreHeaders },
+      );
     }
 
-    const [students, payments, expenses, salaries, incomes] = await Promise.all([
-      loadStudents(),
-      loadPayments(),
-      loadExpenses(),
-      loadSalaries(),
-      loadIncomes(),
-    ]);
+    const [students, payments, expenses, salaries, incomes] = await Promise.all(
+      [
+        loadStudents(),
+        loadPayments(),
+        loadExpenses(),
+        loadSalaries(),
+        loadIncomes(),
+      ],
+    );
 
-    return NextResponse.json({
-      ok: true,
-      students,
-      payments,
-      expenses,
-      salaries,
-      incomes,
-    }, { headers: noStoreHeaders });
+    return NextResponse.json(
+      {
+        ok: true,
+        students,
+        payments,
+        expenses,
+        salaries,
+        incomes,
+      },
+      { headers: noStoreHeaders },
+    );
   } catch (error) {
     // Without this the real PostgREST failure (a dropped column, a disabled
     // feature, a broken embed) is invisible and the UI just shows zeros.
