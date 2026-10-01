@@ -6,6 +6,7 @@ import {
 } from "@/lib/school-archives";
 import { resolveSuperAdminActorContext } from "@/lib/super-admin-server";
 
+import { jsonServerError } from "@/lib/route-utils";
 function jsonError(message: string, status: number) {
   return NextResponse.json({ error: { message } }, { status });
 }
@@ -45,9 +46,6 @@ export async function POST(
     });
   } catch (error) {
     console.error("school import error", error);
-    return jsonError(
-      error instanceof Error ? error.message : "تعذر استيراد ملف الأرشيف.",
-      500,
-    );
+    return jsonServerError("web-super-admin-schools-schoolId-import", error, "تعذر استيراد ملف الأرشيف.", 500);
   }
 }

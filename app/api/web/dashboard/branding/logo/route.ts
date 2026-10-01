@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { resolveSchoolScopedActorContext } from "@/lib/managed-users-server";
 import { uploadLogoToStorage } from "@/lib/logo-upload-server";
 import { validateLogoUpload } from "@/lib/upload-validation";
+import { logRouteError } from "@/lib/route-utils";
 
 function jsonError(message: string, status: number, code?: string) {
   return NextResponse.json(
@@ -13,7 +14,10 @@ function jsonError(message: string, status: number, code?: string) {
 
 export async function POST(req: NextRequest) {
   const formData = await req.formData().catch(() => null);
-  const schoolId = typeof formData?.get("school_id") === "string" ? String(formData.get("school_id")).trim() : "";
+  const schoolId =
+    typeof formData?.get("school_id") === "string"
+      ? String(formData.get("school_id")).trim()
+      : "";
 
   const context = await resolveSchoolScopedActorContext(
     schoolId,
@@ -49,9 +53,7 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({ ok: true, url });
   } catch (error) {
-    return jsonError(
-      error instanceof Error ? error.message : "تعذر رفع شعار المدرسة.",
-      500,
-    );
+    logRouteError("web-dashboard-branding-logo", error);
+    return jsonError("تعذر رفع شعار المدرسة.", 500);
   }
 }

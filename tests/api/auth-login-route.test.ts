@@ -4,8 +4,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const mockState = vi.hoisted(() => ({
   createRouteSupabaseClient: vi.fn(),
   resolveWebUserProfileWithStatus: vi.fn(),
-  enforceRateLimit: vi.fn(),
-  buildAuthRateLimitIdentifier: vi.fn(() => "127.0.0.1:rate-limit-hash"),
+  enforceLoginRateLimits: vi.fn(),
   normalizeRateLimitEmail: vi.fn((email: string) => email.trim().toLowerCase()),
   hasRBACSecret: vi.fn(() => true),
   signRBACSession: vi.fn(async () => "signed-cookie"),
@@ -33,11 +32,7 @@ const mockState = vi.hoisted(() => ({
 }));
 
 vi.mock("@/lib/rate-limit", () => ({
-  enforceRateLimit: mockState.enforceRateLimit,
-  buildAuthRateLimitIdentifier: mockState.buildAuthRateLimitIdentifier,
-  buildAccountRateLimitIdentifier: (account: string | null | undefined) =>
-    account ? `acct:${account}` : null,
-  ACCOUNT_LOGIN_RATE_LIMIT: { namespace: "auth-login-account", windowMs: 900_000, maxHits: 30 },
+  enforceLoginRateLimits: mockState.enforceLoginRateLimits,
   normalizeRateLimitEmail: mockState.normalizeRateLimitEmail,
 }));
 
@@ -119,10 +114,7 @@ describe("POST /api/auth/login", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.resetModules();
-    mockState.enforceRateLimit.mockReturnValue(null);
-    mockState.buildAuthRateLimitIdentifier.mockReturnValue(
-      "127.0.0.1:rate-limit-hash",
-    );
+    mockState.enforceLoginRateLimits.mockReturnValue(null);
     mockState.normalizeRateLimitEmail.mockImplementation((email: string) =>
       email.trim().toLowerCase(),
     );
@@ -151,7 +143,7 @@ describe("POST /api/auth/login", () => {
   });
 
   it("returns the rate-limit response when too many attempts are made", async () => {
-    mockState.enforceRateLimit.mockReturnValue(
+    mockState.enforceLoginRateLimits.mockReturnValue(
       NextResponse.json(
         {
           error: "too_many_attempts",
@@ -352,14 +344,11 @@ describe("POST /api/auth/login", () => {
     expect(response.headers.get("set-cookie")).toContain(
       "school_rbac=signed-cookie",
     );
-    expect(mockState.enforceRateLimit).toHaveBeenCalledWith(
+    expect(mockState.enforceLoginRateLimits).toHaveBeenCalledWith(
       expect.any(NextRequest),
       {
         namespace: "auth-login",
-        windowMs: 10 * 60_000,
-        maxHits: 20,
-        identifier: "127.0.0.1:rate-limit-hash",
-        productionFailureMode: "memory-fallback",
+        account: "user@example.com",
         onRateLimited: {
           error: "too_many_attempts",
           message: "محاولات كثيرة، حاول لاحقاً",
@@ -367,10 +356,6 @@ describe("POST /api/auth/login", () => {
       },
     );
     expect(mockState.normalizeRateLimitEmail).toHaveBeenCalledWith(
-      "user@example.com",
-    );
-    expect(mockState.buildAuthRateLimitIdentifier).toHaveBeenCalledWith(
-      expect.any(NextRequest),
       "user@example.com",
     );
     expect(supabase.auth.signInWithPassword).toHaveBeenCalledWith({

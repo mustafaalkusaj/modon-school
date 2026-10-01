@@ -1,8 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
+import { randomUUID } from "node:crypto";
+import sharp from "sharp";
 
+import { sniffImageType } from "@/lib/image-sniff";
 import { resolveSchoolScopedActorContext } from "@/lib/managed-users-server";
 import { enforceRateLimit } from "@/lib/rate-limit";
-import { jsonError } from "@/lib/route-utils";
+import { jsonError, jsonServerError } from "@/lib/route-utils";
 import { uploadFile, type StorageBucket } from "@/lib/storage";
 
 const ALLOWED_TYPES = new Set([
@@ -13,6 +16,34 @@ const ALLOWED_TYPES = new Set([
 ]);
 
 const MAX_SIZE = 5 * 1024 * 1024; // 5MB
+
+const EXTENSION_BY_MIME: Record<string, string> = {
+  "image/jpeg": "jpg",
+  "image/png": "png",
+  "image/webp": "webp",
+  "application/pdf": "pdf",
+};
+
+/**
+ * Real content type from the file's leading bytes. The browser-supplied
+ * File.type and file name are client-controlled, so neither is trusted.
+ */
+function detectMimeFromBytes(buf: ArrayBuffer): string | null {
+  const image = sniffImageType(buf);
+  if (image) return image.mime;
+  const bytes = new Uint8Array(buf.slice(0, 4));
+  // %PDF
+  if (
+    bytes.length >= 4 &&
+    bytes[0] === 0x25 &&
+    bytes[1] === 0x50 &&
+    bytes[2] === 0x44 &&
+    bytes[3] === 0x46
+  ) {
+    return "application/pdf";
+  }
+  return null;
+}
 
 export async function POST(req: NextRequest) {
   const schoolId = req.headers.get("x-school-id") || new URL(req.url).searchParams.get("schoolId");
@@ -70,14 +101,27 @@ export async function POST(req: NextRequest) {
     return jsonError("Invalid bucket. Use 'avatars' or 'attachments'.", 400);
   }
 
-  // Build a unique path: schoolId/timestamp-filename
-  const ext = file.name.split(".").pop() || "bin";
-  const safeName = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`;
-  const path = `${targetSchoolId}/${safeName}`;
-
   try {
     const buffer = await file.arrayBuffer();
-    const publicUrl = await uploadFile(actorSupabase, bucket, path, buffer, file.type);
+    const detectedMime = detectMimeFromBytes(buffer);
+    if (!detectedMime || detectedMime !== file.type) {
+      return jsonError("File content does not match declared type.", 400);
+    }
+
+    const extension = EXTENSION_BY_MIME[detectedMime];
+    if (!extension) {
+      return jsonError("Unsupported file content.", 400);
+    }
+    const safeName = `${Date.now()}-${randomUUID()}.${extension}`;
+    const path = `${targetSchoolId}/${safeName}`;
+
+    // Re-encode images: drops EXIF/GPS metadata and bakes in the orientation.
+    const isImage = detectedMime.startsWith("image/");
+    const uploadPayload: Buffer | ArrayBuffer = isImage
+      ? await sharp(Buffer.from(buffer)).rotate().toBuffer()
+      : buffer;
+
+    const publicUrl = await uploadFile(actorSupabase, bucket, path, uploadPayload, detectedMime);
 
     return NextResponse.json({
       ok: true,
@@ -85,12 +129,9 @@ export async function POST(req: NextRequest) {
       bucket,
       path,
       size: file.size,
-      contentType: file.type,
+      contentType: detectedMime,
     });
   } catch (err) {
-    return jsonError(
-      err instanceof Error ? err.message : "Upload failed.",
-      500,
-    );
+    return jsonServerError("web-upload", err, "Upload failed.", 500);
   }
 }

@@ -14,13 +14,26 @@ import { resolveBranchScope } from "@/lib/branch-scope";
 import { resolveSchoolScopedActorContext } from "@/lib/managed-users-server";
 import { enforceRateLimit } from "@/lib/rate-limit";
 import { routeUserHasPermission } from "@/lib/route-permissions";
-import { jsonError, jsonValidationError, logRouteError } from "@/lib/route-utils";
+import {
+  jsonError,
+  jsonValidationError,
+  logRouteError,
+} from "@/lib/route-utils";
 import { invalidateSchoolCacheDomains } from "@/lib/server-cache";
-import { createRouteSupabaseClient, createServiceSupabaseClient } from "@/lib/supabase-server";
+import {
+  createRouteSupabaseClient,
+  createServiceSupabaseClient,
+} from "@/lib/supabase-server";
+import { excludeDeletedStudents } from "@/lib/students/soft-delete";
 
 const baseMutationSchema = z.object({
   school_id: z.string().trim().uuid("معرّف المدرسة غير صالح."),
-  branch_id: z.string().trim().uuid("معرّف الفرع غير صالح.").optional().nullable(),
+  branch_id: z
+    .string()
+    .trim()
+    .uuid("معرّف الفرع غير صالح.")
+    .optional()
+    .nullable(),
   branch_scoped: z.boolean().optional().default(false),
 });
 
@@ -42,7 +55,12 @@ const deleteClassSchema = baseMutationSchema.extend({
 
 const saveSectionSchema = baseMutationSchema.extend({
   action: z.literal("save_section"),
-  section_id: z.string().trim().uuid("معرّف الشعبة غير صالح.").optional().nullable(),
+  section_id: z
+    .string()
+    .trim()
+    .uuid("معرّف الشعبة غير صالح.")
+    .optional()
+    .nullable(),
   // class_id may be a legacy synthetic id like "legacy:grade"
   class_id: z.string().trim().min(1, "معرّف الصف مطلوب."),
   class_name: z.string().trim().optional().nullable(),
@@ -65,11 +83,12 @@ async function hasAnyStructureManagementPermission(
   actorUserId: string,
   actorSupabase: Awaited<ReturnType<typeof createRouteSupabaseClient>>,
 ) {
-  const [canAddStudents, canEditStudents, canDeleteStudents] = await Promise.all([
-    routeUserHasPermission(actorSupabase, actorUserId, "add_students"),
-    routeUserHasPermission(actorSupabase, actorUserId, "edit_students"),
-    routeUserHasPermission(actorSupabase, actorUserId, "delete_students"),
-  ]);
+  const [canAddStudents, canEditStudents, canDeleteStudents] =
+    await Promise.all([
+      routeUserHasPermission(actorSupabase, actorUserId, "add_students"),
+      routeUserHasPermission(actorSupabase, actorUserId, "edit_students"),
+      routeUserHasPermission(actorSupabase, actorUserId, "delete_students"),
+    ]);
 
   return canAddStudents || canEditStudents || canDeleteStudents;
 }
@@ -77,11 +96,16 @@ async function hasAnyStructureManagementPermission(
 export async function GET(req: NextRequest) {
   const parsed = dashboardOverviewQuerySchema.safeParse({
     schoolId: req.nextUrl.searchParams.get("schoolId"),
-    branchId: req.nextUrl.searchParams.get("branchId") ?? req.nextUrl.searchParams.get("branch_id"),
+    branchId:
+      req.nextUrl.searchParams.get("branchId") ??
+      req.nextUrl.searchParams.get("branch_id"),
   });
 
   if (!parsed.success) {
-    return jsonValidationError(parsed.error, "معايير تحميل الصفوف والشعب غير صالحة.");
+    return jsonValidationError(
+      parsed.error,
+      "معايير تحميل الصفوف والشعب غير صالحة.",
+    );
   }
 
   const branchScoped = req.nextUrl.searchParams.get("branchScoped") === "1";
@@ -89,14 +113,17 @@ export async function GET(req: NextRequest) {
     parsed.data.schoolId,
     {
       allowedRoles: ["super_admin", "admin", "employee"],
-      roleDeniedMessage: "إدارة الصفوف والشعب متاحة ضمن نطاق المدرسة الحالية فقط.",
+      roleDeniedMessage:
+        "إدارة الصفوف والشعب متاحة ضمن نطاق المدرسة الحالية فقط.",
     },
     req.headers.get("authorization"),
   );
 
   if (!context.ok) {
     return jsonError(
-      "message" in context ? context.message : "تعذر التحقق من صلاحيات المستخدم.",
+      "message" in context
+        ? context.message
+        : "تعذر التحقق من صلاحيات المستخدم.",
       "status" in context ? context.status : 500,
     );
   }
@@ -113,23 +140,30 @@ export async function GET(req: NextRequest) {
 
   let effectiveBranchId: string | null = null;
   if (branchScoped) {
-    const branchScope = resolveBranchScope(context.value, parsed.data.branchId ?? null);
+    const branchScope = resolveBranchScope(
+      context.value,
+      parsed.data.branchId ?? null,
+    );
     if (!branchScope.ok) {
       return jsonError(branchScope.message, branchScope.status);
     }
-    effectiveBranchId = branchScope.value.branchId ?? parsed.data.branchId ?? null;
+    effectiveBranchId =
+      branchScope.value.branchId ?? parsed.data.branchId ?? null;
   }
 
   try {
     const serviceSupabase = createServiceSupabaseClient();
 
-    let studentCountsQuery = serviceSupabase
-      .from("students")
-      .select("class_name, section")
+    let studentCountsQuery = excludeDeletedStudents(
+      serviceSupabase.from("students").select("class_name, section"),
+    )
       .eq("school_id", context.value.targetSchoolId)
       .not("status", "in", '("deleted","transferred")');
     if (branchScoped && effectiveBranchId) {
-      studentCountsQuery = studentCountsQuery.eq("branch_id", effectiveBranchId);
+      studentCountsQuery = studentCountsQuery.eq(
+        "branch_id",
+        effectiveBranchId,
+      );
     }
 
     const [payload, { data: studentRows }] = await Promise.all([
@@ -150,20 +184,26 @@ export async function GET(req: NextRequest) {
       studentCountBySection[key] = (studentCountBySection[key] ?? 0) + 1;
     }
 
-    return NextResponse.json({
-      ok: true,
-      classes: payload.classes,
-      sections: payload.sections,
-      studentCountByClass,
-      studentCountBySection,
-    }, { headers: getCacheHeaders(CACHE_STRATEGIES.DASHBOARD_STRUCTURE) });
+    return NextResponse.json(
+      {
+        ok: true,
+        classes: payload.classes,
+        sections: payload.sections,
+        studentCountByClass,
+        studentCountBySection,
+      },
+      { headers: getCacheHeaders(CACHE_STRATEGIES.DASHBOARD_STRUCTURE) },
+    );
   } catch (error) {
     logRouteError("dashboard-structure-read", error, {
       actorUserId: context.value.actorUserId,
       schoolId: context.value.targetSchoolId,
       branchId: effectiveBranchId,
     });
-    return jsonError("تعذر تحميل الصفوف والشعب حالياً. حاول مرة أخرى بعد قليل.", 500);
+    return jsonError(
+      "تعذر تحميل الصفوف والشعب حالياً. حاول مرة أخرى بعد قليل.",
+      500,
+    );
   }
 }
 
@@ -179,21 +219,32 @@ export async function POST(req: NextRequest) {
     parsed.data.school_id,
     {
       allowedRoles: ["super_admin", "admin", "employee"],
-      roleDeniedMessage: "إدارة الصفوف والشعب متاحة ضمن نطاق المدرسة الحالية فقط.",
+      roleDeniedMessage:
+        "إدارة الصفوف والشعب متاحة ضمن نطاق المدرسة الحالية فقط.",
     },
     req.headers.get("authorization"),
   );
 
   if (!context.ok) {
     return jsonError(
-      "message" in context ? context.message : "تعذر التحقق من صلاحيات المستخدم.",
+      "message" in context
+        ? context.message
+        : "تعذر التحقق من صلاحيات المستخدم.",
       "status" in context ? context.status : 500,
     );
   }
 
   const [canManage, rateLimited] = await Promise.all([
-    hasAnyStructureManagementPermission(context.value.actorUserId, context.value.actorSupabase),
-    enforceRateLimit(req, { namespace: "dashboard-structure-write", windowMs: 60_000, maxHits: 60, identifier: context.value.actorUserId }),
+    hasAnyStructureManagementPermission(
+      context.value.actorUserId,
+      context.value.actorSupabase,
+    ),
+    enforceRateLimit(req, {
+      namespace: "dashboard-structure-write",
+      windowMs: 60_000,
+      maxHits: 60,
+      identifier: context.value.actorUserId,
+    }),
   ]);
   if (!canManage) {
     return jsonError("لا تملك صلاحية إدارة الصفوف والشعب.", 403);
@@ -205,7 +256,10 @@ export async function POST(req: NextRequest) {
   // Only resolve branch when explicitly branch-scoped — never trust raw branch_id from body
   let effectiveBranchId: string | null = null;
   if (parsed.data.branch_scoped) {
-    const branchScope = resolveBranchScope(context.value, parsed.data.branch_id ?? null);
+    const branchScope = resolveBranchScope(
+      context.value,
+      parsed.data.branch_id ?? null,
+    );
     if (!branchScope.ok) {
       return jsonError(branchScope.message, branchScope.status);
     }
@@ -259,7 +313,10 @@ export async function POST(req: NextRequest) {
         return jsonError("إجراء غير مدعوم.", 400);
     }
 
-    invalidateSchoolCacheDomains(context.value.targetSchoolId, ["dashboard-overview", "dashboard-structure"]);
+    invalidateSchoolCacheDomains(context.value.targetSchoolId, [
+      "dashboard-overview",
+      "dashboard-structure",
+    ]);
     return NextResponse.json({ ok: true });
   } catch (error) {
     logRouteError("dashboard-structure-write", error, {

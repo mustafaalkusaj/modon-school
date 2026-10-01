@@ -17,6 +17,25 @@ function normalizeBranchId(value: string | null | undefined) {
   return typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
 }
 
+/**
+ * Branch ids are `public.branches.id`, a uuid.
+ *
+ * `normalizeBranchId` deliberately does NOT enforce this: it also normalises
+ * ids that came from the database via the actor context, and the existing test
+ * fixtures use readable ids like "branch-a". Enforcing a format there changes
+ * behaviour for every importer at once.
+ *
+ * Use this at the point where an UNTRUSTED branch id is about to be
+ * string-interpolated into a PostgREST filter expression, which is where a
+ * crafted value could break out of the intended filter grouping.
+ */
+export function isPostgrestSafeBranchId(value: string | null | undefined) {
+  return (
+    typeof value === "string" &&
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value.trim())
+  );
+}
+
 function uniqueBranchIds(actor: BranchScopedActorLike) {
   return Array.from(
     new Set([

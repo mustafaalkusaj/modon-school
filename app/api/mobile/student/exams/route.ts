@@ -49,7 +49,9 @@ export async function GET(req: NextRequest) {
       : null;
     const matched = ((allData ?? []) as Array<Record<string, unknown>>).filter(
       (exam) => {
-        if (!studentClassKey) return true;
+        // A student with no class sees only explicitly school-wide exams
+        // (no class_name), never every class's exams.
+        if (!studentClassKey) return normalizeClassKey(exam.class_name) === "";
         return normalizeClassKey(exam.class_name) === studentClassKey;
       },
     );

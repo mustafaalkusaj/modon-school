@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { resolveSchoolScopedActorContext } from "@/lib/managed-users-server";
+import { jsonServerError } from "@/lib/route-utils";
 
 export const dynamic = "force-dynamic";
 
@@ -72,7 +73,7 @@ export async function GET(
 
   const { data, error } = await answersQuery;
   if (error) {
-    return NextResponse.json({ ok: false, error: error.message }, { status: 500 });
+    return jsonServerError("web/exams/[examId]/answers", error, "تعذر إتمام العملية. حاول مرة أخرى.");
   }
 
   return NextResponse.json({ ok: true, items: data ?? [], total: (data ?? []).length });

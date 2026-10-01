@@ -7,6 +7,7 @@
  */
 
 import { Redis } from "@upstash/redis";
+import IORedis from "ioredis";
 import { NextRequest } from "next/server";
 import { createHash } from "node:crypto";
 
@@ -32,6 +33,8 @@ type ProductionFailureMode = "fail-open" | "fail-closed" | "memory-fallback";
 // Development-only memory store. It is not shared across serverless instances.
 const store: RateLimitStore = {};
 let redisClient: Redis | null = null;
+let localRedisClient: IORedis | null = null;
+let localRedisFailed = false;
 let hasLoggedMissingProductionConfig = false;
 const rateLimitFailureLogKeys = new Set<string>();
 // NOTE: Design decision: fail-open for rate limiting. Monitor via ops alerts.
@@ -90,6 +93,33 @@ function getUpstashConfig() {
   const url = process.env.UPSTASH_REDIS_REST_URL?.trim() || "";
   const token = process.env.UPSTASH_REDIS_REST_TOKEN?.trim() || "";
   return { url, token };
+}
+
+function hasLocalRedisConfig() {
+  return Boolean(process.env.REDIS_URL?.trim());
+}
+
+function getLocalRedisClient(): IORedis | null {
+  if (localRedisFailed || !hasLocalRedisConfig()) return null;
+
+  if (!localRedisClient) {
+    try {
+      localRedisClient = new IORedis(process.env.REDIS_URL!.trim(), {
+        maxRetriesPerRequest: 1,
+        connectTimeout: 2000,
+        enableOfflineQueue: true,
+      });
+      localRedisClient.on("error", () => {
+        localRedisFailed = true;
+        localRedisClient = null;
+      });
+    } catch {
+      localRedisFailed = true;
+      return null;
+    }
+  }
+
+  return localRedisClient;
 }
 
 function getRedisClient() {
@@ -278,6 +308,35 @@ async function checkRateLimit(
       if (isProduction()) {
         logProductionRateLimitBackendFailure(namespace, "runtime-error", error);
         return { productionFailure: "runtime-error" };
+      }
+    }
+  }
+
+  // Local Redis fallback (PM2 cluster on a single server)
+  const localRedis = getLocalRedisClient();
+  if (localRedis) {
+    try {
+      const nowSeconds = Math.floor(Date.now() / 1000);
+      const windowBucket = Math.floor(nowSeconds / config.window);
+      const key = `modon-school:rate-limit:${namespace}:${windowBucket}:${clientId}`;
+      const current = await localRedis.incr(key);
+
+      if (current === 1) {
+        await localRedis.expire(key, config.window);
+      }
+
+      const ttl = await localRedis.ttl(key);
+      const retryAfter = ttl > 0 ? ttl : config.window;
+
+      return {
+        allowed: current <= config.requests,
+        limit: config.requests,
+        remaining: Math.max(0, config.requests - current),
+        retryAfter,
+      };
+    } catch (error) {
+      if (isProduction()) {
+        logProductionRateLimitBackendFailure(namespace, "runtime-error", error);
       }
     }
   }
@@ -472,6 +531,22 @@ function normalizeIp(raw: string | null | undefined): string | null {
   return parseIp(ip) ? ip : null;
 }
 
+// Header the trusted edge (Cloudflare Transform Rule / reverse proxy) must add,
+// carrying the value of RATE_LIMIT_TRUSTED_PROXY_SECRET. The origin is reachable
+// on its public IP, so without this handshake an attacker bypassing the edge can
+// forge forwarded-IP headers and mint a fresh bucket per request.
+const TRUSTED_PROXY_HEADER = "x-rl-proxy-secret";
+// Shared bucket for every request that did not arrive via the trusted edge.
+const UNTRUSTED_ORIGIN_BUCKET = "untrusted-origin";
+
+function isFromTrustedProxy(req: NextRequest): boolean {
+  const expected = process.env.RATE_LIMIT_TRUSTED_PROXY_SECRET?.trim();
+  // Not configured: keep the Cloudflare CIDR logic below so a missing env var
+  // cannot take the whole site's rate limiting offline.
+  if (!expected) return true;
+  return req.headers.get(TRUSTED_PROXY_HEADER)?.trim() === expected;
+}
+
 /**
  * Resolves the client IP without trusting headers the client can forge.
  *
@@ -484,6 +559,10 @@ function normalizeIp(raw: string | null | undefined): string | null {
  * (local development).
  */
 export function getRateLimitClientIp(req: NextRequest): string {
+  if (!isFromTrustedProxy(req)) {
+    return UNTRUSTED_ORIGIN_BUCKET;
+  }
+
   const peerIp = normalizeIp(req.headers.get("x-real-ip"));
   if (peerIp) {
     if (isCloudflareIp(peerIp)) {
@@ -536,6 +615,8 @@ export function getRateLimitOpsSnapshot() {
   return {
     production: isProduction(),
     upstashConfigured: hasUpstashConfig(),
+    localRedisConfigured: hasLocalRedisConfig(),
+    localRedisHealthy: !localRedisFailed,
     failOpenEnabled: false,
     memoryFallbackNamespaces: ["*"],
     todo: "Configure Upstash for multi-instance deployments; single-process uses memory fallback.",
@@ -663,4 +744,61 @@ export async function enforceRateLimit(
     }
     return null;
   }
+}
+
+/**
+ * Login limits for password endpoints. The IP+account bucket alone let one
+ * client try a password against every account (spraying), and let a forged
+ * forwarded-for header mint a fresh bucket per request. So also limit:
+ * - per account, regardless of IP (stops per-account guessing from many IPs)
+ * - per IP, across accounts (stops spraying), skipped when the IP is unknown
+ *   or collapsed into the shared untrusted bucket so real users behind a
+ *   missing header are not locked out together.
+ */
+export async function enforceLoginRateLimits(
+  req: NextRequest,
+  options: {
+    namespace: string;
+    account: string | null | undefined;
+    onRateLimited: { error: string; message: string };
+  },
+): Promise<Response | null> {
+  const account = normalizeRateLimitEmail(options.account);
+  const ip = getRateLimitClientIp(req) || "unknown";
+  const common = {
+    productionFailureMode: "memory-fallback" as const,
+    onRateLimited: options.onRateLimited,
+  };
+
+  const perIpAndAccount = await enforceRateLimit(req, {
+    ...common,
+    namespace: options.namespace,
+    windowMs: 10 * 60_000,
+    maxHits: 20,
+    identifier: buildAuthRateLimitIdentifier(req, account),
+  });
+  if (perIpAndAccount) return perIpAndAccount;
+
+  const accountId = buildAccountRateLimitIdentifier(account);
+  if (accountId) {
+    const perAccount = await enforceRateLimit(req, {
+      ...common,
+      ...ACCOUNT_LOGIN_RATE_LIMIT,
+      identifier: accountId,
+    });
+    if (perAccount) return perAccount;
+  }
+
+  if (ip !== "unknown" && ip !== UNTRUSTED_ORIGIN_BUCKET) {
+    const perIp = await enforceRateLimit(req, {
+      ...common,
+      namespace: `${options.namespace}-ip`,
+      windowMs: 10 * 60_000,
+      maxHits: 100,
+      identifier: `ip:${ip}`,
+    });
+    if (perIp) return perIp;
+  }
+
+  return null;
 }

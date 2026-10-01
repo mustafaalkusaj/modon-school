@@ -26,6 +26,60 @@ import { sendWebPushToUsers } from "@/lib/web-push";
 const EXPO_PUSH_ENDPOINT = "https://exp.host/--/api/v2/push/send";
 const TOKEN_BATCH_SIZE = 100;
 
+const RETRY_ATTEMPTS = 2;
+const RETRY_BASE_DELAY_MS = 1000;
+
+async function retryAsync<T>(
+  fn: () => Promise<T>,
+  attempts: number = RETRY_ATTEMPTS,
+): Promise<T> {
+  let lastError: unknown;
+  for (let i = 0; i <= attempts; i++) {
+    try {
+      return await fn();
+    } catch (err) {
+      lastError = err;
+      if (i < attempts) {
+        const delay = RETRY_BASE_DELAY_MS * Math.pow(2, i) * (0.5 + Math.random() * 0.5);
+        await new Promise((r) => setTimeout(r, delay));
+      }
+    }
+  }
+  throw lastError;
+}
+
+// Maps a notification type to the Android channel used by the mobile app.
+const CHANNEL_MAP: Record<string, string> = {
+  urgent: "urgent",
+  alert: "urgent",
+  warning: "urgent",
+  grade: "grades",
+  grades: "grades",
+  behavior: "grades",
+  attendance: "attendance",
+  payment: "payment",
+  message: "messages",
+  reminder: "reminders",
+  general: "default",
+};
+
+// Maps a notification type to the student_notification_preferences column that
+// can opt the student out of it. Types not listed here (urgent alerts,
+// payments, reminders, general) are always delivered.
+const PREFERENCE_COLUMN_BY_TYPE: Record<string, "grades" | "attendance" | "assignments" | "exams" | "messages"> = {
+  grade: "grades",
+  grades: "grades",
+  behavior: "grades",
+  attendance: "attendance",
+  homework: "assignments",
+  assignment: "assignments",
+  assignments: "assignments",
+  exam: "exams",
+  exams: "exams",
+  message: "messages",
+  messages: "messages",
+};
+
 export interface PushNotificationInput {
   schoolId: string;
   branchId?: string | null;
@@ -99,11 +153,49 @@ export async function sendPushNotification(
     errors: [],
   };
 
-  const userIds = uniqueNonEmpty(input.userIds);
+  let userIds = uniqueNonEmpty(input.userIds);
   result.targeted = userIds.length;
 
   if (userIds.length === 0) {
     return result;
+  }
+
+  // ----------------------------------------------------------------
+  // 0. Drop students who opted out of this notification category
+  // ----------------------------------------------------------------
+  const preferenceColumn = PREFERENCE_COLUMN_BY_TYPE[input.type ?? "general"];
+  if (preferenceColumn) {
+    try {
+      const svcPref = createServiceSupabaseClient();
+      const { data: managed } = await svcPref
+        .from("managed_user_profiles")
+        .select("auth_user_id, student_id")
+        .in("auth_user_id", userIds)
+        .eq("school_id", input.schoolId)
+        .not("student_id", "is", null);
+      const studentByUser = new Map<string, string>();
+      for (const row of (managed ?? []) as Array<{ auth_user_id: string; student_id: string | null }>) {
+        if (row.student_id) studentByUser.set(row.auth_user_id, row.student_id);
+      }
+      if (studentByUser.size > 0) {
+        const { data: prefs } = await (svcPref as any)
+          .from("student_notification_preferences")
+          .select("student_id")
+          .in("student_id", Array.from(new Set(studentByUser.values())))
+          .eq("school_id", input.schoolId)
+          .eq(preferenceColumn, false);
+        const optedOutStudents = new Set(
+          ((prefs ?? []) as Array<{ student_id: string }>).map((p) => p.student_id),
+        );
+        if (optedOutStudents.size > 0) {
+          userIds = userIds.filter((id) => !optedOutStudents.has(studentByUser.get(id) ?? ""));
+          result.targeted = userIds.length;
+          if (userIds.length === 0) return result;
+        }
+      }
+    } catch {
+      // preference check failure must never block notifications
+    }
   }
 
   // RLS on `notifications` enforces user_id = auth.uid(), so admin
@@ -204,18 +296,20 @@ export async function sendPushNotification(
         data: payload.data,
         priority: "high" as const,
         sound: "default" as const,
-        channelId: "default",
+        channelId: CHANNEL_MAP[type] ?? "default",
       }));
 
-      const response = await fetch(EXPO_PUSH_ENDPOINT, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Accept: "application/json",
-          "Accept-Encoding": "gzip, deflate",
-        },
-        body: JSON.stringify(messages),
-      });
+      const response = await retryAsync(() =>
+        fetch(EXPO_PUSH_ENDPOINT, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Accept: "application/json",
+            "Accept-Encoding": "gzip, deflate",
+          },
+          body: JSON.stringify(messages),
+        }),
+      );
 
       if (!response.ok) {
         const text = await response.text().catch(() => `HTTP ${response.status}`);

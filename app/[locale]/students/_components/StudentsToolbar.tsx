@@ -8,6 +8,7 @@ import {
   Printer,
   KeyRound,
   Plus,
+  UsersRound,
 } from "lucide-react";
 import Link from "next/link";
 import { Input } from "@/components/ui/input";
@@ -35,6 +36,7 @@ interface StudentsToolbarProps {
   onPrintFiltered: () => void;
   onAddStudent: () => void;
   onBulkImport: () => void;
+  onShowDuplicates: () => void;
 }
 
 export function StudentsToolbar({
@@ -56,6 +58,7 @@ export function StudentsToolbar({
   onPromoteYear: _onPromoteYear,
   onAddStudent,
   onBulkImport,
+  onShowDuplicates,
 }: StudentsToolbarProps) {
   const t = useTranslations("students.toolbar");
 
@@ -106,6 +109,16 @@ export function StudentsToolbar({
 
       {/* Action Buttons */}
       <div className="grid w-full grid-cols-1 gap-2 sm:grid-cols-2 xl:flex xl:w-auto xl:flex-wrap xl:justify-end">
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={onShowDuplicates}
+          className="w-full justify-center border-amber-300 text-amber-700 hover:bg-amber-50 xl:w-auto"
+        >
+          <UsersRound className="h-4 w-4" />
+          {t("duplicates")}
+        </Button>
+
         <Button
           variant="outline"
           size="sm"

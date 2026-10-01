@@ -1,6 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 
+import { z } from "zod";
+
 import { resolveMobileRouteContext } from "@/lib/mobile-api-server";
+import { enforceRateLimit } from "@/lib/rate-limit";
 
 const VALID_EVENT_TYPES = [
   "app_switch",
@@ -10,6 +13,15 @@ const VALID_EVENT_TYPES = [
   "focus_lost",
 ];
 
+const metadataSchema = z
+  .record(z.string(), z.unknown())
+  .refine((obj) => Object.keys(obj).length <= 20, {
+    message: "metadata must have at most 20 keys",
+  })
+  .refine((obj) => JSON.stringify(obj).length <= 10000, {
+    message: "metadata JSON must be under 10000 characters",
+  });
+
 export async function POST(req: NextRequest) {
   try {
     const context = await resolveMobileRouteContext(req, "student");
@@ -17,7 +29,21 @@ export async function POST(req: NextRequest) {
       return context.response;
     }
 
-    const { schoolId, account, serviceSupabase: supabase } = context.value;
+    const {
+      schoolId,
+      account,
+      authUserId,
+      serviceSupabase: supabase,
+    } = context.value;
+
+    const limited = await enforceRateLimit(req, {
+      namespace: "mobile-exam-integrity",
+      windowMs: 60_000,
+      maxHits: 60,
+      identifier: authUserId,
+    });
+    if (limited) return limited;
+
     const studentId = account.student?.id;
 
     if (!studentId) {
@@ -37,6 +63,21 @@ export async function POST(req: NextRequest) {
         { ok: false, error: { message: "attempt_id و event_type مطلوبان." } },
         { status: 400 },
       );
+    }
+
+    let validatedMetadata: Record<string, unknown> | null = null;
+    if (body?.metadata != null) {
+      const metaParsed = metadataSchema.safeParse(body.metadata);
+      if (!metaParsed.success) {
+        return NextResponse.json(
+          {
+            ok: false,
+            error: { message: "بيانات الحدث الإضافية غير صالحة." },
+          },
+          { status: 400 },
+        );
+      }
+      validatedMetadata = metaParsed.data;
     }
 
     const eventType = String(rawEventType).trim().toLowerCase();
@@ -78,7 +119,8 @@ export async function POST(req: NextRequest) {
         student_id: studentId,
         school_id: schoolId,
         event_type: eventType,
-        metadata: body.metadata ?? null,
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        metadata: validatedMetadata as any,
       })
       .select("id, event_type, created_at")
       .single();

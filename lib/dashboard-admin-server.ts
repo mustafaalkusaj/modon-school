@@ -422,7 +422,14 @@ export async function saveDashboardClass(
 
   const legacyClassIds = Array.isArray(options.legacyClassIds) ? options.legacyClassIds : [];
   if (legacyClassIds.length > 0) {
-    const { error: deleteLegacyError } = await client.from("classes").delete().in("id", legacyClassIds);
+    const { error: deleteLegacyError } = await client
+      .from("classes")
+      .delete()
+      .in("id", legacyClassIds)
+      // Tenant predicate is unconditional: `legacyClassIds` comes straight from
+      // the request body with no ownership check, and this is a service-role
+      // client, so RLS cannot catch a cross-tenant id.
+      .eq("school_id", options.schoolId);
     if (deleteLegacyError) {
       throw deleteLegacyError;
     }
@@ -518,7 +525,12 @@ export async function deleteDashboardClass(
     return;
   }
 
-  const { error } = await client.from("classes").delete().in("id", legacyIds);
+  const { error } = await client
+    .from("classes")
+    .delete()
+    .in("id", legacyIds)
+    // Tenant predicate is unconditional — see saveDashboardClass.
+    .eq("school_id", options.schoolId);
   if (error) {
     throw error;
   }
@@ -614,7 +626,9 @@ export async function saveDashboardSection(
     const { error } = await client
       .from("classes")
       .update({ section: normalizedSectionName })
-      .eq("id", options.sectionId);
+      .eq("id", options.sectionId)
+      // Tenant predicate is unconditional: `sectionId` is caller-supplied.
+      .eq("school_id", options.schoolId);
     if (error) {
       throw error;
     }
@@ -683,7 +697,12 @@ export async function deleteDashboardSection(
     return;
   }
 
-  const { error } = await client.from("classes").delete().eq("id", options.sectionId);
+  const { error } = await client
+    .from("classes")
+    .delete()
+    .eq("id", options.sectionId)
+    // Tenant predicate is unconditional: `sectionId` is caller-supplied.
+    .eq("school_id", options.schoolId);
   if (error) {
     throw error;
   }

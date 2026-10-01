@@ -4,10 +4,15 @@ import { createPaymentSchema } from "@/lib/api-schemas";
 import { resolveBranchScope } from "@/lib/branch-scope";
 import { resolveSchoolScopedActorContext } from "@/lib/managed-users-server";
 import { enforceRateLimit } from "@/lib/rate-limit";
-import { jsonError, jsonValidationError, logRouteError } from "@/lib/route-utils";
+import {
+  jsonError,
+  jsonValidationError,
+  logRouteError,
+} from "@/lib/route-utils";
 import { routeUserHasPermission } from "@/lib/route-permissions";
 import { invalidateSchoolCacheDomains } from "@/lib/server-cache";
 import { createServiceSupabaseClient } from "@/lib/supabase-server";
+import { excludeDeletedStudents } from "@/lib/students/soft-delete";
 
 export async function POST(req: NextRequest) {
   const body = await req.json().catch(() => null);
@@ -38,7 +43,9 @@ export async function POST(req: NextRequest) {
 
   if (!context.ok) {
     return jsonError(
-      "message" in context ? context.message : "تعذر التحقق من صلاحيات المستخدم.",
+      "message" in context
+        ? context.message
+        : "تعذر التحقق من صلاحيات المستخدم.",
       "status" in context ? context.status : 500,
     );
   }
@@ -47,9 +54,19 @@ export async function POST(req: NextRequest) {
 
   // Run rate limit, permission check, and student lookup ALL in parallel
   const [rateLimited, canRecordPayments, studentResult] = await Promise.all([
-    enforceRateLimit(req, { namespace: "payments-records-create", windowMs: 60_000, maxHits: 40, identifier: actorUserId }),
+    enforceRateLimit(req, {
+      namespace: "payments-records-create",
+      windowMs: 60_000,
+      maxHits: 40,
+      identifier: actorUserId,
+    }),
     routeUserHasPermission(actorSupabase, actorUserId, "add_payments"),
-    actorSupabase.from("students").select("id, school_id, branch_id").eq("id", studentId).eq("school_id", targetSchoolId).maybeSingle(),
+    excludeDeletedStudents(
+      actorSupabase.from("students").select("id, school_id, branch_id"),
+    )
+      .eq("id", studentId)
+      .eq("school_id", targetSchoolId)
+      .maybeSingle(),
   ]);
 
   if (rateLimited) {
@@ -59,7 +76,11 @@ export async function POST(req: NextRequest) {
     return jsonError("ليس لديك صلاحية تسجيل دفعات جديدة.", 403);
   }
 
-  const student = studentResult.data as { id: string; school_id: string; branch_id: string | null } | null;
+  const student = studentResult.data as {
+    id: string;
+    school_id: string;
+    branch_id: string | null;
+  } | null;
   const studentError = studentResult.error;
   const studentBranchId: string | null = student?.branch_id ?? null;
 
@@ -68,41 +89,51 @@ export async function POST(req: NextRequest) {
   }
 
   // Validate actor has access to student's actual branch
-  const studentBranchScope = resolveBranchScope(context.value, studentBranchId ?? undefined);
+  const studentBranchScope = resolveBranchScope(
+    context.value,
+    studentBranchId ?? undefined,
+  );
   if (!studentBranchScope.ok) {
     return jsonError(studentBranchScope.message, studentBranchScope.status);
   }
 
   // Use student's actual branch_id from DB; fall back to actor's accessible branch
   const actorBranchScope = resolveBranchScope(context.value);
-  const finalBranchId: string | null = studentBranchId
-    ?? (actorBranchScope.ok ? actorBranchScope.value.branchId : null);
+  const finalBranchId: string | null =
+    studentBranchId ??
+    (actorBranchScope.ok ? actorBranchScope.value.branchId : null);
 
   const paymentTimestamp = receiptDate ?? new Date().toISOString();
 
   // create_payment_atomic is SECURITY DEFINER and trusts p_school_id, so it is
   // executable by service_role only; the actor was authorized above.
-  const { data: rpcRows, error: rpcError } = await createServiceSupabaseClient().rpc("create_payment_atomic", {
-    p_school_id: targetSchoolId,
-    p_student_id: studentId,
-    p_branch_id: finalBranchId,
-    p_amount: amount,
-    p_payment_method: paymentMethod,
-    p_notes: notes ?? null,
-    p_created_at: paymentTimestamp,
-    // Force DB sequence to assign the canonical receipt_number to prevent
-    // client-supplied collisions / unique-violation races. Client-facing
-    // external receipts still flow through manual_receipt_number.
-    p_receipt_number: null,
-    p_manual_receipt_number: (manualReceiptNumber ?? receiptNumber) ?? null,
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  } as any);
+  const { data: rpcRows, error: rpcError } =
+    await createServiceSupabaseClient().rpc("create_payment_atomic", {
+      p_school_id: targetSchoolId,
+      p_student_id: studentId,
+      p_branch_id: finalBranchId,
+      p_amount: amount,
+      p_payment_method: paymentMethod,
+      p_notes: notes ?? null,
+      p_created_at: paymentTimestamp,
+      // Force DB sequence to assign the canonical receipt_number to prevent
+      // client-supplied collisions / unique-violation races. Client-facing
+      // external receipts still flow through manual_receipt_number.
+      p_receipt_number: null,
+      p_manual_receipt_number: manualReceiptNumber ?? receiptNumber ?? null,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    } as any);
 
   if (rpcError) {
     // Postgres unique violation (error code 23505) → duplicate payment → 409
     if ((rpcError as { code?: string }).code === "23505") {
       return NextResponse.json(
-        { error: { code: "DUPLICATE_PAYMENT", message: "تم تسجيل هذه الدفعة مسبقاً." } },
+        {
+          error: {
+            code: "DUPLICATE_PAYMENT",
+            message: "تم تسجيل هذه الدفعة مسبقاً.",
+          },
+        },
         { status: 409 },
       );
     }
@@ -126,7 +157,12 @@ export async function POST(req: NextRequest) {
 
   if (row.error_code === "DUPLICATE_PAYMENT") {
     return NextResponse.json(
-      { error: { code: "DUPLICATE_PAYMENT", message: "تم تسجيل هذه الدفعة مسبقاً." } },
+      {
+        error: {
+          code: "DUPLICATE_PAYMENT",
+          message: "تم تسجيل هذه الدفعة مسبقاً.",
+        },
+      },
       { status: 409 },
     );
   }
@@ -139,7 +175,7 @@ export async function POST(req: NextRequest) {
           message: "تم تسديد المبلغ بالكامل، لا يمكن تسجيل دفعة جديدة.",
         },
       },
-      { status: 400 }
+      { status: 400 },
     );
   }
 
@@ -151,16 +187,20 @@ export async function POST(req: NextRequest) {
           message: "قيمة الدفعة أكبر من المبلغ المتبقي.",
         },
       },
-      { status: 400 }
+      { status: 400 },
     );
   }
 
   if (row.error_code) {
-    logRouteError("payments-records-create", new Error(`Unexpected RPC error_code: ${row.error_code}`), {
-      actorUserId,
-      schoolId: targetSchoolId,
-      studentId,
-    });
+    logRouteError(
+      "payments-records-create",
+      new Error(`Unexpected RPC error_code: ${row.error_code}`),
+      {
+        actorUserId,
+        schoolId: targetSchoolId,
+        studentId,
+      },
+    );
     return jsonError("تعذر تسجيل الدفعة حالياً. حاول مرة أخرى بعد قليل.", 500);
   }
 
@@ -187,7 +227,8 @@ export async function POST(req: NextRequest) {
 
   // create_payment_atomic does not return verification_token; fetch it from the
   // payments row so the receipt verification link/QR can be built. Null-safe.
-  let verificationToken: string | null = (row as { verification_token?: string | null }).verification_token ?? null;
+  let verificationToken: string | null =
+    (row as { verification_token?: string | null }).verification_token ?? null;
   if (!verificationToken && row.id) {
     const { data: tokenRow } = await actorSupabase
       .from("payments")

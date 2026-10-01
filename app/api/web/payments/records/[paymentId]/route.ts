@@ -1,14 +1,130 @@
 import { NextRequest, NextResponse } from "next/server";
 
 import { deletePaymentSchema } from "@/lib/api-schemas";
-import { applyBranchScopeToQuery, resolveBranchScope } from "@/lib/branch-scope";
+import {
+  applyBranchScopeToQuery,
+  resolveBranchScope,
+} from "@/lib/branch-scope";
 import { resolveSchoolScopedActorContext } from "@/lib/managed-users-server";
 import { enforceRateLimit } from "@/lib/rate-limit";
-import { jsonError, jsonValidationError, logRouteError } from "@/lib/route-utils";
+import {
+  jsonError,
+  jsonValidationError,
+  logRouteError,
+} from "@/lib/route-utils";
 import { routeUserHasPermission } from "@/lib/route-permissions";
 import { invalidateSchoolCacheDomains } from "@/lib/server-cache";
 
-const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const UUID_REGEX =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+export async function PATCH(
+  req: NextRequest,
+  { params }: { params: Promise<{ paymentId: string }> },
+) {
+  const { paymentId } = await params;
+  if (!paymentId || !UUID_REGEX.test(paymentId)) {
+    return jsonError("معرف الدفعة غير صالح.", 400);
+  }
+  const body = await req.json().catch(() => null);
+  const schoolId = body?.school_id;
+  if (!schoolId || typeof schoolId !== "string") {
+    return jsonError("school_id مطلوب.", 400);
+  }
+  // Clients send the state they want. A bare toggle (no `audited`) is still
+  // accepted, but two quick clicks on it cancelled each other out.
+  const requestedAudited =
+    typeof body?.audited === "boolean" ? (body.audited as boolean) : null;
+
+  const context = await resolveSchoolScopedActorContext(
+    schoolId,
+    {
+      allowedRoles: ["super_admin", "admin", "employee"],
+      roleDeniedMessage: "تدقيق الدفعات متاح ضمن المدرسة الحالية فقط.",
+    },
+    req.headers.get("authorization"),
+  );
+
+  if (!context.ok) {
+    return jsonError(
+      "message" in context
+        ? context.message
+        : "تعذر التحقق من صلاحيات المستخدم.",
+      "status" in context ? context.status : 500,
+    );
+  }
+
+  const { actorSupabase, actorUserId, targetSchoolId } = context.value;
+
+  const rateLimited = await enforceRateLimit(req, {
+    namespace: "payments-audit-toggle",
+    windowMs: 60_000,
+    maxHits: 60,
+    identifier: actorUserId,
+  });
+  if (rateLimited) return rateLimited;
+
+  // Marking a payment as audited is a finance action: same permission as
+  // recording or deleting payments, and only inside the actor's branches.
+  const [canAdd, canDelete] = await Promise.all([
+    routeUserHasPermission(actorSupabase, actorUserId, "add_payments"),
+    routeUserHasPermission(actorSupabase, actorUserId, "delete_payments"),
+  ]);
+  if (!canAdd && !canDelete) {
+    return jsonError("ليس لديك صلاحية تدقيق الدفعات.", 403);
+  }
+  const branchScope = resolveBranchScope(context.value);
+  if (!branchScope.ok) {
+    return jsonError(branchScope.message, branchScope.status);
+  }
+
+  // `audited_at` is not part of the generated Database types yet, so the row is
+  // typed explicitly here.
+  const { data: paymentRow, error: fetchErr } = await applyBranchScopeToQuery(
+    actorSupabase
+      .from("payments")
+      .select("id, audited_at" as "id")
+      .eq("id", paymentId)
+      .eq("school_id", targetSchoolId)
+      .is("deleted_at", null),
+    branchScope.value,
+  ).maybeSingle();
+
+  if (fetchErr || !paymentRow) {
+    return jsonError("تعذر العثور على الدفعة.", 404);
+  }
+  const payment = paymentRow as unknown as {
+    id: string;
+    audited_at: string | null;
+  };
+
+  const shouldBeAudited = requestedAudited ?? !payment.audited_at;
+  const newAuditedAt = shouldBeAudited
+    ? (payment.audited_at ?? new Date().toISOString())
+    : null;
+
+  const { error: updateErr } = await actorSupabase
+    .from("payments")
+    .update({ audited_at: newAuditedAt } as never)
+    .eq("id", paymentId)
+    .eq("school_id", targetSchoolId)
+    .is("deleted_at", null);
+
+  if (updateErr) {
+    logRouteError("payments-audit-toggle", updateErr, {
+      actorUserId,
+      schoolId: targetSchoolId,
+      paymentId,
+    });
+    return jsonError("تعذر تحديث حالة التدقيق.", 500);
+  }
+
+  return NextResponse.json({
+    ok: true,
+    paymentId,
+    audited_at: newAuditedAt,
+  });
+}
 
 export async function DELETE(
   req: NextRequest,
@@ -36,7 +152,9 @@ export async function DELETE(
 
   if (!context.ok) {
     return jsonError(
-      "message" in context ? context.message : "تعذر التحقق من صلاحيات المستخدم.",
+      "message" in context
+        ? context.message
+        : "تعذر التحقق من صلاحيات المستخدم.",
       "status" in context ? context.status : 500,
     );
   }
@@ -57,7 +175,11 @@ export async function DELETE(
     return rateLimited;
   }
 
-  const canDeletePayments = await routeUserHasPermission(actorSupabase, actorUserId, "delete_payments");
+  const canDeletePayments = await routeUserHasPermission(
+    actorSupabase,
+    actorUserId,
+    "delete_payments",
+  );
   if (!canDeletePayments) {
     return jsonError("ليس لديك صلاحية حذف الدفعات.", 403);
   }
@@ -70,10 +192,14 @@ export async function DELETE(
       .eq("school_id", targetSchoolId),
     branchScope.value,
   );
-  const { data: payment, error: paymentError } = await paymentQuery.maybeSingle();
+  const { data: payment, error: paymentError } =
+    await paymentQuery.maybeSingle();
 
   if (paymentError || !payment?.id || typeof payment.student_id !== "string") {
-    return jsonError("تعذر العثور على الدفعة المطلوبة ضمن المدرسة الحالية.", 404);
+    return jsonError(
+      "تعذر العثور على الدفعة المطلوبة ضمن المدرسة الحالية.",
+      404,
+    );
   }
 
   if (payment.deleted_at) {
@@ -90,17 +216,26 @@ export async function DELETE(
       updated_at: new Date().toISOString(),
     })
     .eq("id", paymentId)
-    .eq("school_id", targetSchoolId);
+    .eq("school_id", targetSchoolId)
+    // Guard against a concurrent delete: only a live row may be soft-deleted.
+    .is("deleted_at", null);
 
   // Only apply branch scope filtering if user has specific branch access
   if (branchScope.value.branchId) {
-    softDeleteQuery = softDeleteQuery.eq("branch_id", branchScope.value.branchId);
+    softDeleteQuery = softDeleteQuery.eq(
+      "branch_id",
+      branchScope.value.branchId,
+    );
   } else if (branchScope.value.branchIds.length > 0) {
-    softDeleteQuery = softDeleteQuery.in("branch_id", branchScope.value.branchIds);
+    softDeleteQuery = softDeleteQuery.in(
+      "branch_id",
+      branchScope.value.branchIds,
+    );
   }
   // If neither (group_admin with all branches), no branch filtering needed
 
-  const { error: deleteError } = await softDeleteQuery;
+  const { data: deletedRows, error: deleteError } =
+    await softDeleteQuery.select("id");
 
   if (deleteError) {
     logRouteError("payments-records-delete", deleteError, {
@@ -110,15 +245,16 @@ export async function DELETE(
       errorCode: deleteError.code,
       errorMessage: deleteError.message,
     });
-    // Return detailed error for debugging
-    const msg = deleteError.message || "unknown error";
+    // Details are in the server log; never echo database errors to clients.
+    return jsonError("تعذر حذف الدفعة. حاول مرة أخرى.", 500);
+  }
+
+  // RLS or the branch filter can match nothing without raising an error;
+  // that used to be reported as a successful delete.
+  if (!deletedRows || deletedRows.length === 0) {
     return jsonError(
-      msg.includes("policy") || msg.includes("RLS")
-        ? "RLS policy blocks delete. Contact admin."
-        : msg.includes("foreign key")
-        ? "Payment referenced elsewhere, cannot delete."
-        : "Delete failed: " + msg,
-      500
+      "لم يتم حذف الدفعة: غير موجودة ضمن صلاحياتك أو حُذفت مسبقاً.",
+      409,
     );
   }
 
@@ -140,12 +276,16 @@ export async function DELETE(
     .maybeSingle();
 
   if (studentQueryError || !updatedStudent) {
-    logRouteError("payments-records-delete-fetch-updated-student", studentQueryError, {
-      actorUserId,
-      schoolId: targetSchoolId,
-      studentId: payment.student_id,
-      paymentId,
-    });
+    logRouteError(
+      "payments-records-delete-fetch-updated-student",
+      studentQueryError,
+      {
+        actorUserId,
+        schoolId: targetSchoolId,
+        studentId: payment.student_id,
+        paymentId,
+      },
+    );
     return NextResponse.json(
       {
         ok: true,

@@ -4,6 +4,7 @@ import { writeAuditLog } from "@/lib/audit/audit-log";
 import { isOpsTokenAuthorized } from "@/lib/ops/security";
 import { createServiceSupabaseClient } from "@/lib/supabase-server";
 import { resolveSuperAdminActorContext } from "@/lib/super-admin-server";
+import { logRouteError } from "@/lib/route-utils";
 
 function notFound() {
   return NextResponse.json(
@@ -36,8 +37,9 @@ export async function GET(request: NextRequest) {
     .limit(50);
 
   if (error) {
+    logRouteError("ops/pending-actions", error);
     return NextResponse.json(
-      { ok: false, message: error.message },
+      { ok: false, message: "تعذر تحميل الإجراءات المعلّقة." },
       { status: 500, headers: { "Cache-Control": "no-store" } },
     );
   }
@@ -94,8 +96,9 @@ export async function POST(request: NextRequest) {
     .maybeSingle();
 
   if (fetchError) {
+    logRouteError("ops/pending-actions", fetchError);
     return NextResponse.json(
-      { ok: false, message: fetchError.message },
+      { ok: false, message: "تعذر تحميل الإجراء." },
       { status: 500, headers: { "Cache-Control": "no-store" } },
     );
   }
@@ -176,7 +179,8 @@ export async function POST(request: NextRequest) {
         });
 
       if (createError) {
-        result = { error: createError.message };
+        logRouteError("ops/pending-actions", createError);
+        result = { error: "تعذر إنشاء المستخدم." };
       } else {
         result = { user_id: newUser?.user?.id ?? null };
 
@@ -204,11 +208,11 @@ export async function POST(request: NextRequest) {
       { headers: { "Cache-Control": "no-store" } },
     );
   } catch (err) {
+    logRouteError("ops/pending-actions", err);
     return NextResponse.json(
       {
         ok: false,
-        message:
-          err instanceof Error ? err.message : "Failed to execute pending action.",
+        message: "Failed to execute pending action.",
       },
       { status: 500, headers: { "Cache-Control": "no-store" } },
     );

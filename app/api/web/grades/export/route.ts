@@ -7,6 +7,7 @@ import { applyBranchScopeToQuery, resolveBranchScope } from "@/lib/branch-scope"
 import { fetchGradeEntriesForSection } from "@/lib/grades/grade-entries-server";
 import { computeGradeLabel, computePercentage } from "@/lib/grades/grade-calculator";
 import { buildStyledWorkbook } from "@/lib/excel-builder";
+import { excludeDeletedStudents } from "@/lib/students/soft-delete";
 
 function jsonError(message: string, status: number) {
   return NextResponse.json({ error: { message } }, { status });
@@ -74,7 +75,7 @@ export async function GET(req: NextRequest) {
   let branchStudentIds: string[] | undefined;
   if (branchScope.value.branchIds.length > 0) {
     const { data: bs } = await applyBranchScopeToQuery(
-      serviceSupabase.from("students").select("id").eq("school_id", resolvedSchoolId),
+      excludeDeletedStudents(serviceSupabase.from("students").select("id")).eq("school_id", resolvedSchoolId),
       branchScope.value,
     );
     branchStudentIds = ((bs ?? []) as Array<{ id: string }>).map((s) => s.id);

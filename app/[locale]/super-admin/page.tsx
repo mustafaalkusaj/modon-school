@@ -44,6 +44,8 @@ import { type AdminInfrastructure, DEFAULT_ADMIN_INFRASTRUCTURE } from "@/lib/ad
 import { type AppSchemaCompat } from "@/lib/schema-compat";
 import { cn } from "@/lib/brand/brand-utils";
 
+import { ProtectedRoute } from "@/components/ProtectedRoute";
+
 // Components
 import { AuditLogTab } from "./components/AuditLogTab";
 import { RolesTab } from "./components/RolesTab";
@@ -533,7 +535,7 @@ export default function SuperAdminPage() {
   ], [overviewDiagnostics]);
 
   return (
-    <>
+    <ProtectedRoute roles={["super_admin"]}>
           <div className="flex-1 min-h-0 flex flex-col overflow-hidden xl:flex-row">
             {/* Super Admin Vertical Tabs Sidebar */}
             <div className="w-80 shrink-0 border-e border-[var(--border)] bg-[var(--surface-muted)] hidden xl:flex flex-col p-4">
@@ -772,6 +774,6 @@ export default function SuperAdminPage() {
             </div>
           </div>
         )}
-    </>
+    </ProtectedRoute>
   );
 }

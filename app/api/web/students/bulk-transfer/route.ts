@@ -1,15 +1,19 @@
 import { NextRequest, NextResponse } from "next/server";
 
-import { applyBranchScopeToQuery, resolveBranchScope } from "@/lib/branch-scope";
+import {
+  applyBranchScopeToQuery,
+  resolveBranchScope,
+} from "@/lib/branch-scope";
 import { resolveSchoolScopedActorContext } from "@/lib/managed-users-server";
 import { enforceRateLimit } from "@/lib/rate-limit";
-import { isValidUUID } from "@/lib/route-utils";
+import { isValidUUID, jsonServerError } from "@/lib/route-utils";
 import { RBAC_COOKIE_NAME, verifyRBACSession } from "@/lib/rbac-session";
 import { invalidateSchoolCacheDomains } from "@/lib/server-cache";
 import { createServiceSupabaseClient } from "@/lib/supabase-server";
 import { checkPermission } from "@/lib/perm-check";
 import { hasPermissionInList } from "@/types/roles";
 import type { StudentStatus } from "@/types/student";
+import { excludeDeletedStudents } from "@/lib/students/soft-delete";
 
 function jsonError(message: string, status: number) {
   return NextResponse.json({ error: { message } }, { status });
@@ -18,13 +22,24 @@ function jsonError(message: string, status: number) {
 // POST: bulk class transfer (promotion) — promotes many students into one
 // target class in a single scoped UPDATE instead of N PATCH requests.
 export async function POST(req: NextRequest) {
-  const body = (await req.json().catch(() => null)) as Record<string, unknown> | null;
+  const body = (await req.json().catch(() => null)) as Record<
+    string,
+    unknown
+  > | null;
   const schoolId = typeof body?.school_id === "string" ? body.school_id : null;
-  const requestedBranchId = typeof body?.branch_id === "string" ? body.branch_id : null;
-  const targetClassName = typeof body?.target_class_name === "string" ? body.target_class_name.trim() : "";
+  const requestedBranchId =
+    typeof body?.branch_id === "string" ? body.branch_id : null;
+  const targetClassName =
+    typeof body?.target_class_name === "string"
+      ? body.target_class_name.trim()
+      : "";
   const rawIds = Array.isArray(body?.student_ids) ? body.student_ids : [];
   const studentIds = Array.from(
-    new Set(rawIds.filter((id): id is string => typeof id === "string" && isValidUUID(id))),
+    new Set(
+      rawIds.filter(
+        (id): id is string => typeof id === "string" && isValidUUID(id),
+      ),
+    ),
   );
 
   if (!targetClassName) {
@@ -35,7 +50,9 @@ export async function POST(req: NextRequest) {
   }
 
   // edit_students permission — same gate as the single-student transfer PATCH.
-  const session = await verifyRBACSession(req.cookies.get(RBAC_COOKIE_NAME)?.value);
+  const session = await verifyRBACSession(
+    req.cookies.get(RBAC_COOKIE_NAME)?.value,
+  );
   if (!session?.userActive) {
     return jsonError("يجب تسجيل الدخول أولاً.", 401);
   }
@@ -56,7 +73,9 @@ export async function POST(req: NextRequest) {
   );
   if (!context.ok) {
     return jsonError(
-      "message" in context ? context.message : "تعذر التحقق من صلاحيات المستخدم.",
+      "message" in context
+        ? context.message
+        : "تعذر التحقق من صلاحيات المستخدم.",
       "status" in context ? context.status : 500,
     );
   }
@@ -107,16 +126,24 @@ export async function POST(req: NextRequest) {
 
   // Single scoped UPDATE — branch + school + id-set bound it to the actor's reach.
   const { data, error } = await applyBranchScopeToQuery(
-    serviceSupabase
-      .from("students")
-      .update({ class_name: targetClassName, status: "active" satisfies StudentStatus })
+    excludeDeletedStudents(
+      serviceSupabase.from("students").update({
+        class_name: targetClassName,
+        status: "active" satisfies StudentStatus,
+      }),
+    )
       .eq("school_id", targetSchoolId)
       .in("id", studentIds),
     branchScope.value,
   ).select("id");
 
   if (error) {
-    return jsonError(error.message || "تعذر ترقية الطلاب.", 500);
+    return jsonServerError(
+      "web-students-bulk-transfer",
+      error,
+      "تعذر ترقية الطلاب.",
+      500,
+    );
   }
 
   invalidateSchoolCacheDomains(targetSchoolId, [
@@ -128,5 +155,9 @@ export async function POST(req: NextRequest) {
   ]);
 
   const promoted = (data ?? []).length;
-  return NextResponse.json({ ok: true, promoted, requested: studentIds.length });
+  return NextResponse.json({
+    ok: true,
+    promoted,
+    requested: studentIds.length,
+  });
 }

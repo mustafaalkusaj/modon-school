@@ -43,7 +43,7 @@ function setup(options: {
   db = createSupabaseMock({
     payments: [
       options.lookup ?? { data: { id: PAYMENT_ID, student_id: STUDENT_ID, deleted_at: null } },
-      options.update ?? { data: null, error: null },
+      options.update ?? { data: [{ id: PAYMENT_ID }], error: null },
     ],
     students: options.student ?? { data: UPDATED_STUDENT },
   });
@@ -214,6 +214,15 @@ describe("DELETE /api/web/payments/records/[paymentId]", () => {
         ["id", PAYMENT_ID],
         ["school_id", SCHOOL_ID],
       ]);
+    });
+
+    it("returns 409 when the update matched no live row", async () => {
+      setup({ update: { data: [], error: null } });
+
+      const { response } = await del(PAYMENT_ID);
+
+      expect(response.status).toBe(409);
+      expect(invalidateSchoolCacheDomains).not.toHaveBeenCalled();
     });
 
     it("returns 500 when the update fails", async () => {

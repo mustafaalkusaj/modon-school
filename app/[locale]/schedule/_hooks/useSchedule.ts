@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { fetchJsonWithAuthorizedSession, withJsonHeaders } from "@/lib/authorized-api";
 import type { TimeSlot, WorkingDay } from "./useTimeSlotsSettings";
 
@@ -66,11 +66,20 @@ export function useSchedule(
   // Stabilize array references so parent re-renders that produce new array
   // instances (inline literals, .filter()) don't recreate fetchSchedule and
   // trigger unnecessary re-fetch cascades. We serialize to a string dep so
-  // useMemo only fires when the actual content changes, not on identity change.
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  const stableTimeSlots = useMemo(() => timeSlots, [JSON.stringify(timeSlots)]);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  const stableWorkingDays = useMemo(() => workingDays, [JSON.stringify(workingDays)]);
+  // the stored reference only changes when the serialized content changes.
+  const stableTimeSlotsRef = useRef({ key: "", value: timeSlots });
+  const timeSlotsKey = JSON.stringify(timeSlots);
+  if (stableTimeSlotsRef.current.key !== timeSlotsKey) {
+    stableTimeSlotsRef.current = { key: timeSlotsKey, value: timeSlots };
+  }
+  const stableTimeSlots = stableTimeSlotsRef.current.value;
+
+  const stableWorkingDaysRef = useRef({ key: "", value: workingDays });
+  const workingDaysKey = JSON.stringify(workingDays);
+  if (stableWorkingDaysRef.current.key !== workingDaysKey) {
+    stableWorkingDaysRef.current = { key: workingDaysKey, value: workingDays };
+  }
+  const stableWorkingDays = stableWorkingDaysRef.current.value;
   const [selectedClass, setSelectedClass] = useState<string>("");
   const [selectedSection, setSelectedSection] = useState<string>("");
   const [grid, setGrid] = useState<ScheduleGrid | null>(null);

@@ -112,12 +112,26 @@ describe("PATCH /api/v1/roles/[roleId]", () => {
   it("400 nothing to update", async () => {
     expect((await rolePATCH(req({}, "PATCH"), P())).status).toBe(400);
   });
+  it("404 when the role does not exist in the school", async () => {
+    h.results = [{ data: null, error: null }];
+    expect((await rolePATCH(req({ name_ar: "جديد" }, "PATCH"), P())).status).toBe(404);
+  });
+  it("403 when the role is a system role", async () => {
+    h.results = [{ data: { is_system: true }, error: null }];
+    expect((await rolePATCH(req({ name_ar: "جديد" }, "PATCH"), P())).status).toBe(403);
+  });
   it("ok update", async () => {
-    h.results = [{ data: { id: "r1", name_ar: "x" }, error: null }];
+    h.results = [
+      { data: { is_system: false }, error: null },
+      { data: { id: "r1", name_ar: "x" }, error: null },
+    ];
     expect((await rolePATCH(req({ name_ar: "جديد" }, "PATCH"), P())).status).toBe(200);
   });
   it("500 error", async () => {
-    h.results = [{ data: null, error: { message: "x" } }];
+    h.results = [
+      { data: { is_system: false }, error: null },
+      { data: null, error: { message: "x" } },
+    ];
     expect((await rolePATCH(req({ name_ar: "جديد" }, "PATCH"), P())).status).toBe(500);
   });
 });
@@ -133,6 +147,10 @@ describe("PUT /api/v1/roles/[roleId]/perms", () => {
   it("404 role not in school", async () => {
     h.results = [{ data: null, error: null }];
     expect((await permsPUT(req({ permissionIds: [] }, "PUT"), P())).status).toBe(404);
+  });
+  it("403 when the role is a system role", async () => {
+    h.results = [{ data: { id: "r1", is_system: true }, error: null }];
+    expect((await permsPUT(req({ permissionIds: [] }, "PUT"), P())).status).toBe(403);
   });
   it("ok empty permissionIds (delete only)", async () => {
     h.results = [{ data: { id: "r1" }, error: null }, { data: null, error: null }];

@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { usePathname, useSearchParams } from "next/navigation";
 import Link from "next/link";
+import NextImage from "next/image";
 import { motion, AnimatePresence } from "framer-motion";
 import { AppSidebar } from "@/components/AppSidebar";
 import { AppShellTopbar } from "@/components/AppShellTopbar";
@@ -12,6 +13,7 @@ import { useRole } from "@/hooks/useRole";
 import { useSchoolScope } from "@/hooks/useSchoolScope";
 import { getLocaleFromPath, localizeAppPath } from "@/lib/locale-routing";
 import { cn } from "@/lib/brand/brand-utils";
+import { invalidateCurrencyCache } from "@/hooks/useCurrency";
 import {
   Settings,
   Palette,
@@ -23,7 +25,7 @@ import {
   ExternalLink,
   Upload,
   X,
-  Image,
+  Image as ImageIcon,
   FileSpreadsheet,
   Download,
   Users,
@@ -105,6 +107,12 @@ type PayrollSettings = {
   default_lecture_price: number | null;
 };
 
+
+type PayrollSettingsResponse = {
+  ok?: boolean;
+  settings?: PayrollSettings | null;
+  error?: { message?: string };
+};
 
 type MutationResponse = BrandingResponse & {
   settings?: PayrollSettings;
@@ -750,7 +758,10 @@ function BrandingTab({ schoolId }: { schoolId: string }) {
                 {logoUploading ? (
                   <Loader2 size={22} className="animate-spin text-[var(--primary)]" />
                 ) : logoUrl.trim() ? (
-                  <img
+                  <NextImage
+                    unoptimized
+                    width={800}
+                    height={800}
                     src={logoUrl}
                     alt="school logo"
                     className="w-full h-full transition-all"
@@ -759,7 +770,7 @@ function BrandingTab({ schoolId }: { schoolId: string }) {
                   />
                 ) : (
                   <div className="flex flex-col items-center gap-1.5 text-[var(--text-muted)]">
-                    <Image size={22} />
+                    <ImageIcon size={22} />
                     <span className="text-[10px] font-bold">رفع شعار</span>
                   </div>
                 )}
@@ -999,6 +1010,154 @@ function BrandingTab({ schoolId }: { schoolId: string }) {
     </div>
   );
 }
+
+// ─── Payroll Tab ──────────────────────────────────────────────────────────────
+
+function PayrollTab({ schoolId }: { schoolId: string }) {
+  const [workingDays, setWorkingDays] = useState("22");
+  const [lecturePrice, setLecturePrice] = useState("0");
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [success, setSuccess] = useState("");
+  const [error, setError] = useState("");
+
+  const load = useCallback(async () => {
+    if (!schoolId) {
+      setLoading(false);
+      return;
+    }
+    setLoading(true);
+    setError("");
+    try {
+      const { response, payload } =
+        await fetchJsonWithAuthorizedSession<PayrollSettingsResponse>(
+          `/api/web/payroll/settings?schoolId=${encodeURIComponent(schoolId)}`,
+        );
+      if (!response.ok) {
+        throw new Error(
+          getApiErrorMessage(payload, "تعذر تحميل إعدادات الرواتب."),
+        );
+      }
+      const s = payload?.settings;
+      if (s) {
+        setWorkingDays(String(s.working_days_per_month ?? 22));
+        setLecturePrice(String(s.default_lecture_price ?? 0));
+      }
+    } catch (err) {
+      setError(
+        err instanceof Error ? err.message : "تعذر تحميل إعدادات الرواتب.",
+      );
+    } finally {
+      setLoading(false);
+    }
+  }, [schoolId]);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    if (!schoolId) return;
+    setSaving(true);
+    setError("");
+    setSuccess("");
+    try {
+      const { response, payload } =
+        await fetchJsonWithAuthorizedSession<MutationResponse>(
+          "/api/web/payroll/settings",
+          {
+            method: "PUT",
+            headers: withJsonHeaders(),
+            body: JSON.stringify({
+              school_id: schoolId,
+              working_days_per_month: Number(workingDays) || 22,
+              default_lecture_price: Number(lecturePrice) || 0,
+            }),
+          },
+        );
+      if (!response.ok) {
+        throw new Error(
+          getApiErrorMessage(payload, "تعذر حفظ إعدادات الرواتب."),
+        );
+      }
+      const s = payload?.settings;
+      if (s) {
+        setWorkingDays(String(s.working_days_per_month ?? 22));
+        setLecturePrice(String(s.default_lecture_price ?? 0));
+      }
+      invalidateCurrencyCache();
+      setSuccess("تم حفظ إعدادات الرواتب بنجاح.");
+      setTimeout(() => setSuccess(""), 3500);
+    } catch (err) {
+      setError(
+        err instanceof Error ? err.message : "تعذر حفظ إعدادات الرواتب.",
+      );
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center py-20 gap-3">
+        <Loader2 size={20} className="animate-spin text-[var(--primary)]" />
+        <span className="text-sm font-bold text-[var(--text-muted)]">
+          جارٍ التحميل...
+        </span>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-5">
+      <Toast success={success} error={error} />
+
+      <form onSubmit={handleSubmit}>
+        <Section
+          title="إعدادات الرواتب والمحاضرات"
+          description="هذه الإعدادات تؤثر على حساب الرواتب الشهرية وأسعار المحاضرات."
+        >
+          <Field label="أيام العمل في الشهر" htmlFor="working-days-input">
+            <input
+              id="working-days-input"
+              className={INPUT_CLS}
+              type="number"
+              min={1}
+              max={31}
+              step={1}
+              placeholder="22"
+              value={workingDays}
+              onChange={(e) => setWorkingDays(e.target.value)}
+              required
+            />
+          </Field>
+
+          <Field label="سعر المحاضرة الافتراضي" htmlFor="lecture-price-input">
+            <input
+              id="lecture-price-input"
+              className={INPUT_CLS}
+              type="number"
+              min={0}
+              step={500}
+              placeholder="0"
+              value={lecturePrice}
+              onChange={(e) => setLecturePrice(e.target.value)}
+              required
+            />
+          </Field>
+
+          <div className="flex justify-end pt-2">
+            <SaveButton saving={saving} />
+          </div>
+        </Section>
+      </form>
+    </div>
+  );
+}
+
+// Reserved for the payroll settings navigation once that tab is enabled.
+void PayrollTab;
 
 // ─── Roles Tab ────────────────────────────────────────────────────────────────
 
@@ -2140,7 +2299,10 @@ function buildPrintTemplateHtml(
   <meta name="viewport" content="width=device-width,initial-scale=1"/>
   <title>${doc.nameAr} — ${template.nameAr}</title>
   <style>
-    @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+Arabic:wght@400;700;900&display=swap');
+    /* Self-hosted, not Google Fonts: a client-side @import leaks the viewer's
+       IP, User-Agent and Referer to Google with no DPA. Same @font-face the
+       print modules already use. */
+    @font-face{font-family:"Noto Sans Arabic";src:url("/fonts/noto-sans-arabic/NotoSansArabic-Variable.ttf") format("truetype");font-style:normal;font-weight:100 900;font-display:swap;}
     *{box-sizing:border-box;margin:0;padding:0;}
     body{font-family:'Noto Sans Arabic',Arial,sans-serif;background:${bodyBg};display:flex;justify-content:center;padding:24px;}
     .page{${paperCss};background:${receiptBg};box-shadow:0 4px 32px rgba(0,0,0,0.14);border-radius:12px;overflow:hidden;}

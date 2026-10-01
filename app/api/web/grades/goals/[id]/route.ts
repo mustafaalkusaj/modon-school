@@ -1,3 +1,4 @@
+import { jsonServerError } from "@/lib/route-utils"
 import { NextRequest, NextResponse } from 'next/server'
 import { resolveSchoolScopedActorContext } from '@/lib/managed-users-server'
 import { enforceRateLimit } from '@/lib/rate-limit'
@@ -146,7 +147,7 @@ export async function PATCH(
     if (updateError.message?.includes('could not find the table')) {
       return jsonError('جدول student_goals غير جاهز بعد.', 503)
     }
-    return jsonError(`تعذر تحديث الهدف: ${updateError.message}`, 500)
+    return jsonServerError("web/grades/goals/[id]", updateError, "تعذر تحديث الهدف.")
   }
 
   if (!updatedGoal) {
@@ -246,7 +247,7 @@ export async function DELETE(
     if (deleteError.message?.includes('could not find the table')) {
       return jsonError('جدول student_goals غير جاهز بعد.', 503)
     }
-    return jsonError(`تعذر حذف الهدف: ${deleteError.message}`, 500)
+    return jsonServerError("web/grades/goals/[id]", deleteError, "تعذر حذف الهدف.")
   }
 
   return NextResponse.json({

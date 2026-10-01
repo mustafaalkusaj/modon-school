@@ -1,7 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 
 import { isMissingTableError } from "@/lib/admin-infrastructure";
-import { applyBranchScopeToQuery, resolveBranchScope } from "@/lib/branch-scope";
+import {
+  applyBranchScopeToQuery,
+  resolveBranchScope,
+} from "@/lib/branch-scope";
 import { resolveSchoolScopedActorContext } from "@/lib/managed-users-server";
 import { enforceRateLimit } from "@/lib/rate-limit";
 import { routeUserHasPermission } from "@/lib/route-permissions";
@@ -11,6 +14,7 @@ import {
   calculateNetSalary,
   loadSchoolDeductionIndex,
 } from "@/lib/salaries/effective-deductions";
+import { jsonServerError } from "@/lib/route-utils";
 
 const MONTH_REGEX = /^\d{4}-(0[1-9]|1[0-2])$/;
 
@@ -30,8 +34,12 @@ function extractMonthRange(month: string) {
 }
 
 export async function POST(req: NextRequest) {
-  const body = (await req.json().catch(() => null)) as Record<string, unknown> | null;
-  const schoolId = typeof body?.school_id === "string" ? body.school_id.trim() : "";
+  const body = (await req.json().catch(() => null)) as Record<
+    string,
+    unknown
+  > | null;
+  const schoolId =
+    typeof body?.school_id === "string" ? body.school_id.trim() : "";
   const month = typeof body?.month === "string" ? body.month.trim() : "";
 
   if (!schoolId || !month) {
@@ -53,12 +61,17 @@ export async function POST(req: NextRequest) {
 
   if (!context.ok) {
     return jsonError(
-      "message" in context ? context.message : "تعذر التحقق من صلاحيات المستخدم.",
+      "message" in context
+        ? context.message
+        : "تعذر التحقق من صلاحيات المستخدم.",
       "status" in context ? context.status : 500,
     );
   }
 
-  const requestedBranchId = typeof body?.branch_id === "string" && body.branch_id.trim() ? body.branch_id.trim() : null;
+  const requestedBranchId =
+    typeof body?.branch_id === "string" && body.branch_id.trim()
+      ? body.branch_id.trim()
+      : null;
   const branchScope = resolveBranchScope(context.value, requestedBranchId);
   if (!branchScope.ok) {
     return jsonError(branchScope.message, branchScope.status);
@@ -75,7 +88,11 @@ export async function POST(req: NextRequest) {
     return rateLimited;
   }
 
-  const canManageSalaries = await routeUserHasPermission(actorSupabase, actorUserId, "manage_salaries");
+  const canManageSalaries = await routeUserHasPermission(
+    actorSupabase,
+    actorUserId,
+    "manage_salaries",
+  );
   if (!canManageSalaries) {
     return jsonError("ليس لديك صلاحية أرشفة الرواتب.", 403);
   }
@@ -83,13 +100,18 @@ export async function POST(req: NextRequest) {
 
   const [teachersResult, salariesResult, lecturesResult] = await Promise.all([
     applyBranchScopeToQuery(
-      actorSupabase.from("teachers").select("id").eq("school_id", targetSchoolId),
+      actorSupabase
+        .from("teachers")
+        .select("id")
+        .eq("school_id", targetSchoolId),
       branchScope.value,
     ),
     applyBranchScopeToQuery(
       actorSupabase
         .from("salaries")
-        .select("id, teacher_id, gross_salary, deductions, month, paid_at, notes, teachers(full_name,subject)")
+        .select(
+          "id, teacher_id, gross_salary, deductions, month, paid_at, notes, teachers(full_name,subject)",
+        )
         .eq("school_id", targetSchoolId)
         .eq("month", month),
       branchScope.value,
@@ -97,7 +119,9 @@ export async function POST(req: NextRequest) {
     applyBranchScopeToQuery(
       actorSupabase
         .from("daily_lectures")
-        .select("id, teacher_id, grade, section, period, session_type, lecture_date, price")
+        .select(
+          "id, teacher_id, grade, section, period, session_type, lecture_date, price",
+        )
         .eq("school_id", targetSchoolId)
         .gte("lecture_date", from)
         .lte("lecture_date", to),
@@ -106,25 +130,49 @@ export async function POST(req: NextRequest) {
   ]);
 
   if (teachersResult.error) {
-    return jsonError(teachersResult.error.message || "تعذر تحميل الأساتذة قبل الأرشفة.", 500);
+    return jsonServerError(
+      "web-salaries-archive",
+      teachersResult.error,
+      "تعذر تحميل الأساتذة قبل الأرشفة.",
+      500,
+    );
   }
   if (salariesResult.error) {
-    return jsonError(salariesResult.error.message || "تعذر تحميل رواتب الشهر المطلوب.", 500);
+    return jsonServerError(
+      "web-salaries-archive",
+      salariesResult.error,
+      "تعذر تحميل رواتب الشهر المطلوب.",
+      500,
+    );
   }
   if (lecturesResult.error) {
-    return jsonError(lecturesResult.error.message || "تعذر تحميل المحاضرات المرتبطة بالشهر.", 500);
+    return jsonServerError(
+      "web-salaries-archive",
+      lecturesResult.error,
+      "تعذر تحميل المحاضرات المرتبطة بالشهر.",
+      500,
+    );
   }
 
   const normalizedSalaries = (salariesResult.data ?? []).map((item) => ({
     ...item,
-    teachers: Array.isArray(item.teachers) ? item.teachers[0] ?? null : item.teachers ?? null,
+    teachers: Array.isArray(item.teachers)
+      ? (item.teachers[0] ?? null)
+      : (item.teachers ?? null),
   }));
-  const deductionIndex = await loadSchoolDeductionIndex(actorSupabase, targetSchoolId);
-  const salaries = applyEffectiveSalaryDeductions(normalizedSalaries, deductionIndex);
+  const deductionIndex = await loadSchoolDeductionIndex(
+    actorSupabase,
+    targetSchoolId,
+  );
+  const salaries = applyEffectiveSalaryDeductions(
+    normalizedSalaries,
+    deductionIndex,
+  );
   const lectures = lecturesResult.data ?? [];
   const totalTeachers = teachersResult.data?.length ?? 0;
   const totalAmount = salaries.reduce(
-    (sum, salary) => sum + calculateNetSalary(salary.gross_salary, salary.deductions),
+    (sum, salary) =>
+      sum + calculateNetSalary(salary.gross_salary, salary.deductions),
     0,
   );
 
@@ -140,20 +188,29 @@ export async function POST(req: NextRequest) {
     },
   };
 
-  const { data: existingArchive, error: existingArchiveError } = await actorSupabase
-    .from("salary_archives")
-    .select("id")
-    .eq("school_id", targetSchoolId)
-    .eq("month", month)
-    .order("archive_date", { ascending: false })
-    .limit(1)
-    .maybeSingle();
+  const { data: existingArchive, error: existingArchiveError } =
+    await actorSupabase
+      .from("salary_archives")
+      .select("id")
+      .eq("school_id", targetSchoolId)
+      .eq("month", month)
+      .order("archive_date", { ascending: false })
+      .limit(1)
+      .maybeSingle();
 
   if (existingArchiveError) {
     if (isMissingTableError(existingArchiveError, "salary_archives")) {
-      return jsonError("جدول أرشيف الرواتب غير موجود بعد في قاعدة البيانات الحالية.", 500);
+      return jsonError(
+        "جدول أرشيف الرواتب غير موجود بعد في قاعدة البيانات الحالية.",
+        500,
+      );
     }
-    return jsonError(existingArchiveError.message || "تعذر التحقق من أرشيف الرواتب الحالي.", 500);
+    return jsonServerError(
+      "web-salaries-archive",
+      existingArchiveError,
+      "تعذر التحقق من أرشيف الرواتب الحالي.",
+      500,
+    );
   }
 
   // Capture old archive state before update (needed for correct rollback if lecture deletion fails)
@@ -187,9 +244,17 @@ export async function POST(req: NextRequest) {
 
   if (archiveError) {
     if (isMissingTableError(archiveError, "salary_archives")) {
-      return jsonError("جدول أرشيف الرواتب غير موجود بعد في قاعدة البيانات الحالية.", 500);
+      return jsonError(
+        "جدول أرشيف الرواتب غير موجود بعد في قاعدة البيانات الحالية.",
+        500,
+      );
     }
-    return jsonError(archiveError.message || "تعذر أرشفة بيانات الرواتب.", 500);
+    return jsonServerError(
+      "web-salaries-archive",
+      archiveError,
+      "تعذر أرشفة بيانات الرواتب.",
+      500,
+    );
   }
 
   const { error: purgeLecturesError } = await applyBranchScopeToQuery(
@@ -213,14 +278,22 @@ export async function POST(req: NextRequest) {
         .eq("id", archive!.id)
         .eq("school_id", targetSchoolId);
     } else if (oldArchiveSnapshot) {
-      const { id: _id, ...restorePayload } = oldArchiveSnapshot as Record<string, unknown>;
+      const { id: _id, ...restorePayload } = oldArchiveSnapshot as Record<
+        string,
+        unknown
+      >;
       await actorSupabase
         .from("salary_archives")
         .update(restorePayload)
         .eq("id", existingArchive!.id)
         .eq("school_id", targetSchoolId);
     }
-    return jsonError(purgeLecturesError.message || "تعذر تصفير سجل المحاضرات — تم التراجع عن الأرشفة.", 500);
+    return jsonServerError(
+      "web-salaries-archive",
+      purgeLecturesError,
+      "تعذر تصفير سجل المحاضرات — تم التراجع عن الأرشفة.",
+      500,
+    );
   }
 
   try {
@@ -230,7 +303,10 @@ export async function POST(req: NextRequest) {
     // Ignore when migration has not been applied yet.
   }
 
-  invalidateSchoolCacheDomains(targetSchoolId, ["dashboard-overview", "reports-overview"]);
+  invalidateSchoolCacheDomains(targetSchoolId, [
+    "dashboard-overview",
+    "reports-overview",
+  ]);
 
   return NextResponse.json({
     ok: true,

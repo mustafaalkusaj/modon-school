@@ -1,9 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
-import { applyBranchScopeToQuery, resolveBranchScope } from "@/lib/branch-scope";
+import {
+  applyBranchScopeToQuery,
+  resolveBranchScope,
+} from "@/lib/branch-scope";
 import { resolveSchoolScopedActorContext } from "@/lib/managed-users-server";
 import { enforceRateLimit } from "@/lib/rate-limit";
 import { routeUserHasPermission } from "@/lib/route-permissions";
-import { jsonError, logRouteError } from "@/lib/route-utils";
+import { jsonError, jsonServerError, logRouteError } from "@/lib/route-utils";
 import { todayBaghdadIso } from "@/lib/tz";
 
 export async function GET(
@@ -24,7 +27,9 @@ export async function GET(
 
   if (!context.ok) {
     return jsonError(
-      "message" in context ? context.message : "تعذر التحقق من صلاحيات المستخدم.",
+      "message" in context
+        ? context.message
+        : "تعذر التحقق من صلاحيات المستخدم.",
       "status" in context ? context.status : 500,
     );
   }
@@ -53,8 +58,11 @@ export async function GET(
 
   // Branch isolation: verify teacher belongs to this school and branch
   const { data: teacherCheck } = await applyBranchScopeToQuery(
-    actorSupabase.from("teachers").select("id")
-      .eq("id", teacherId).eq("school_id", targetSchoolId),
+    actorSupabase
+      .from("teachers")
+      .select("id")
+      .eq("id", teacherId)
+      .eq("school_id", targetSchoolId),
     branchScope.value,
   ).maybeSingle();
   if (!teacherCheck) {
@@ -70,13 +78,19 @@ export async function GET(
       .order("evaluation_date", { ascending: false });
 
     if (error) {
-      logRouteError("teachers-evaluations-get", error, { teacherId, schoolId: targetSchoolId });
+      logRouteError("teachers-evaluations-get", error, {
+        teacherId,
+        schoolId: targetSchoolId,
+      });
       return jsonError("تعذر تحميل سجل التقييمات.", 500);
     }
 
     return NextResponse.json({ ok: true, evaluations: data ?? [] });
   } catch (error) {
-    logRouteError("teachers-evaluations-get", error, { teacherId, schoolId: targetSchoolId });
+    logRouteError("teachers-evaluations-get", error, {
+      teacherId,
+      schoolId: targetSchoolId,
+    });
     return jsonError("تعذر تحميل سجل التقييمات.", 500);
   }
 }
@@ -86,7 +100,10 @@ export async function POST(
   { params }: { params: Promise<{ teacherId: string }> },
 ) {
   const { teacherId } = await params;
-  const body = (await req.json().catch(() => null)) as Record<string, unknown> | null;
+  const body = (await req.json().catch(() => null)) as Record<
+    string,
+    unknown
+  > | null;
   const schoolId = typeof body?.school_id === "string" ? body.school_id : null;
 
   const context = await resolveSchoolScopedActorContext(
@@ -100,7 +117,9 @@ export async function POST(
 
   if (!context.ok) {
     return jsonError(
-      "message" in context ? context.message : "تعذر التحقق من صلاحيات المستخدم.",
+      "message" in context
+        ? context.message
+        : "تعذر التحقق من صلاحيات المستخدم.",
       "status" in context ? context.status : 500,
     );
   }
@@ -129,8 +148,11 @@ export async function POST(
 
   // Branch isolation: verify teacher belongs to this school and branch
   const { data: teacherCheckPost } = await applyBranchScopeToQuery(
-    actorSupabase.from("teachers").select("id")
-      .eq("id", teacherId).eq("school_id", targetSchoolId),
+    actorSupabase
+      .from("teachers")
+      .select("id")
+      .eq("id", teacherId)
+      .eq("school_id", targetSchoolId),
     branchScope.value,
   ).maybeSingle();
   if (!teacherCheckPost) {
@@ -138,7 +160,10 @@ export async function POST(
   }
 
   try {
-    const evaluationDate = typeof body?.evaluation_date === "string" ? body.evaluation_date : todayBaghdadIso();
+    const evaluationDate =
+      typeof body?.evaluation_date === "string"
+        ? body.evaluation_date
+        : todayBaghdadIso();
     const toNumOrNull = (v: unknown) => {
       const n = Number(v);
       return Number.isFinite(n) ? n : null;
@@ -151,25 +176,44 @@ export async function POST(
         school_id: targetSchoolId,
         evaluation_date: evaluationDate,
         overall_score: toNumOrNull(body?.overall_score),
-        overall_grade: typeof body?.overall_grade === "string" ? body.overall_grade : null,
+        overall_grade:
+          typeof body?.overall_grade === "string" ? body.overall_grade : null,
         discipline_score: toNumOrNull(body?.discipline_score),
         curriculum_score: toNumOrNull(body?.curriculum_score),
         student_results_score: toNumOrNull(body?.student_results_score),
         cooperation_score: toNumOrNull(body?.cooperation_score),
-        notes: typeof body?.notes === "string" && body.notes.trim() ? body.notes.trim() : null,
-        ...(branchScope.value.branchId ? { branch_id: branchScope.value.branchId } : {}),
+        notes:
+          typeof body?.notes === "string" && body.notes.trim()
+            ? body.notes.trim()
+            : null,
+        ...(branchScope.value.branchId
+          ? { branch_id: branchScope.value.branchId }
+          : {}),
       })
       .select("*")
       .single();
 
     if (error || !data) {
-      logRouteError("teachers-evaluations-create", error, { teacherId, actorUserId, schoolId: targetSchoolId });
-      return jsonError(error?.message || "تعذر إضافة التقييم.", 500);
+      logRouteError("teachers-evaluations-create", error, {
+        teacherId,
+        actorUserId,
+        schoolId: targetSchoolId,
+      });
+      return jsonServerError(
+        "web-teachers-teacherId-evaluations",
+        error,
+        "تعذر إضافة التقييم.",
+        500,
+      );
     }
 
     return NextResponse.json({ ok: true, evaluation: data }, { status: 201 });
   } catch (error) {
-    logRouteError("teachers-evaluations-create", error, { teacherId, actorUserId, schoolId: targetSchoolId });
+    logRouteError("teachers-evaluations-create", error, {
+      teacherId,
+      actorUserId,
+      schoolId: targetSchoolId,
+    });
     return jsonError("تعذر إضافة التقييم.", 500);
   }
 }

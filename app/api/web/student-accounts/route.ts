@@ -1,7 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
+import { openTemporaryPassword } from "@/lib/managed-users/password-vault";
 import { resolveSchoolScopedActorContext } from "@/lib/managed-users-server";
 import { createServiceSupabaseClient } from "@/lib/supabase-server";
 
+import { logRouteError } from "@/lib/route-utils";
 const BATCH_SIZE = 50;
 
 export async function GET(request: NextRequest) {
@@ -35,10 +37,8 @@ export async function GET(request: NextRequest) {
     .order("full_name", { ascending: true });
 
   if (studentsError) {
-    return NextResponse.json(
-      { ok: false, error: studentsError.message },
-      { status: 500 },
-    );
+    logRouteError("web-student-accounts", studentsError);
+    return NextResponse.json({ ok: false, error: "تعذر إكمال العملية. حاول مرة أخرى لاحقاً." }, { status: 500 });
   }
 
   if (!studentRows || studentRows.length === 0) {
@@ -67,10 +67,8 @@ export async function GET(request: NextRequest) {
       .in("auth_user_id", batch);
 
     if (error) {
-      return NextResponse.json(
-        { ok: false, error: error.message },
-        { status: 500 },
-      );
+      logRouteError("web-student-accounts", error);
+      return NextResponse.json({ ok: false, error: "تعذر إكمال العملية. حاول مرة أخرى لاحقاً." }, { status: 500 });
     }
     if (data) allCredentials.push(...data);
   }
@@ -86,7 +84,7 @@ export async function GET(request: NextRequest) {
       className: s.class_name,
       section: s.section,
       username: cred?.login_identifier ?? "",
-      password: cred?.temporary_password_plain ?? "",
+      password: openTemporaryPassword(cred?.temporary_password_plain),
       hasAccount: !!(cred?.login_identifier),
     };
   });

@@ -2,6 +2,7 @@ import "server-only";
 import { NextRequest, NextResponse } from "next/server";
 import { resolveSchoolScopedActorContext } from "@/lib/managed-users-server";
 import { sanitizeStorageFilename } from "@/lib/upload-validation";
+import { jsonServerError } from "@/lib/route-utils";
 
 const BUCKET = "notification-media";
 
@@ -45,10 +46,7 @@ export async function GET(request: NextRequest) {
     .createSignedUploadUrl(objectPath);
 
   if (error || !data?.signedUrl) {
-    return NextResponse.json(
-      { ok: false, error: error?.message ?? "تعذر إنشاء رابط الرفع" },
-      { status: 500 },
-    );
+    return jsonServerError("web/notifications/upload-url", error, "تعذر إنشاء رابط الرفع");
   }
 
   const { data: pubData } = actorSupabase.storage.from(BUCKET).getPublicUrl(objectPath);

@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import sharp from "sharp";
 
 import { createServiceSupabaseClient } from "@/lib/supabase-server";
 import { sniffImageType } from "@/lib/image-sniff";
@@ -68,9 +69,13 @@ export async function POST(req: NextRequest) {
   }
   const fileName = `temp/${token}/photo.${image.ext}`;
 
+  // Re-encode: drops EXIF/GPS metadata and bakes in the orientation. The format
+  // is kept, so the stored type still matches the sniffed one.
+  const strippedBuf = await sharp(Buffer.from(buffer)).rotate().toBuffer();
+
   const { error: uploadError } = await sb.storage
     .from("student-photos")
-    .upload(fileName, buffer, { contentType: image.mime, upsert: true });
+    .upload(fileName, strippedBuf, { contentType: image.mime, upsert: true });
 
   if (uploadError) {
     return jsonError("تعذر رفع الصورة.", 500);

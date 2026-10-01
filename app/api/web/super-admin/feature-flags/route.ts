@@ -1,15 +1,21 @@
 import { NextRequest, NextResponse } from "next/server";
 
 import { resolveSuperAdminActorContext } from "@/lib/super-admin-server";
+import { jsonServerError } from "@/lib/route-utils";
 
 function jsonError(message: string, status: number) {
   return NextResponse.json({ error: { message } }, { status });
 }
 
 export async function GET(req: NextRequest) {
-  const context = await resolveSuperAdminActorContext(req.headers.get("authorization"));
+  const context = await resolveSuperAdminActorContext(
+    req.headers.get("authorization"),
+  );
   if (!context.ok) {
-    return jsonError("message" in context ? context.message : "غير مصرح.", "status" in context ? context.status : 500);
+    return jsonError(
+      "message" in context ? context.message : "غير مصرح.",
+      "status" in context ? context.status : 500,
+    );
   }
 
   try {
@@ -27,40 +33,62 @@ export async function GET(req: NextRequest) {
     const { data, error } = await query;
 
     if (error) {
-      if (error.code === "42P01") return NextResponse.json({ ok: true, flags: [], tableMissing: true });
+      if (error.code === "42P01")
+        return NextResponse.json({ ok: true, flags: [], tableMissing: true });
       throw error;
     }
 
     return NextResponse.json({ ok: true, flags: data ?? [] });
   } catch (e) {
-    return jsonError(e instanceof Error ? e.message : "تعذر تحميل الميزات.", 500);
+    return jsonServerError(
+      "web-super-admin-feature-flags",
+      e,
+      "تعذر تحميل الميزات.",
+      500,
+    );
   }
 }
 
 export async function POST(req: NextRequest) {
-  const context = await resolveSuperAdminActorContext(req.headers.get("authorization"));
+  const context = await resolveSuperAdminActorContext(
+    req.headers.get("authorization"),
+  );
   if (!context.ok) {
-    return jsonError("message" in context ? context.message : "غير مصرح.", "status" in context ? context.status : 500);
+    return jsonError(
+      "message" in context ? context.message : "غير مصرح.",
+      "status" in context ? context.status : 500,
+    );
   }
 
   try {
     const body = await req.json();
-    const { school_id, feature_key, is_enabled } = body as Record<string, unknown>;
+    const { school_id, feature_key, is_enabled } = body as Record<
+      string,
+      unknown
+    >;
 
-    if (!school_id || typeof school_id !== "string") return jsonError("school_id مطلوب.", 400);
-    if (!feature_key || typeof feature_key !== "string") return jsonError("feature_key مطلوب.", 400);
+    if (!school_id || typeof school_id !== "string")
+      return jsonError("school_id مطلوب.", 400);
+    if (!feature_key || typeof feature_key !== "string")
+      return jsonError("feature_key مطلوب.", 400);
     if (!/^[a-z][a-z0-9_]{1,59}$/.test(feature_key as string)) {
-      return jsonError("feature_key يجب أن يبدأ بحرف صغير ويحتوي على حروف صغيرة وأرقام وشرطات سفلية فقط (max 60).", 400);
+      return jsonError(
+        "feature_key يجب أن يبدأ بحرف صغير ويحتوي على حروف صغيرة وأرقام وشرطات سفلية فقط (max 60).",
+        400,
+      );
     }
 
     const { data, error } = await context.value.dataSupabase
       .from("school_feature_flags")
-      .upsert({
-        school_id,
-        feature_key,
-        is_enabled: is_enabled === true,
-        updated_at: new Date().toISOString(),
-      }, { onConflict: "school_id,feature_key" })
+      .upsert(
+        {
+          school_id,
+          feature_key,
+          is_enabled: is_enabled === true,
+          updated_at: new Date().toISOString(),
+        },
+        { onConflict: "school_id,feature_key" },
+      )
       .select("*")
       .single();
 
@@ -68,32 +96,50 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({ ok: true, flag: data });
   } catch (e) {
-    return jsonError(e instanceof Error ? e.message : "تعذر حفظ الميزة.", 500);
+    return jsonServerError(
+      "web-super-admin-feature-flags",
+      e,
+      "تعذر حفظ الميزة.",
+      500,
+    );
   }
 }
 
 export async function PATCH(req: NextRequest) {
-  const context = await resolveSuperAdminActorContext(req.headers.get("authorization"));
+  const context = await resolveSuperAdminActorContext(
+    req.headers.get("authorization"),
+  );
   if (!context.ok) {
-    return jsonError("message" in context ? context.message : "غير مصرح.", "status" in context ? context.status : 500);
+    return jsonError(
+      "message" in context ? context.message : "غير مصرح.",
+      "status" in context ? context.status : 500,
+    );
   }
 
   try {
     const body = await req.json();
-    const { updates } = body as { updates?: Array<{ school_id: string; feature_key: string; is_enabled: boolean }> };
+    const { updates } = body as {
+      updates?: Array<{
+        school_id: string;
+        feature_key: string;
+        is_enabled: boolean;
+      }>;
+    };
 
-    if (!Array.isArray(updates) || updates.length === 0) return jsonError("updates مطلوب.", 400);
+    if (!Array.isArray(updates) || updates.length === 0)
+      return jsonError("updates مطلوب.", 400);
 
     const results = await Promise.allSettled(
       updates.map((u) =>
-        context.value.dataSupabase
-          .from("school_feature_flags")
-          .upsert({
+        context.value.dataSupabase.from("school_feature_flags").upsert(
+          {
             school_id: u.school_id,
             feature_key: u.feature_key,
             is_enabled: u.is_enabled,
             updated_at: new Date().toISOString(),
-          }, { onConflict: "school_id,feature_key" })
+          },
+          { onConflict: "school_id,feature_key" },
+        ),
       ),
     );
 
@@ -102,6 +148,11 @@ export async function PATCH(req: NextRequest) {
 
     return NextResponse.json({ ok: true, succeeded, failed });
   } catch (e) {
-    return jsonError(e instanceof Error ? e.message : "تعذر التحديث الجماعي.", 500);
+    return jsonServerError(
+      "web-super-admin-feature-flags",
+      e,
+      "تعذر التحديث الجماعي.",
+      500,
+    );
   }
 }

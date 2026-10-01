@@ -1,8 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import { resolveSchoolScopedActorContext } from "@/lib/managed-users-server";
 import { enforceRateLimit } from "@/lib/rate-limit";
-import { jsonError } from "@/lib/route-utils";
-import { resolveBranchScope, resolveBranchIdForWrite } from "@/lib/branch-scope";
+import { jsonError, jsonServerError } from "@/lib/route-utils";
+import {
+  resolveBranchScope,
+  resolveBranchIdForWrite,
+  isPostgrestSafeBranchId,
+} from "@/lib/branch-scope";
 import { getCacheHeaders, CACHE_STRATEGIES } from "@/lib/cache-strategies";
 import { createInsiteNotification } from "@/lib/notifications/insite-service";
 import { createServiceSupabaseClient } from "@/lib/supabase-server";
@@ -15,7 +19,8 @@ export async function GET(req: NextRequest) {
   const year = searchParams.get("year") || new Date().getFullYear().toString();
   const month = searchParams.get("month"); // optional, 1-12
   const type = searchParams.get("type"); // optional filter
-  const requestedBranchId = searchParams.get("branchId") ?? searchParams.get("branch_id");
+  const requestedBranchId =
+    searchParams.get("branchId") ?? searchParams.get("branch_id");
 
   const context = await resolveSchoolScopedActorContext(
     schoolId,
@@ -28,7 +33,9 @@ export async function GET(req: NextRequest) {
 
   if (!context.ok) {
     return jsonError(
-      "message" in context ? context.message : "تعذر التحقق من صلاحيات المستخدم.",
+      "message" in context
+        ? context.message
+        : "تعذر التحقق من صلاحيات المستخدم.",
       "status" in context ? context.status : 500,
     );
   }
@@ -77,10 +84,32 @@ export async function GET(req: NextRequest) {
 
   // Always scope to this school: show global events OR school-specific events.
   // If a branch is requested, additionally filter branch-specific events.
-  if (branchScope.value.branchId) {
-    query = query.or(`is_global.eq.true,and(school_id.eq.${targetSchoolId},or(branch_id.is.null,branch_id.eq.${branchScope.value.branchId}))`);
-  } else if (branchScope.value.branchIds.length > 0) {
-    query = query.or(`is_global.eq.true,and(school_id.eq.${targetSchoolId},or(branch_id.is.null,branch_id.in.(${branchScope.value.branchIds.join(",")})))`);
+  // The branch id is interpolated into a PostgREST filter expression on a
+  // SERVICE-ROLE client, so a non-uuid value could break out of the filter
+  // grouping. `resolveBranchScope` returns the REQUESTED id verbatim when the
+  // actor has no branch assignment and no schoolBranchIds list was supplied
+  // (which is the case here), so this value is caller-controlled and must be
+  // validated before it reaches the filter string.
+  const scopedBranchId = branchScope.value.branchId;
+  if (scopedBranchId && !isPostgrestSafeBranchId(scopedBranchId)) {
+    return jsonError("معرّف الفرع غير صالح.", 400);
+  }
+
+  const safeBranchIds = branchScope.value.branchIds.filter((value) =>
+    isPostgrestSafeBranchId(value),
+  );
+  if (safeBranchIds.length !== branchScope.value.branchIds.length) {
+    return jsonError("معرّف الفرع غير صالح.", 400);
+  }
+
+  if (scopedBranchId) {
+    query = query.or(
+      `is_global.eq.true,and(school_id.eq.${targetSchoolId},or(branch_id.is.null,branch_id.eq.${scopedBranchId}))`,
+    );
+  } else if (safeBranchIds.length > 0) {
+    query = query.or(
+      `is_global.eq.true,and(school_id.eq.${targetSchoolId},or(branch_id.is.null,branch_id.in.(${safeBranchIds.join(",")})))`,
+    );
   } else {
     query = query.or(`is_global.eq.true,school_id.eq.${targetSchoolId}`);
   }
@@ -92,10 +121,18 @@ export async function GET(req: NextRequest) {
   const { data, error } = await query;
 
   if (error) {
-    return jsonError(error.message, 500);
+    return jsonServerError(
+      "web-calendar-events",
+      error,
+      "تعذر إكمال العملية. حاول مرة أخرى لاحقاً.",
+      500,
+    );
   }
 
-  return NextResponse.json({ ok: true, events: data ?? [] }, { headers: getCacheHeaders(CACHE_STRATEGIES.CALENDAR_EVENTS) });
+  return NextResponse.json(
+    { ok: true, events: data ?? [] },
+    { headers: getCacheHeaders(CACHE_STRATEGIES.CALENDAR_EVENTS) },
+  );
 }
 
 export async function POST(req: NextRequest) {
@@ -110,7 +147,9 @@ export async function POST(req: NextRequest) {
 
   if (!context.ok) {
     return jsonError(
-      "message" in context ? context.message : "تعذر التحقق من صلاحيات المستخدم.",
+      "message" in context
+        ? context.message
+        : "تعذر التحقق من صلاحيات المستخدم.",
       "status" in context ? context.status : 500,
     );
   }
@@ -130,7 +169,19 @@ export async function POST(req: NextRequest) {
     return jsonError("طلب غير صالح.", 400);
   }
 
-  const { title, title_en, date, end_date, type, hijri_date, description, color, branch_id, target_class, target_section } = body as {
+  const {
+    title,
+    title_en,
+    date,
+    end_date,
+    type,
+    hijri_date,
+    description,
+    color,
+    branch_id,
+    target_class,
+    target_section,
+  } = body as {
     title?: string;
     title_en?: string;
     date?: string;
@@ -148,18 +199,32 @@ export async function POST(req: NextRequest) {
     return jsonError("الحقول المطلوبة: title, date, type.", 400);
   }
 
-  const validTypes = ["holiday", "religious", "national", "school", "exam", "vacation", "custom"];
+  const validTypes = [
+    "holiday",
+    "religious",
+    "national",
+    "school",
+    "exam",
+    "vacation",
+    "custom",
+  ];
   if (!validTypes.includes(type)) {
     return jsonError("نوع الحدث غير صالح.", 400);
   }
 
   // Resolve branch scope for write — validate the requested branch_id against actor's allowed branches
-  const branchScopeForWrite = resolveBranchScope(context.value, branch_id ?? null);
+  const branchScopeForWrite = resolveBranchScope(
+    context.value,
+    branch_id ?? null,
+  );
   if (!branchScopeForWrite.ok) {
     return jsonError(branchScopeForWrite.message, branchScopeForWrite.status);
   }
 
-  const resolvedBranchId = resolveBranchIdForWrite(branchScopeForWrite.value, branch_id ?? null);
+  const resolvedBranchId = resolveBranchIdForWrite(
+    branchScopeForWrite.value,
+    branch_id ?? null,
+  );
   if (!resolvedBranchId.ok) {
     return jsonError(resolvedBranchId.message, resolvedBranchId.status);
   }
@@ -193,7 +258,12 @@ export async function POST(req: NextRequest) {
     .single();
 
   if (error) {
-    return jsonError(error.message, 500);
+    return jsonServerError(
+      "web-calendar-events",
+      error,
+      "تعذر إكمال العملية. حاول مرة أخرى لاحقاً.",
+      500,
+    );
   }
 
   // Auto-notify teachers and students about new event (fire-and-forget)
@@ -208,7 +278,9 @@ export async function POST(req: NextRequest) {
   };
   const typeLabel = eventTypeLabels[String(type)] ?? "حدث";
   const notifTitle = `📅 ${typeLabel}: ${String(title)}`;
-  const notifBody = description ? String(description) : `${typeLabel} بتاريخ ${String(date)}`;
+  const notifBody = description
+    ? String(description)
+    : `${typeLabel} بتاريخ ${String(date)}`;
 
   // Notify both teachers and students (non-blocking)
   void Promise.allSettled([
@@ -234,7 +306,9 @@ export async function POST(req: NextRequest) {
       category: "activity",
       sentByUserId: context.value.actorUserId,
     }),
-  ]).catch(() => { /* notification failure should not block event creation */ });
+  ]).catch(() => {
+    /* notification failure should not block event creation */
+  });
 
   return NextResponse.json({ ok: true, event: data }, { status: 201 });
 }

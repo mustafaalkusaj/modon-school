@@ -1,10 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
 
-import { applyBranchScopeToQuery, resolveBranchIdForWrite, resolveBranchScope } from "@/lib/branch-scope";
+import {
+  applyBranchScopeToQuery,
+  resolveBranchIdForWrite,
+  resolveBranchScope,
+} from "@/lib/branch-scope";
 import { resolveSchoolScopedActorContext } from "@/lib/managed-users-server";
 import { enforceRateLimit } from "@/lib/rate-limit";
 import { routeUserHasPermission } from "@/lib/route-permissions";
 import { invalidateSchoolCacheDomains } from "@/lib/server-cache";
+import { jsonServerError } from "@/lib/route-utils";
 import { todayBaghdadIso } from "@/lib/tz";
 
 function jsonError(message: string, status: number) {
@@ -24,12 +29,16 @@ export async function GET(req: NextRequest) {
 
   if (!context.ok) {
     return jsonError(
-      "message" in context ? context.message : "تعذر التحقق من صلاحيات المستخدم.",
+      "message" in context
+        ? context.message
+        : "تعذر التحقق من صلاحيات المستخدم.",
       "status" in context ? context.status : 500,
     );
   }
 
-  const requestedBranchId = req.nextUrl.searchParams.get("branchId") ?? req.nextUrl.searchParams.get("branch_id");
+  const requestedBranchId =
+    req.nextUrl.searchParams.get("branchId") ??
+    req.nextUrl.searchParams.get("branch_id");
   const branchScope = resolveBranchScope(context.value, requestedBranchId);
   if (!branchScope.ok) {
     return jsonError(branchScope.message, branchScope.status);
@@ -45,7 +54,11 @@ export async function GET(req: NextRequest) {
   if (rateLimited) {
     return rateLimited;
   }
-  const canManageSalaries = await routeUserHasPermission(actorSupabase, actorUserId, "manage_salaries");
+  const canManageSalaries = await routeUserHasPermission(
+    actorSupabase,
+    actorUserId,
+    "manage_salaries",
+  );
   if (!canManageSalaries) {
     return jsonError("ليس لديك صلاحية الوصول إلى سجل السحوبات.", 403);
   }
@@ -53,38 +66,59 @@ export async function GET(req: NextRequest) {
   const { data, error } = await applyBranchScopeToQuery(
     actorSupabase
       .from("deductions")
-      .select("id, teacher_id, amount, notes, deduction_date, teachers(full_name)")
+      .select(
+        "id, teacher_id, amount, notes, deduction_date, teachers(full_name)",
+      )
       .eq("school_id", targetSchoolId)
       .order("deduction_date", { ascending: false }),
     branchScope.value,
   );
 
   if (error) {
-    return jsonError(error.message || "تعذر تحميل سجل السحوبات.", 500);
+    return jsonServerError(
+      "web-salaries-deductions",
+      error,
+      "تعذر تحميل سجل السحوبات.",
+      500,
+    );
   }
 
   return NextResponse.json({
     ok: true,
     deductions: (data ?? []).map((item) => ({
       ...item,
-      teachers: Array.isArray(item.teachers) ? item.teachers[0] ?? null : item.teachers ?? null,
+      teachers: Array.isArray(item.teachers)
+        ? (item.teachers[0] ?? null)
+        : (item.teachers ?? null),
     })),
   });
 }
 
 export async function POST(req: NextRequest) {
-  const body = (await req.json().catch(() => null)) as Record<string, unknown> | null;
-  const schoolId = typeof body?.school_id === "string" ? body.school_id.trim() : "";
-  const teacherId = typeof body?.teacher_id === "string" ? body.teacher_id.trim() : "";
-  const branchId = typeof body?.branch_id === "string" && body.branch_id.trim() ? body.branch_id.trim() : null;
+  const body = (await req.json().catch(() => null)) as Record<
+    string,
+    unknown
+  > | null;
+  const schoolId =
+    typeof body?.school_id === "string" ? body.school_id.trim() : "";
+  const teacherId =
+    typeof body?.teacher_id === "string" ? body.teacher_id.trim() : "";
+  const branchId =
+    typeof body?.branch_id === "string" && body.branch_id.trim()
+      ? body.branch_id.trim()
+      : null;
   const amount = Math.max(0, Number(body?.amount ?? 0) || 0);
-  const notes = typeof body?.notes === "string" && body.notes.trim() ? body.notes.trim() : null;
+  const notes =
+    typeof body?.notes === "string" && body.notes.trim()
+      ? body.notes.trim()
+      : null;
   const deductionDate =
     typeof body?.deduction_date === "string" && body.deduction_date.trim()
       ? body.deduction_date.trim()
       : todayBaghdadIso();
 
-  const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+  const UUID_REGEX =
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
   if (!schoolId || !teacherId) {
     return jsonError("بيانات السحب غير مكتملة.", 400);
   }
@@ -107,7 +141,12 @@ export async function POST(req: NextRequest) {
   );
 
   if (!context.ok) {
-    return jsonError("message" in context ? context.message : "تعذر التحقق من صلاحيات المستخدم.", "status" in context ? context.status : 500);
+    return jsonError(
+      "message" in context
+        ? context.message
+        : "تعذر التحقق من صلاحيات المستخدم.",
+      "status" in context ? context.status : 500,
+    );
   }
 
   const branchScope = resolveBranchScope(context.value, branchId);
@@ -125,7 +164,11 @@ export async function POST(req: NextRequest) {
     return rateLimited;
   }
 
-  const canManageSalaries = await routeUserHasPermission(context.value.actorSupabase, context.value.actorUserId, "manage_salaries");
+  const canManageSalaries = await routeUserHasPermission(
+    context.value.actorSupabase,
+    context.value.actorUserId,
+    "manage_salaries",
+  );
   if (!canManageSalaries) {
     return jsonError("ليس لديك صلاحية إدارة السحوبات.", 403);
   }
@@ -158,20 +201,31 @@ export async function POST(req: NextRequest) {
       notes,
       deduction_date: deductionDate,
     })
-    .select("id, teacher_id, amount, notes, deduction_date, teachers(full_name)")
+    .select(
+      "id, teacher_id, amount, notes, deduction_date, teachers(full_name)",
+    )
     .single();
 
   if (error || !data) {
-    return jsonError(error?.message || "تعذر تسجيل السحب.", 500);
+    return jsonServerError(
+      "web-salaries-deductions",
+      error,
+      "تعذر تسجيل السحب.",
+      500,
+    );
   }
 
-  invalidateSchoolCacheDomains(context.value.targetSchoolId, ["reports-overview"]);
+  invalidateSchoolCacheDomains(context.value.targetSchoolId, [
+    "reports-overview",
+  ]);
 
   return NextResponse.json({
     ok: true,
     deduction: {
       ...data,
-      teachers: Array.isArray(data.teachers) ? data.teachers[0] ?? null : data.teachers ?? null,
+      teachers: Array.isArray(data.teachers)
+        ? (data.teachers[0] ?? null)
+        : (data.teachers ?? null),
     },
   });
 }

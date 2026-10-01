@@ -1,8 +1,9 @@
-import { createHash, randomBytes, timingSafeEqual } from "crypto";
+import { createHash, randomInt, timingSafeEqual } from "crypto";
 import bcrypt from "bcryptjs";
 
 import { isMissingTableError } from "@/lib/admin-infrastructure";
 import { createServiceSupabaseClient } from "@/lib/supabase-server";
+import { sealTemporaryPassword } from "./password-vault";
 import type { ManagedUserAppAccountSummary, ManagedUserRole } from "@/lib/managed-users";
 import type {
   RouteSupabaseClient,
@@ -21,6 +22,12 @@ function asObject(value: unknown): Record<string, unknown> {
     : {};
 }
 
+function sanitizeManagedCredentials(value: unknown): Record<string, unknown> {
+  const credentials = { ...asObject(value) };
+  delete credentials.temporary_password_plain;
+  return credentials;
+}
+
 function normalizeText(value: unknown) {
   return typeof value === "string" ? value.trim() : "";
 }
@@ -34,19 +41,28 @@ function normalizeNullableTimestamp(value: unknown) {
   return typeof value === "string" && value.trim() ? value : null;
 }
 
+function secureRandomCharacters(alphabet: string, length: number) {
+  let result = "";
+  for (let index = 0; index < length; index += 1) {
+    result += alphabet[randomInt(alphabet.length)];
+  }
+  return result;
+}
+
 // Password generation and hashing
+//
+// Temporary passwords are typed by students on phones, so they use lowercase
+// letters and digits only, without look-alikes (0/o, 1/l/i). 8 characters
+// from 31 symbols is ~40 bits, far beyond what the per-account login limit
+// lets anyone try; the old 6-digit PINs were ~20 bits.
+const TEMP_PASSWORD_ALPHABET = "abcdefghjkmnpqrstuvwxyz23456789";
+const TEMP_PASSWORD_LENGTH = 8;
+
 export function generateTemporaryPassword() {
-  const digits = "0123456789";
-  const bytes = randomBytes(6);
-  const pick = (byte: number) => digits[byte % digits.length];
-  return (
-    pick(bytes[0]) +
-    pick(bytes[1]) +
-    pick(bytes[2]) +
-    pick(bytes[3]) +
-    pick(bytes[4]) +
-    pick(bytes[5])
-  );
+  for (;;) {
+    const password = secureRandomCharacters(TEMP_PASSWORD_ALPHABET, TEMP_PASSWORD_LENGTH);
+    if (/[a-z]/.test(password) && /[0-9]/.test(password)) return password;
+  }
 }
 
 const BCRYPT_ROUNDS = 10;
@@ -73,7 +89,9 @@ function toCredentialSummary(row: CredentialRow): ManagedUserAppAccountSummary {
   return {
     login_identifier: row.login_identifier,
     has_temporary_password: Boolean(row.temporary_password_hash),
-    temporary_password_plain: row.temporary_password_plain ?? null,
+    // Kept as null for response compatibility. Plaintext is returned only by
+    // the create/reset response that generated it and is never reloaded.
+    temporary_password_plain: null,
     password_last_reset_at: row.password_last_reset_at,
     card_last_printed_at: row.card_last_printed_at,
   };
@@ -86,7 +104,7 @@ function toAuthCredentialRow(authUserId: string, user: { app_metadata?: Record<s
 
   const appMetadata = asObject(user.app_metadata);
   const userMetadata = asObject(user.user_metadata);
-  const managedCredentials = asObject(appMetadata.managed_credentials ?? userMetadata.managed_credentials);
+  const managedCredentials = sanitizeManagedCredentials(appMetadata.managed_credentials ?? userMetadata.managed_credentials);
   const loginIdentifier =
     nullableText(managedCredentials.login_identifier) ??
     nullableText(userMetadata.loginIdentifier) ??
@@ -100,7 +118,7 @@ function toAuthCredentialRow(authUserId: string, user: { app_metadata?: Record<s
     auth_user_id: authUserId,
     login_identifier: loginIdentifier,
     temporary_password_hash: nullableText(managedCredentials.temporary_password_hash),
-    temporary_password_plain: nullableText(managedCredentials.temporary_password_plain),
+    temporary_password_plain: null,
     has_pending_setup: Boolean(managedCredentials.has_pending_setup),
     password_last_reset_at: normalizeNullableTimestamp(managedCredentials.password_last_reset_at),
     card_last_printed_at: normalizeNullableTimestamp(managedCredentials.card_last_printed_at),
@@ -172,7 +190,6 @@ async function patchManagedCredentialMetadata(
   patch: {
     login_identifier?: string;
     temporary_password_hash?: string | null;
-    temporary_password_plain?: string | null;
     has_pending_setup?: boolean;
     password_last_reset_at?: string | null;
     card_last_printed_at?: string | null;
@@ -185,12 +202,11 @@ async function patchManagedCredentialMetadata(
   }
 
   const existingAppMetadata = asObject(data.user.app_metadata);
-  const existingManagedCredentials = asObject(existingAppMetadata.managed_credentials);
+  const existingManagedCredentials = sanitizeManagedCredentials(existingAppMetadata.managed_credentials);
   const nextManagedCredentials: Record<string, unknown> = {
     ...existingManagedCredentials,
     ...(patch.login_identifier !== undefined ? { login_identifier: patch.login_identifier } : {}),
     ...(patch.temporary_password_hash !== undefined ? { temporary_password_hash: patch.temporary_password_hash } : {}),
-    ...(patch.temporary_password_plain !== undefined ? { temporary_password_plain: patch.temporary_password_plain } : {}),
     ...(patch.has_pending_setup !== undefined ? { has_pending_setup: patch.has_pending_setup } : {}),
     ...(patch.password_last_reset_at !== undefined ? { password_last_reset_at: patch.password_last_reset_at } : {}),
     ...(patch.card_last_printed_at !== undefined ? { card_last_printed_at: patch.card_last_printed_at } : {}),
@@ -225,7 +241,7 @@ async function patchManagedCredentialMetadata(
       nullableText(data.user.email) ??
       "",
     temporary_password_hash: nullableText(nextManagedCredentials.temporary_password_hash),
-    temporary_password_plain: nullableText(nextManagedCredentials.temporary_password_plain),
+    temporary_password_plain: null,
     has_pending_setup: Boolean(nextManagedCredentials.has_pending_setup),
     password_last_reset_at: normalizeNullableTimestamp(nextManagedCredentials.password_last_reset_at),
     card_last_printed_at: normalizeNullableTimestamp(nextManagedCredentials.card_last_printed_at),
@@ -250,7 +266,7 @@ export function buildManagedAuthIdentityPayload(options: {
 }) {
   const existingAppMetadata = options.existingAppMetadata ?? {};
   const existingUserMetadata = options.existingUserMetadata ?? {};
-  const existingManagedCredentials = asObject(
+  const existingManagedCredentials = sanitizeManagedCredentials(
     existingAppMetadata.managed_credentials ?? existingUserMetadata.managed_credentials,
   );
   const nextLoginIdentifier = normalizeText(options.loginIdentifier).toLowerCase();
@@ -305,7 +321,7 @@ export async function syncManagedAuthIdentityMetadata(options: {
   }
 
   const existingAppMetadata = asObject(data.user.app_metadata);
-  const existingManagedCredentials = asObject(existingAppMetadata.managed_credentials);
+  const existingManagedCredentials = sanitizeManagedCredentials(existingAppMetadata.managed_credentials);
   const existingUserMetadata = asObject(data.user.user_metadata);
   const nextLoginIdentifier =
     normalizeText(options.loginIdentifier).toLowerCase() ||
@@ -420,11 +436,7 @@ export async function upsertManagedUserCredential(
       school_id: options.schoolId,
       login_identifier: options.loginIdentifier,
       temporary_password_hash: passwordHash,
-      // Printable credential cards need the plaintext: the hash is one-way, so
-      // without this the next card print cannot show the password and instead
-      // rotates a brand new one, silently invalidating the card already handed
-      // out. The account-creation and provisioning paths already store it.
-      temporary_password_plain: options.temporaryPassword,
+      temporary_password_plain: sealTemporaryPassword(options.temporaryPassword),
       has_pending_setup: true,
       password_last_reset_at: now,
       ...(options.touchPrintTimestamp ? { card_last_printed_at: now } : {}),

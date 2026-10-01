@@ -1,9 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
-import { applyBranchScopeToQuery, resolveBranchScope } from "@/lib/branch-scope";
+import {
+  applyBranchScopeToQuery,
+  resolveBranchScope,
+} from "@/lib/branch-scope";
 import { resolveSchoolScopedActorContext } from "@/lib/managed-users-server";
 import { enforceRateLimit } from "@/lib/rate-limit";
 import { jsonError, logRouteError } from "@/lib/route-utils";
+import { excludeDeletedStudents } from "@/lib/students/soft-delete";
 
 const querySchema = z.object({
   schoolId: z.string().uuid("معرّف المدرسة غير صالح."),
@@ -27,7 +31,9 @@ export async function GET(req: NextRequest) {
 
   if (!context.ok) {
     return jsonError(
-      "message" in context ? context.message : "تعذر التحقق من صلاحيات المستخدم.",
+      "message" in context
+        ? context.message
+        : "تعذر التحقق من صلاحيات المستخدم.",
       "status" in context ? context.status : 500,
     );
   }
@@ -49,9 +55,9 @@ export async function GET(req: NextRequest) {
 
   try {
     const { data: students, error } = await applyBranchScopeToQuery(
-      actorSupabase
-        .from("students")
-        .select("id, class_name, status")
+      excludeDeletedStudents(
+        actorSupabase.from("students").select("id, class_name, status"),
+      )
         .eq("school_id", targetSchoolId)
         .neq("status", "graduated"),
       branchScope.value,
@@ -65,7 +71,9 @@ export async function GET(req: NextRequest) {
     // Students in final grade (السادس) who will graduate
     const GRADUATING_CLASSES = ["السادس", "6"];
     const graduatingStudents = activeStudents.filter(
-      (s) => s.class_name && GRADUATING_CLASSES.some((g) => s.class_name!.includes(g)),
+      (s) =>
+        s.class_name &&
+        GRADUATING_CLASSES.some((g) => s.class_name!.includes(g)),
     ).length;
 
     // Build class distribution

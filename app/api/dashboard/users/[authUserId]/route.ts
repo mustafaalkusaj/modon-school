@@ -23,6 +23,7 @@ import { enforceRateLimit } from "@/lib/rate-limit";
 import { invalidateSchoolCacheDomains } from "@/lib/server-cache";
 import { createServiceSupabaseClient } from "@/lib/supabase-server";
 
+import { jsonServerError } from "@/lib/route-utils";
 function jsonError(message: string, status: number, fieldErrors?: Record<string, string>) {
   return NextResponse.json(
     {
@@ -224,10 +225,7 @@ export async function PATCH(
       await rollbackAuthUser(authUserId, existing);
       await restoreManagedProfile(actorSupabase, existing);
 
-      return jsonError(
-        paymentError instanceof Error ? paymentError.message : "تعذر التحقق من إجمالي دفعات الطالب الحالية.",
-        500,
-      );
+      return jsonServerError("dashboard-users-authUserId", paymentError, "تعذر التحقق من إجمالي دفعات الطالب الحالية.", 500);
     }
 
     if (nextPaidFee > validation.value.student!.total_fee) {
@@ -320,10 +318,7 @@ export async function PATCH(
         assignments: validation.value.teacher?.assignments ?? [],
       });
     } catch (assignmentError) {
-      return jsonError(
-        assignmentError instanceof Error ? assignmentError.message : "تعذر حفظ تكليفات المدرس.",
-        400,
-      );
+      return jsonServerError("dashboard-users-authUserId", assignmentError, "تعذر حفظ تكليفات المدرس.", 400);
     }
   }
 
@@ -335,10 +330,7 @@ export async function PATCH(
         loginIdentifier: validation.value.email,
       });
     } catch (credentialError) {
-      return jsonError(
-        credentialError instanceof Error ? credentialError.message : "تعذر تحديث معرّف دخول التطبيق.",
-        400,
-      );
+      return jsonServerError("dashboard-users-authUserId", credentialError, "تعذر تحديث معرّف دخول التطبيق.", 400);
     }
   }
 
@@ -355,10 +347,7 @@ export async function PATCH(
       teacherId: existing.teacher?.id ?? null,
     });
   } catch (identityError) {
-    return jsonError(
-      identityError instanceof Error ? identityError.message : "تم الحفظ لكن تعذر مزامنة هوية حساب التطبيق.",
-      500,
-    );
+    return jsonServerError("dashboard-users-authUserId", identityError, "تم الحفظ لكن تعذر مزامنة هوية حساب التطبيق.", 500);
   }
 
   let updatedUser: ManagedUserRecord | null = null;
@@ -368,10 +357,7 @@ export async function PATCH(
       schoolId: targetSchoolId,
     });
   } catch (fetchError) {
-    return jsonError(
-      fetchError instanceof Error ? fetchError.message : "تم الحفظ لكن تعذر إعادة تحميل الحساب.",
-      500,
-    );
+    return jsonServerError("dashboard-users-authUserId", fetchError, "تم الحفظ لكن تعذر إعادة تحميل الحساب.", 500);
   }
 
   invalidateManagedUsersListCache(targetSchoolId);
@@ -447,7 +433,7 @@ export async function DELETE(
       !isMissingTableError(assignmentsDeleteError, "teacher_assignments") &&
       !assignmentsDeleteError.message.toLowerCase().includes("could not find")
     ) {
-      return jsonError(assignmentsDeleteError.message || "تعذر حذف تكليفات الأستاذ.", 400);
+      return jsonServerError("dashboard-users-authUserId", assignmentsDeleteError, "تعذر حذف تكليفات الأستاذ.", 400);
     }
 
     const { error: teacherDeleteError } = await actorSupabase
@@ -490,7 +476,7 @@ export async function DELETE(
   const serviceSupabase = createServiceSupabaseClient();
   const { error: authDeleteError } = await serviceSupabase.auth.admin.deleteUser(authUserId);
   if (authDeleteError) {
-    return jsonError(authDeleteError.message || "تم حذف السجلات لكن تعذر حذف حساب المصادقة.", 500);
+    return jsonServerError("dashboard-users-authUserId", authDeleteError, "تم حذف السجلات لكن تعذر حذف حساب المصادقة.", 500);
   }
 
   invalidateManagedUsersListCache(targetSchoolId);

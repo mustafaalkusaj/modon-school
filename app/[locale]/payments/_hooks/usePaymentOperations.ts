@@ -69,11 +69,13 @@ export function usePaymentOperations(
   }, []);
 
   // Load payments when student selected for payment
-  useEffect(() => {
-    if (!payStudent || !resolvedSchoolId) return;
-    if (paymentsByStudent[payStudent.id]) return; // Already loaded
+  const payStudentId = payStudent?.id;
 
-    setPaymentsLoadingStudentId(payStudent.id);
+  useEffect(() => {
+    if (!payStudentId || !resolvedSchoolId) return;
+    if (paymentsByStudent[payStudentId]) return; // Already loaded
+
+    setPaymentsLoadingStudentId(payStudentId);
     void (async () => {
       try {
         const params = new URLSearchParams({
@@ -86,7 +88,7 @@ export function usePaymentOperations(
         const { response, payload } = await fetchJsonWithAuthorizedSession<{
           payments?: Payment[];
           error?: { message?: string };
-        }>(`/api/web/payments/students/${payStudent.id}?${params.toString()}`);
+        }>(`/api/web/payments/students/${payStudentId}?${params.toString()}`);
 
         if (!response.ok) {
           onError?.(payload?.error?.message || "تعذر تحميل سجل دفعات الطالب.");
@@ -94,14 +96,14 @@ export function usePaymentOperations(
         }
 
         const nextPayments = payload?.payments ?? [];
-        setPaymentsByStudent((current) => ({ ...current, [payStudent.id]: nextPayments }));
+        setPaymentsByStudent((current) => ({ ...current, [payStudentId]: nextPayments }));
       } catch (error) {
         onError?.(error instanceof Error ? error.message : "تعذر تحميل سجل دفعات الطالب.");
       } finally {
         setPaymentsLoadingStudentId(null);
       }
     })();
-  }, [payStudent?.id, resolvedSchoolId, onError, currentBranchId]);
+  }, [payStudentId, resolvedSchoolId, onError, currentBranchId, paymentsByStudent, setPaymentsByStudent]);
 
   // Student search effect
   useEffect(() => {
@@ -436,6 +438,7 @@ export function usePaymentOperations(
 
     // Payments by student
     paymentsByStudent,
+    setPaymentsByStudent,
     paymentsLoadingStudentId,
     loadStudentPayments,
 
@@ -443,5 +446,5 @@ export function usePaymentOperations(
     pendingDeletePaymentId,
     setPendingDeletePaymentId,
     deletePayment,
-  }), [showPayModal, payStudent, payForm, setPayForm, saving, openPaymentModal, closePaymentModal, handlePayment, selectStudentForPayment, studentSearch, setStudentSearch, studentSearchResults, studentSearchLoading, showDropdown, setShowDropdown, searchRef, paymentsByStudent, paymentsLoadingStudentId, loadStudentPayments, pendingDeletePaymentId, setPendingDeletePaymentId, deletePayment]);
+  }), [showPayModal, payStudent, payForm, setPayForm, saving, openPaymentModal, closePaymentModal, handlePayment, selectStudentForPayment, studentSearch, setStudentSearch, studentSearchResults, studentSearchLoading, showDropdown, setShowDropdown, searchRef, paymentsByStudent, setPaymentsByStudent, paymentsLoadingStudentId, loadStudentPayments, pendingDeletePaymentId, setPendingDeletePaymentId, deletePayment]);
 }

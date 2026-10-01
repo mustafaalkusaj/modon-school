@@ -1,10 +1,18 @@
 import { NextRequest, NextResponse } from "next/server";
 
-import { applyBranchScopeToQuery, resolveBranchScope } from "@/lib/branch-scope";
+import {
+  applyBranchScopeToQuery,
+  resolveBranchScope,
+} from "@/lib/branch-scope";
 import { resolveSchoolScopedActorContext } from "@/lib/managed-users-server";
 import { enforceRateLimit } from "@/lib/rate-limit";
 import { routeUserHasPermission } from "@/lib/route-permissions";
-import { isValidUUID, jsonError, logRouteError } from "@/lib/route-utils";
+import {
+  isValidUUID,
+  jsonError,
+  jsonServerError,
+  logRouteError,
+} from "@/lib/route-utils";
 
 function normalizeOptionalText(value: unknown): string | null {
   if (typeof value !== "string") return null;
@@ -31,13 +39,20 @@ async function resolveTeacherContext(
     return {
       ok: false as const,
       status: "status" in context ? context.status : 500,
-      message: "message" in context ? context.message : "تعذر التحقق من صلاحيات المستخدم.",
+      message:
+        "message" in context
+          ? context.message
+          : "تعذر التحقق من صلاحيات المستخدم.",
     };
   }
 
   const branchScope = resolveBranchScope(context.value, requestedBranchId);
   if (!branchScope.ok) {
-    return { ok: false as const, status: branchScope.status, message: branchScope.message };
+    return {
+      ok: false as const,
+      status: branchScope.status,
+      message: branchScope.message,
+    };
   }
 
   const { actorSupabase, actorUserId, targetSchoolId } = context.value;
@@ -53,13 +68,19 @@ async function resolveTeacherContext(
   ]);
 
   if (rateLimited) {
-    return { ok: false as const, status: 429, message: "تم تجاوز عدد المحاولات المسموح بها.", response: rateLimited };
+    return {
+      ok: false as const,
+      status: 429,
+      message: "تم تجاوز عدد المحاولات المسموح بها.",
+      response: rateLimited,
+    };
   }
 
   if (!hasPermission) {
-    const msg = permission === "manage_teachers"
-      ? "ليس لديك صلاحية تعديل بيانات الأساتذة."
-      : "ليس لديك صلاحية عرض الأساتذة.";
+    const msg =
+      permission === "manage_teachers"
+        ? "ليس لديك صلاحية تعديل بيانات الأساتذة."
+        : "ليس لديك صلاحية عرض الأساتذة.";
     return { ok: false as const, status: 403, message: msg };
   }
 
@@ -104,7 +125,10 @@ export async function GET(
     ).maybeSingle();
 
     if (error) {
-      logRouteError("teachers-get", error, { teacherId, schoolId: targetSchoolId });
+      logRouteError("teachers-get", error, {
+        teacherId,
+        schoolId: targetSchoolId,
+      });
       return jsonError("تعذر تحميل بيانات المعلم.", 500);
     }
 
@@ -114,11 +138,16 @@ export async function GET(
 
     // C1: Never send the plaintext password in GET responses.
     // The AppAccountTab reads it from state set at account-creation time.
-    const { app_password_plain: _pwd, ...teacher } = data as typeof data & { app_password_plain?: string | null };
+    const { app_password_plain: _pwd, ...teacher } = data as typeof data & {
+      app_password_plain?: string | null;
+    };
 
     return NextResponse.json({ ok: true, teacher });
   } catch (error) {
-    logRouteError("teachers-get", error, { teacherId, schoolId: targetSchoolId });
+    logRouteError("teachers-get", error, {
+      teacherId,
+      schoolId: targetSchoolId,
+    });
     return jsonError("تعذر تحميل بيانات المعلم.", 500);
   }
 }
@@ -131,11 +160,20 @@ export async function PATCH(
   if (!isValidUUID(teacherId)) {
     return jsonError("معرّف المعلم غير صالح.", 400);
   }
-  const body = (await req.json().catch(() => null)) as Record<string, unknown> | null;
+  const body = (await req.json().catch(() => null)) as Record<
+    string,
+    unknown
+  > | null;
   const schoolId = typeof body?.school_id === "string" ? body.school_id : null;
-  const requestedBranchId = typeof body?.branch_id === "string" ? body.branch_id : null;
+  const requestedBranchId =
+    typeof body?.branch_id === "string" ? body.branch_id : null;
 
-  const ctx = await resolveTeacherContext(req, schoolId, "manage_teachers", requestedBranchId);
+  const ctx = await resolveTeacherContext(
+    req,
+    schoolId,
+    "manage_teachers",
+    requestedBranchId,
+  );
   if (!ctx.ok) {
     if ("response" in ctx && ctx.response) return ctx.response;
     return jsonError(ctx.message, ctx.status);
@@ -164,13 +202,40 @@ export async function PATCH(
     };
 
     const optionalTextFields = [
-      "full_name", "first_name_ar", "last_name_ar", "subject", "job_title", "specialization",
-      "phone", "phone_secondary", "email", "email_work", "address", "city",
-      "nationality", "marital_status", "blood_type", "national_id", "national_id_expiry",
-      "employee_id", "contract_type", "hire_date", "contract_end_date",
-      "qualification", "university", "bank_name", "bank_account",
-      "emergency_contact_name", "emergency_contact_phone", "emergency_contact_relation",
-      "notes", "date_of_birth", "status", "status_reason", "photo", "salary_type",
+      "full_name",
+      "first_name_ar",
+      "last_name_ar",
+      "subject",
+      "job_title",
+      "specialization",
+      "phone",
+      "phone_secondary",
+      "email",
+      "email_work",
+      "address",
+      "city",
+      "nationality",
+      "marital_status",
+      "blood_type",
+      "national_id",
+      "national_id_expiry",
+      "employee_id",
+      "contract_type",
+      "hire_date",
+      "contract_end_date",
+      "qualification",
+      "university",
+      "bank_name",
+      "bank_account",
+      "emergency_contact_name",
+      "emergency_contact_phone",
+      "emergency_contact_relation",
+      "notes",
+      "date_of_birth",
+      "status",
+      "status_reason",
+      "photo",
+      "salary_type",
     ] as const;
 
     for (const field of optionalTextFields) {
@@ -180,13 +245,21 @@ export async function PATCH(
     }
 
     if (body && "gender" in body) {
-      updatePayload.gender = body.gender === "male" || body.gender === "female" ? body.gender : null;
+      updatePayload.gender =
+        body.gender === "male" || body.gender === "female" ? body.gender : null;
     }
 
     const numericFields = [
-      "years_experience", "max_periods_daily", "max_periods_weekly",
-      "graduation_year", "base_salary", "lecture_price", "transport_allowance",
-      "housing_allowance", "other_allowances", "performance_score",
+      "years_experience",
+      "max_periods_daily",
+      "max_periods_weekly",
+      "graduation_year",
+      "base_salary",
+      "lecture_price",
+      "transport_allowance",
+      "housing_allowance",
+      "other_allowances",
+      "performance_score",
     ] as const;
 
     for (const field of numericFields) {
@@ -197,14 +270,22 @@ export async function PATCH(
     }
 
     // JSONB fields
-    if (body && "classes_taught" in body && Array.isArray(body.classes_taught)) {
+    if (
+      body &&
+      "classes_taught" in body &&
+      Array.isArray(body.classes_taught)
+    ) {
       updatePayload.classes_taught = body.classes_taught;
     }
 
-    const booleanFields = ["messaging_paused", "notifications_require_approval"] as const;
+    const booleanFields = [
+      "messaging_paused",
+      "notifications_require_approval",
+    ] as const;
     for (const field of booleanFields) {
       if (body && field in body) {
-        updatePayload[field] = body[field] === true || body[field] === false ? body[field] : null;
+        updatePayload[field] =
+          body[field] === true || body[field] === false ? body[field] : null;
       }
     }
 
@@ -220,13 +301,58 @@ export async function PATCH(
       .maybeSingle();
 
     if (error || !data) {
-      logRouteError("teachers-patch", error, { teacherId, actorUserId, schoolId: targetSchoolId });
-      return jsonError(error?.message || "تعذر تحديث بيانات المعلم.", 500);
+      logRouteError("teachers-patch", error, {
+        teacherId,
+        actorUserId,
+        schoolId: targetSchoolId,
+      });
+      return jsonServerError(
+        "web-teachers-teacherId",
+        error,
+        "تعذر تحديث بيانات المعلم.",
+        500,
+      );
+    }
+
+    // Sync teacher_assignments when classes_taught is updated
+    if (
+      body &&
+      "classes_taught" in body &&
+      Array.isArray(body.classes_taught)
+    ) {
+      try {
+        const { replaceTeacherAssignments } =
+          await import("@/lib/managed-users/queries");
+        const assignments = (
+          body.classes_taught as Array<{
+            grade?: string;
+            class_name?: string;
+            className?: string;
+            section?: string;
+            subject_name?: string;
+          }>
+        ).map((ct) => ({
+          subject_name: ct.subject_name ?? "",
+          class_name: ct.class_name ?? ct.className ?? ct.grade ?? "",
+          section: ct.section || null,
+        }));
+        await replaceTeacherAssignments(actorSupabase, {
+          schoolId: targetSchoolId,
+          teacherId,
+          assignments,
+        });
+      } catch {
+        // Don't fail teacher update if assignment sync fails
+      }
     }
 
     return NextResponse.json({ ok: true, teacher: data });
   } catch (error) {
-    logRouteError("teachers-patch", error, { teacherId, actorUserId, schoolId: targetSchoolId });
+    logRouteError("teachers-patch", error, {
+      teacherId,
+      actorUserId,
+      schoolId: targetSchoolId,
+    });
     return jsonError("تعذر تحديث بيانات المعلم.", 500);
   }
 }
@@ -239,11 +365,20 @@ export async function DELETE(
   if (!isValidUUID(teacherId)) {
     return jsonError("معرّف المعلم غير صالح.", 400);
   }
-  const body = (await req.json().catch(() => null)) as Record<string, unknown> | null;
+  const body = (await req.json().catch(() => null)) as Record<
+    string,
+    unknown
+  > | null;
   const schoolId = typeof body?.school_id === "string" ? body.school_id : null;
-  const requestedBranchId = typeof body?.branch_id === "string" ? body.branch_id : null;
+  const requestedBranchId =
+    typeof body?.branch_id === "string" ? body.branch_id : null;
 
-  const ctx = await resolveTeacherContext(req, schoolId, "manage_teachers", requestedBranchId);
+  const ctx = await resolveTeacherContext(
+    req,
+    schoolId,
+    "manage_teachers",
+    requestedBranchId,
+  );
   if (!ctx.ok) {
     if ("response" in ctx && ctx.response) return ctx.response;
     return jsonError(ctx.message, ctx.status);
@@ -278,13 +413,26 @@ export async function DELETE(
       .maybeSingle();
 
     if (error || !data) {
-      logRouteError("teachers-delete", error, { teacherId, actorUserId, schoolId: targetSchoolId });
-      return jsonError(error?.message || "تعذر حذف المعلم.", 500);
+      logRouteError("teachers-delete", error, {
+        teacherId,
+        actorUserId,
+        schoolId: targetSchoolId,
+      });
+      return jsonServerError(
+        "web-teachers-teacherId",
+        error,
+        "تعذر حذف المعلم.",
+        500,
+      );
     }
 
     return NextResponse.json({ ok: true, teacherId });
   } catch (error) {
-    logRouteError("teachers-delete", error, { teacherId, actorUserId, schoolId: targetSchoolId });
+    logRouteError("teachers-delete", error, {
+      teacherId,
+      actorUserId,
+      schoolId: targetSchoolId,
+    });
     return jsonError("تعذر حذف المعلم.", 500);
   }
 }

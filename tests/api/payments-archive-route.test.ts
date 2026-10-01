@@ -201,6 +201,49 @@ describe("POST /api/web/payments/archive", () => {
     expect(invalidateSchoolCacheDomains).toHaveBeenCalledWith(SCHOOL_ID, expect.any(Array));
   });
 
+  it("bounds the year by Baghdad (+03:00) instants with an exclusive next-year end", async () => {
+    setupArchiveDb();
+
+    const { response } = await post(validBody);
+
+    expect(response.status).toBe(200);
+    const paymentsQuery = db.queriesFor("payments")[0];
+    expect(paymentsQuery.argsOf("gte")).toContainEqual(["created_at", `${ARCHIVE_YEAR}-01-01T00:00:00+03:00`]);
+    expect(paymentsQuery.argsOf("lt")).toContainEqual(["created_at", `${ARCHIVE_YEAR + 1}-01-01T00:00:00+03:00`]);
+    expect(paymentsQuery.argsOf("lte")).toHaveLength(0);
+  });
+
+  it("guards each promotion by the student's current class", async () => {
+    setupArchiveDb();
+
+    await post(validBody);
+
+    const promotion = db.queriesFor("students").find((query) => query.isWrite())!;
+    expect(promotion.argsOf("eq")).toContainEqual(["class_name", "الأول"]);
+  });
+
+  it("does not promote students again when re-saving an existing archive", async () => {
+    db = createSupabaseMock({
+      account_archives: [
+        { count: 1 },
+        { data: { id: ARCHIVE_ID } }, // existing archive for the year
+        { data: { id: ARCHIVE_ID, school_id: SCHOOL_ID, archive_year: ARCHIVE_YEAR } }, // update
+      ],
+      payments: { data: [{ id: "p1", student_id: STUDENT_ID, amount: 300 }] },
+      students: [
+        { data: [{ id: STUDENT_ID, full_name: "طالب", class_name: "الأول" }] },
+        { data: [{ id: STUDENT_ID, class_name: "الأول", status: "active" }] },
+      ],
+    });
+    mockActor();
+
+    const { response, payload } = await post(validBody);
+
+    expect(response.status).toBe(200);
+    expect(payload).toMatchObject({ created: false, promotion: { applied: false } });
+    expect(db.queriesFor("students").some((query) => query.isWrite())).toBe(false);
+  });
+
   it("does not save the archive when the student promotion fails", async () => {
     setupArchiveDb({ promotionUpdate: { error: { message: "boom" } } });
 

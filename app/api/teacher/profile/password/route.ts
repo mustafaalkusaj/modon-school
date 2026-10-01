@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createRouteSupabaseClientWithCookies, applyPendingCookies } from "@/lib/supabase-server";
+import { jsonServerError } from "@/lib/route-utils";
 
 function jsonError(message: string, status: number) {
   return NextResponse.json({ error: message }, { status });
@@ -33,7 +34,7 @@ export async function POST(request: NextRequest) {
     password: body.new_password,
   });
   if (updateError) {
-    return jsonError(updateError.message, 500);
+    return jsonServerError("teacher/profile/password", updateError, "تعذر إتمام العملية. حاول مرة أخرى.");
   }
 
   const response = NextResponse.json({ ok: true });

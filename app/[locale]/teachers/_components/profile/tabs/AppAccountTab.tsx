@@ -167,7 +167,15 @@ export function AppAccountTab({ teacher, schoolId, canManage, locale, refetch }:
   <meta charset="UTF-8"/>
   <title>بطاقة دخول — ${h(teacher.full_name)}</title>
   <style>
-    @import url('https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700;900&display=swap');
+    /* Self-hosted, not Google Fonts: a client-side @import leaks the viewer's
+       IP, User-Agent and Referer to Google with no DPA. */
+    @font-face {
+      font-family: "Noto Sans Arabic";
+      src: url("/fonts/noto-sans-arabic/NotoSansArabic-Variable.ttf") format("truetype");
+      font-style: normal;
+      font-weight: 100 900;
+      font-display: swap;
+    }
 
     @page { size: ${isA4 ? "A4" : "A5"} portrait; margin: 0; }
 
@@ -175,7 +183,7 @@ export function AppAccountTab({ teacher, schoolId, canManage, locale, refetch }:
 
     html, body {
       width: 100%; height: 100%;
-      font-family: 'Cairo', 'Segoe UI', Tahoma, sans-serif;
+      font-family: 'Noto Sans Arabic', 'Segoe UI', Tahoma, sans-serif;
       background: #fff;
       -webkit-print-color-adjust: exact;
       print-color-adjust: exact;

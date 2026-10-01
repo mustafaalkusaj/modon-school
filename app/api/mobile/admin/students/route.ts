@@ -12,6 +12,7 @@ import {
   syncManagedUserAccountState,
 } from "@/lib/managed-users-server";
 import { createServiceSupabaseClient } from "@/lib/supabase-server";
+import { excludeDeletedStudents } from "@/lib/students/soft-delete";
 
 export async function GET(req: NextRequest) {
   try {
@@ -32,14 +33,13 @@ export async function GET(req: NextRequest) {
     const from = (page - 1) * limit;
     const to = from + limit - 1;
 
-    let query = serviceSupabase
+    let query = excludeDeletedStudents(serviceSupabase
       .from("students")
       .select(
         "id, full_name, class_name, section, phone, parent_phone, status",
         { count: "exact" },
-      )
+      ))
       .eq("school_id", schoolId)
-      .is("deleted_at", null)
       .order("full_name", { ascending: true })
       .range(from, to);
 

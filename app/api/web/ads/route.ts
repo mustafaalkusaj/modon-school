@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { resolveSchoolScopedActorContext } from "@/lib/managed-users-server";
 
+import { logRouteError } from "@/lib/route-utils";
 function jsonError(message: string, status: number) {
   return NextResponse.json({ error: { message } }, { status });
 }
@@ -25,7 +26,8 @@ export async function GET(request: NextRequest) {
     .order("created_at", { ascending: false });
 
   if (error) {
-    return NextResponse.json({ ok: false, error: error.message }, { status: 500 });
+    logRouteError("web-ads", error);
+    return NextResponse.json({ ok: false, error: "تعذر إكمال العملية. حاول مرة أخرى لاحقاً." }, { status: 500 });
   }
 
   const res = NextResponse.json({ ok: true, items: data ?? [] });
@@ -78,7 +80,8 @@ export async function POST(request: NextRequest) {
     .single();
 
   if (error) {
-    return NextResponse.json({ ok: false, error: error.message }, { status: 500 });
+    logRouteError("web-ads", error);
+    return NextResponse.json({ ok: false, error: "تعذر إكمال العملية. حاول مرة أخرى لاحقاً." }, { status: 500 });
   }
 
   return NextResponse.json({ ok: true, item: data }, { status: 201 });

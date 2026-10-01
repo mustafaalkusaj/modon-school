@@ -15,6 +15,7 @@ import {
 } from "@/lib/managed-users-server";
 import { enforceRateLimit } from "@/lib/rate-limit";
 import { createServiceSupabaseClient } from "@/lib/supabase-server";
+import { excludeDeletedStudents } from "@/lib/students/soft-delete";
 
 function jsonError(message: string, status: number) {
   return NextResponse.json({ error: { message } }, { status });
@@ -25,13 +26,21 @@ export async function POST(
   { params }: { params: Promise<{ studentId: string }> },
 ) {
   const { studentId } = await params;
-  const body = (await req.json().catch(() => null)) as Record<string, unknown> | null;
+  const body = (await req.json().catch(() => null)) as Record<
+    string,
+    unknown
+  > | null;
   const schoolId = typeof body?.school_id === "string" ? body.school_id : null;
 
-  const context = await resolveManagedUsersActorContext(schoolId, req.headers.get("authorization"));
+  const context = await resolveManagedUsersActorContext(
+    schoolId,
+    req.headers.get("authorization"),
+  );
   if (!context.ok) {
     return jsonError(
-      "message" in context ? context.message : "تعذر التحقق من صلاحيات المستخدم.",
+      "message" in context
+        ? context.message
+        : "تعذر التحقق من صلاحيات المستخدم.",
       "status" in context ? context.status : 500,
     );
   }
@@ -47,9 +56,13 @@ export async function POST(
     return rateLimited;
   }
 
-  const { data: student, error: studentError } = await actorSupabase
-    .from("students")
-    .select("id, full_name, phone, school_id, class_name, section, status, auth_user_id")
+  const { data: student, error: studentError } = await excludeDeletedStudents(
+    actorSupabase
+      .from("students")
+      .select(
+        "id, full_name, phone, school_id, class_name, section, status, auth_user_id",
+      ),
+  )
     .eq("id", studentId)
     .eq("school_id", targetSchoolId)
     .maybeSingle();
@@ -59,27 +72,35 @@ export async function POST(
   }
 
   const serviceSupabase = createServiceSupabaseClient();
-  const studentName = typeof student.full_name === "string" ? student.full_name.trim() : "";
+  const studentName =
+    typeof student.full_name === "string" ? student.full_name.trim() : "";
   if (!studentName) {
     return jsonError("لا يمكن إنشاء حساب تطبيق لطالب بلا اسم كامل.", 400);
   }
 
   const studentPhone = typeof student.phone === "string" ? student.phone : null;
-  const studentSection = typeof student.section === "string" && student.section.trim() ? student.section.trim() : null;
+  const studentSection =
+    typeof student.section === "string" && student.section.trim()
+      ? student.section.trim()
+      : null;
   const isActive = student.status !== "deleted";
 
-  let authUserId = typeof student.auth_user_id === "string" ? student.auth_user_id : null;
+  let authUserId =
+    typeof student.auth_user_id === "string" ? student.auth_user_id : null;
   let loginIdentifier = "";
   let createdNewAccount = false;
   let revealedPassword: string | null = null;
 
   try {
     if (!authUserId) {
-      const existingManagedProfile = await findManagedProfileByLinkedRecord(actorSupabase, {
-        schoolId: targetSchoolId,
-        role: "student",
-        relatedRecordId: studentId,
-      });
+      const existingManagedProfile = await findManagedProfileByLinkedRecord(
+        actorSupabase,
+        {
+          schoolId: targetSchoolId,
+          role: "student",
+          relatedRecordId: studentId,
+        },
+      );
 
       if (existingManagedProfile?.authUserId) {
         authUserId = existingManagedProfile.authUserId;
@@ -91,7 +112,10 @@ export async function POST(
           .eq("school_id", targetSchoolId);
 
         if (relinkStudentError) {
-          return jsonError("تعذر إعادة ربط حساب التطبيق الحالي بسجل الطالب.", 500);
+          return jsonError(
+            "تعذر إعادة ربط حساب التطبيق الحالي بسجل الطالب.",
+            500,
+          );
         }
       }
     }
@@ -121,13 +145,16 @@ export async function POST(
         },
       });
       // Supabase Auth requires an email — append @schoolapp.local to simple identifiers
-      const authEmail = loginIdentifier.includes("@") ? loginIdentifier : `${loginIdentifier}@schoolapp.local`;
-      const { data: createdUser, error: createAuthError } = await serviceSupabase.auth.admin.createUser({
-        email: authEmail,
-        password: temporaryPassword,
-        email_confirm: true,
-        ...authIdentityPayload,
-      });
+      const authEmail = loginIdentifier.includes("@")
+        ? loginIdentifier
+        : `${loginIdentifier}@schoolapp.local`;
+      const { data: createdUser, error: createAuthError } =
+        await serviceSupabase.auth.admin.createUser({
+          email: authEmail,
+          password: temporaryPassword,
+          email_confirm: true,
+          ...authIdentityPayload,
+        });
 
       if (createAuthError || !createdUser.user?.id) {
         return jsonError("تعذر إنشاء حساب التطبيق للطالب.", 500);
@@ -165,7 +192,8 @@ export async function POST(
       return jsonError("تعذر تحديد حساب المصادقة لهذا الطالب.", 500);
     }
 
-    const { data: authUserResponse, error: authUserError } = await serviceSupabase.auth.admin.getUserById(authUserId);
+    const { data: authUserResponse, error: authUserError } =
+      await serviceSupabase.auth.admin.getUserById(authUserId);
     if (authUserError || !authUserResponse.user) {
       return jsonError("تعذر تحميل مستخدم المصادقة لهذا الطالب.", 500);
     }
@@ -181,10 +209,11 @@ export async function POST(
     }
 
     if (!authUserResponse.user.email && loginIdentifier) {
-      const { error: updateLoginIdentifierError } = await serviceSupabase.auth.admin.updateUserById(authUserId, {
-        email: loginIdentifier,
-        email_confirm: true,
-      });
+      const { error: updateLoginIdentifierError } =
+        await serviceSupabase.auth.admin.updateUserById(authUserId, {
+          email: loginIdentifier,
+          email_confirm: true,
+        });
 
       if (updateLoginIdentifierError) {
         return jsonError("تعذر تثبيت معرّف الدخول لحساب الطالب الحالي.", 500);
@@ -212,16 +241,19 @@ export async function POST(
       return jsonError("تعذر إعادة تحميل حساب الطالب بعد الربط.", 500);
     }
 
-    let accountCard: Awaited<ReturnType<typeof buildManagedUserAccountCard>> | null = null;
+    let accountCard: Awaited<
+      ReturnType<typeof buildManagedUserAccountCard>
+    > | null = null;
 
     try {
       accountCard = await buildManagedUserAccountCard(actorSupabase, user);
     } catch {
       const temporaryPassword = generateTemporaryPassword();
       revealedPassword = temporaryPassword;
-      const { error: updatePasswordError } = await serviceSupabase.auth.admin.updateUserById(authUserId, {
-        password: temporaryPassword,
-      });
+      const { error: updatePasswordError } =
+        await serviceSupabase.auth.admin.updateUserById(authUserId, {
+          password: temporaryPassword,
+        });
 
       if (updatePasswordError) {
         return jsonError("تعذر إصدار كلمة مرور مؤقتة لهذا الطالب.", 500);
@@ -240,17 +272,23 @@ export async function POST(
       });
 
       if (!user) {
-        return jsonError("تعذر تحميل الحساب بعد إصدار كلمة المرور المؤقتة.", 500);
+        return jsonError(
+          "تعذر تحميل الحساب بعد إصدار كلمة المرور المؤقتة.",
+          500,
+        );
       }
 
-      accountCard = await buildManagedUserAccountCard(actorSupabase, user, { temporaryPassword });
+      accountCard = await buildManagedUserAccountCard(actorSupabase, user, {
+        temporaryPassword,
+      });
     }
 
     try {
       await syncStudentTeacherLinks(actorSupabase, {
         schoolId: targetSchoolId,
         studentId,
-        className: typeof student.class_name === "string" ? student.class_name : "",
+        className:
+          typeof student.class_name === "string" ? student.class_name : "",
         section: studentSection,
       });
     } catch {

@@ -3,9 +3,13 @@ import { NextRequest, NextResponse } from "next/server";
 import { resolveBranchScope } from "@/lib/branch-scope";
 import { resolveSchoolScopedActorContext } from "@/lib/managed-users-server";
 import { enforceRateLimit } from "@/lib/rate-limit";
-import { parseStudentsListFilters, resolveStudentsMeta } from "@/lib/students/overview";
+import {
+  parseStudentsListFilters,
+  resolveStudentsMeta,
+} from "@/lib/students/overview";
 import { getCacheHeaders, CACHE_STRATEGIES } from "@/lib/cache-strategies"; // ✅ إضافة cache strategies
 import { buildSchoolCacheTag, rememberWithTtl } from "@/lib/server-cache";
+import { jsonServerError } from "@/lib/route-utils";
 
 function jsonError(message: string, status: number) {
   return NextResponse.json({ error: { message } }, { status });
@@ -24,12 +28,16 @@ export async function GET(req: NextRequest) {
 
   if (!context.ok) {
     return jsonError(
-      "message" in context ? context.message : "تعذر التحقق من صلاحيات المستخدم.",
+      "message" in context
+        ? context.message
+        : "تعذر التحقق من صلاحيات المستخدم.",
       "status" in context ? context.status : 500,
     );
   }
 
-  const requestedBranchId = req.nextUrl.searchParams.get("branchId") ?? req.nextUrl.searchParams.get("branch_id");
+  const requestedBranchId =
+    req.nextUrl.searchParams.get("branchId") ??
+    req.nextUrl.searchParams.get("branch_id");
   const branchScope = resolveBranchScope(context.value, requestedBranchId);
   if (!branchScope.ok) {
     return jsonError(branchScope.message, branchScope.status);
@@ -54,7 +62,13 @@ export async function GET(req: NextRequest) {
     const payload = await rememberWithTtl(
       `students-meta:${targetSchoolId}:${branchScope.value.cacheKeySuffix}:${filterSuffix}`,
       30_000,
-      () => resolveStudentsMeta(actorSupabase, targetSchoolId, branchScope.value, filters),
+      () =>
+        resolveStudentsMeta(
+          actorSupabase,
+          targetSchoolId,
+          branchScope.value,
+          filters,
+        ),
       {
         tags: [buildSchoolCacheTag(targetSchoolId, "students-meta")],
       },
@@ -66,6 +80,11 @@ export async function GET(req: NextRequest) {
       },
     );
   } catch (error) {
-    return jsonError(error instanceof Error ? error.message : "تعذر تحميل ملخص الطلاب.", 500);
+    return jsonServerError(
+      "web-students-meta",
+      error,
+      "تعذر تحميل ملخص الطلاب.",
+      500,
+    );
   }
 }

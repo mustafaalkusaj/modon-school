@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { resolveSchoolScopedActorContext } from "@/lib/managed-users-server";
 import { enforceRateLimit } from "@/lib/rate-limit";
-import { jsonError } from "@/lib/route-utils";
+import { jsonError, jsonServerError } from "@/lib/route-utils";
 import { resolveBranchScope } from "@/lib/branch-scope";
 
 export const dynamic = "force-dynamic";
@@ -23,7 +23,9 @@ export async function PATCH(
 
   if (!context.ok) {
     return jsonError(
-      "message" in context ? context.message : "تعذر التحقق من صلاحيات المستخدم.",
+      "message" in context
+        ? context.message
+        : "تعذر التحقق من صلاحيات المستخدم.",
       "status" in context ? context.status : 500,
     );
   }
@@ -43,7 +45,16 @@ export async function PATCH(
     return jsonError("طلب غير صالح.", 400);
   }
 
-  const allowedFields = ["title", "title_en", "date", "end_date", "type", "hijri_date", "description", "color"];
+  const allowedFields = [
+    "title",
+    "title_en",
+    "date",
+    "end_date",
+    "type",
+    "hijri_date",
+    "description",
+    "color",
+  ];
   const updates: Record<string, unknown> = {};
   for (const field of allowedFields) {
     if (field in body) {
@@ -55,7 +66,9 @@ export async function PATCH(
     return jsonError("لا توجد حقول صالحة للتحديث.", 400);
   }
 
-  const requestedBranchId = req.nextUrl.searchParams.get("branchId") ?? req.nextUrl.searchParams.get("branch_id");
+  const requestedBranchId =
+    req.nextUrl.searchParams.get("branchId") ??
+    req.nextUrl.searchParams.get("branch_id");
   const branchScope = resolveBranchScope(context.value, requestedBranchId);
   if (!branchScope.ok) {
     return jsonError(branchScope.message, branchScope.status);
@@ -97,7 +110,12 @@ export async function PATCH(
     .single();
 
   if (error) {
-    return jsonError(error.message, 500);
+    return jsonServerError(
+      "web-calendar-events-id",
+      error,
+      "تعذر إكمال العملية. حاول مرة أخرى لاحقاً.",
+      500,
+    );
   }
 
   return NextResponse.json({ ok: true, event: data });
@@ -120,7 +138,9 @@ export async function DELETE(
 
   if (!context.ok) {
     return jsonError(
-      "message" in context ? context.message : "تعذر التحقق من صلاحيات المستخدم.",
+      "message" in context
+        ? context.message
+        : "تعذر التحقق من صلاحيات المستخدم.",
       "status" in context ? context.status : 500,
     );
   }
@@ -133,7 +153,11 @@ export async function DELETE(
   });
   if (rateLimited) return rateLimited;
 
-  const deleteBranchScope = resolveBranchScope(context.value, req.nextUrl.searchParams.get("branchId") ?? req.nextUrl.searchParams.get("branch_id"));
+  const deleteBranchScope = resolveBranchScope(
+    context.value,
+    req.nextUrl.searchParams.get("branchId") ??
+      req.nextUrl.searchParams.get("branch_id"),
+  );
   if (!deleteBranchScope.ok) {
     return jsonError(deleteBranchScope.message, deleteBranchScope.status);
   }
@@ -171,7 +195,12 @@ export async function DELETE(
     .eq("id", id);
 
   if (error) {
-    return jsonError(error.message, 500);
+    return jsonServerError(
+      "web-calendar-events-id",
+      error,
+      "تعذر إكمال العملية. حاول مرة أخرى لاحقاً.",
+      500,
+    );
   }
 
   return NextResponse.json({ ok: true });

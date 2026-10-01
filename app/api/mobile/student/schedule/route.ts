@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { resolveMobileRouteContext } from "@/lib/mobile-api-server";
 import { escapeFilterValue } from "@/lib/supabase-query-helpers";
+import { excludeDeletedStudents } from "@/lib/students/soft-delete";
 
 /**
  * Today's class schedule for the signed-in student.
@@ -23,9 +24,9 @@ export async function GET(req: NextRequest) {
     let section = account.student?.section ?? null;
 
     if (!className) {
-      const { data: row } = await serviceSupabase
+      const { data: row } = await excludeDeletedStudents(serviceSupabase
         .from("students")
-        .select("class_name, section")
+        .select("class_name, section"))
         .eq("auth_user_id", authUserId)
         .eq("school_id", schoolId)
         .maybeSingle();

@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 
 import { resolveStudentContext, unauthorized } from "@/lib/student-api";
 import { enforceRateLimit } from "@/lib/rate-limit";
@@ -33,6 +34,23 @@ function safeFileName(value: string) {
   return normalized.slice(0, 120) || "attachment";
 }
 
+const uploadUrlSchema = z.object({
+  assignment_id: z.string().trim().min(1, "الواجب غير محدد."),
+  file_name: z.string().trim().min(1, "نوع الملف غير مسموح."),
+  mime_type: z
+    .string()
+    .trim()
+    .toLowerCase()
+    .refine((v) => ALLOWED_MIME_TYPES.has(v), {
+      message: "نوع الملف غير مسموح.",
+    }),
+  size_bytes: z.coerce
+    .number()
+    .int("حجم الملف غير صالح أو يتجاوز 10 م.ب.")
+    .positive("حجم الملف غير صالح أو يتجاوز 10 م.ب.")
+    .max(MAX_BYTES, "حجم الملف غير صالح أو يتجاوز 10 م.ب."),
+});
+
 export async function POST(req: NextRequest) {
   try {
     const ctx = await resolveStudentContext(req);
@@ -46,45 +64,20 @@ export async function POST(req: NextRequest) {
     });
     if (limited) return limited;
 
-    const body = (await req.json().catch(() => null)) as Record<
-      string,
-      unknown
-    > | null;
-    const assignmentId =
-      typeof body?.assignment_id === "string" ? body.assignment_id.trim() : "";
-    const fileName =
-      typeof body?.file_name === "string" ? body.file_name.trim() : "";
-    const mimeType =
-      typeof body?.mime_type === "string"
-        ? body.mime_type.trim().toLowerCase()
-        : "";
-    const sizeBytes =
-      typeof body?.size_bytes === "number"
-        ? body.size_bytes
-        : Number(body?.size_bytes);
-
-    if (!assignmentId) {
+    const raw = await req.json().catch(() => null);
+    const parsed = uploadUrlSchema.safeParse(raw);
+    if (!parsed.success) {
       return NextResponse.json(
-        { ok: false, error: "الواجب غير محدد." },
+        { ok: false, error: parsed.error.issues[0]?.message ?? "invalid_body" },
         { status: 400 },
       );
     }
-    if (!fileName || !ALLOWED_MIME_TYPES.has(mimeType)) {
-      return NextResponse.json(
-        { ok: false, error: "نوع الملف غير مسموح." },
-        { status: 400 },
-      );
-    }
-    if (
-      !Number.isInteger(sizeBytes) ||
-      sizeBytes <= 0 ||
-      sizeBytes > MAX_BYTES
-    ) {
-      return NextResponse.json(
-        { ok: false, error: "حجم الملف غير صالح أو يتجاوز 10 م.ب." },
-        { status: 400 },
-      );
-    }
+    const {
+      assignment_id: assignmentId,
+      file_name: fileName,
+      mime_type: mimeType,
+      size_bytes: sizeBytes,
+    } = parsed.data;
 
     // Only allow uploads against an assignment inside the student's school
     // and class.

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 
 import { resolveSuperAdminActorContext } from "@/lib/super-admin-server";
 
+import { jsonServerError } from "@/lib/route-utils";
 const MAX_FILE_SIZE = 5 * 1024 * 1024; // 5MB
 const ALLOWED_FILE_TYPES = ["text/csv", "application/vnd.ms-excel"];
 const VALID_PLANS = ["basic", "premium", "enterprise"] as const;
@@ -160,6 +161,6 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({ successful, failed, errors });
   } catch (err) {
-    return jsonError(err instanceof Error ? err.message : "خطأ في الخادم", 500);
+    return jsonServerError("web-super-admin-bulk-import", err, "خطأ في الخادم", 500);
   }
 }

@@ -1,13 +1,20 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createServerClient } from "@supabase/ssr";
 import { endOfDayBaghdad } from "@/lib/tz";
+import { applyCdnCacheHeaders } from "@/lib/cdn-cache-policy";
 import createIntlMiddleware from 'next-intl/middleware';
 import {
   isPagePathAllowed,
   resolvePageCodeFromApiPath,
 } from "@/lib/authorization/page-access";
 import { getPublicEnv } from "@/lib/env/public";
-import { RBAC_COOKIE_NAME, verifyRBACSession } from "@/lib/rbac-session";
+import {
+  RBAC_COOKIE_NAME,
+  RBAC_SESSION_MAX_AGE,
+  getRBACCookieOptions,
+  signRBACSession,
+  verifyRBACSession,
+} from "@/lib/rbac-session";
 import { routing } from "./i18n/routing";
 import {
   getMatchingPermissionRule,
@@ -16,6 +23,7 @@ import {
   isRoleAllowedForPath,
   normalizePath,
   PUBLIC_PATHS,
+  PUBLIC_PATH_PREFIXES,
 } from "@/types/roles";
 
 // --- Mobile API Rate Limiter (Redis-backed via lib/rate-limit) ---
@@ -124,7 +132,7 @@ function buildApiGuardResponse(status: 401 | 403, message: string) {
   );
 }
 
-function readBearerOrQueryToken(request: NextRequest) {
+function readBearerToken(request: NextRequest) {
   const authorization = request.headers.get("authorization");
   if (authorization?.toLowerCase().startsWith("bearer ")) {
     const token = authorization.slice(7).trim();
@@ -133,11 +141,11 @@ function readBearerOrQueryToken(request: NextRequest) {
     }
   }
 
-  return request.nextUrl.searchParams.get("token")?.trim() || null;
+  return null;
 }
 
 function isAuthorizedOpsProbe(request: NextRequest, normalizedPath: string) {
-  const providedToken = readBearerOrQueryToken(request);
+  const providedToken = readBearerToken(request);
   if (!providedToken) {
     return false;
   }
@@ -263,6 +271,9 @@ async function getGuardRedirect(request: NextRequest): Promise<URL | NextRespons
     if (signedInRedirect) return signedInRedirect;
   }
   const isPublicPath = PUBLIC_PATHS.some((path) => normalizedPath === path) ||
+    PUBLIC_PATH_PREFIXES.some(
+      (prefix) => normalizedPath === prefix || normalizedPath.startsWith(`${prefix}/`),
+    ) ||
     normalizedPath.startsWith("/upload/");
   const isPublicApiPath =
     // Mobile APIs use their own auth (Supabase token / resolveMobileRouteContext)
@@ -538,6 +549,33 @@ function applyBaseSecurityHeaders(response: NextResponse, requestId: string, non
   }
 }
 
+/**
+ * Security headers for `/api/**` responses.
+ *
+ * `applyBaseSecurityHeaders` is only called for page requests, so API routes
+ * would otherwise ship with no HSTS, no `nosniff`, no `Referrer-Policy` and no
+ * framing protection. `nosniff` stops a browser from re-interpreting a JSON
+ * error body as HTML.
+ *
+ * The page CSP is deliberately NOT reused. It is nonce-based and meaningless
+ * for JSON, and a restrictive `default-src 'none'` risks breaking the inline
+ * rendering of the PDF and spreadsheet responses some export routes return.
+ */
+function applyApiSecurityHeaders(response: NextResponse, requestId: string) {
+  response.headers.set("X-Content-Type-Options", "nosniff");
+  response.headers.set("Referrer-Policy", "strict-origin-when-cross-origin");
+  response.headers.set("X-Frame-Options", "DENY");
+  response.headers.set("Cross-Origin-Resource-Policy", "same-origin");
+  response.headers.set("x-request-id", requestId);
+
+  if (process.env.NODE_ENV === "production") {
+    response.headers.set(
+      "Strict-Transport-Security",
+      "max-age=31536000; includeSubDomains; preload",
+    );
+  }
+}
+
 export async function proxy(request: NextRequest): Promise<NextResponse> {
   const rateLimitResponse = await checkMobileRateLimit(request);
   if (rateLimitResponse) return rateLimitResponse;
@@ -645,8 +683,29 @@ export async function proxy(request: NextRequest): Promise<NextResponse> {
           layoutMode = "full";
         }
         response.cookies.set("lm", layoutMode, { httpOnly: false, sameSite: "lax", path: "/" });
+
+        // Session renewal: refresh the cookie when past 50% of its lifetime.
+        // This prevents sessions from expiring mid-exam (60-90 min) for students.
+        // Only page requests renew to avoid race conditions on parallel API calls.
+        const nowSec = Math.floor(Date.now() / 1000);
+        const halfLife = Math.floor(RBAC_SESSION_MAX_AGE / 2);
+        const sessionAge = nowSec - session.iat;
+        if (sessionAge >= halfLife) {
+          const renewedToken = await signRBACSession({
+            ...session,
+            iat: nowSec,
+            exp: nowSec + RBAC_SESSION_MAX_AGE,
+          });
+          if (renewedToken) {
+            response.cookies.set(RBAC_COOKIE_NAME, renewedToken, getRBACCookieOptions());
+          }
+        }
       }
     }
+  }
+
+  if (isApiRequest) {
+    applyApiSecurityHeaders(response, requestId);
   }
 
   applyCdnCacheHeaders(response, request.nextUrl.pathname, isApiRequest);
@@ -675,33 +734,6 @@ export async function proxy(request: NextRequest): Promise<NextResponse> {
   }
 
   return response;
-}
-
-const CDN_CACHE_RULES: Array<{ match: (p: string, isApi: boolean) => boolean; sMaxAge: number; staleRevalidate: number }> = [
-  { match: (p) => p === "/api/ping" || p === "/api/health", sMaxAge: 30, staleRevalidate: 60 },
-  // Page-only rule. API auth endpoints must never be CDN/browser cached — a cached
-  // login response gets replayed without its Set-Cookie headers, leaving the client
-  // "logged in" with no session cookie and bouncing straight back to /login.
-  { match: (p, isApi) => !isApi && (p.endsWith("/login") || p.endsWith("/forgot-password") || p.endsWith("/student-login") || p.endsWith("/qr-login")), sMaxAge: 0, staleRevalidate: 0 },
-  { match: (_p, isApi) => !isApi, sMaxAge: 0, staleRevalidate: 0 },
-];
-
-function applyCdnCacheHeaders(response: NextResponse, pathname: string, isApiRequest: boolean) {
-  for (const rule of CDN_CACHE_RULES) {
-    if (rule.match(pathname, isApiRequest)) {
-      if (rule.sMaxAge > 0) {
-        response.headers.set(
-          "Cache-Control",
-          `public, s-maxage=${rule.sMaxAge}, stale-while-revalidate=${rule.staleRevalidate}`,
-        );
-        response.headers.set("CDN-Cache-Control", `public, s-maxage=${rule.sMaxAge}`);
-      } else {
-        response.headers.set("Cache-Control", "private, no-cache, no-store, must-revalidate");
-        response.headers.set("CDN-Cache-Control", "private, no-store");
-      }
-      return;
-    }
-  }
 }
 
 export const config = {

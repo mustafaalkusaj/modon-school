@@ -3,7 +3,11 @@ import { NextRequest, NextResponse } from "next/server";
 import { resolveSchoolScopedActorContext } from "@/lib/managed-users-server";
 import { enforceRateLimit } from "@/lib/rate-limit";
 import { routeUserHasPermission } from "@/lib/route-permissions";
-import { applyBranchScopeToQuery, resolveBranchScope } from "@/lib/branch-scope";
+import {
+  applyBranchScopeToQuery,
+  resolveBranchScope,
+} from "@/lib/branch-scope";
+import { jsonServerError } from "@/lib/route-utils";
 
 function jsonError(message: string, status: number) {
   return NextResponse.json({ error: { message } }, { status });
@@ -29,7 +33,9 @@ export async function DELETE(
 
   if (!context.ok) {
     return jsonError(
-      "message" in context ? context.message : "تعذر التحقق من صلاحيات المستخدم.",
+      "message" in context
+        ? context.message
+        : "تعذر التحقق من صلاحيات المستخدم.",
       "status" in context ? context.status : 500,
     );
   }
@@ -44,7 +50,11 @@ export async function DELETE(
   });
   if (rateLimited) return rateLimited;
 
-  const canManageSalaries = await routeUserHasPermission(actorSupabase, actorUserId, "manage_salaries");
+  const canManageSalaries = await routeUserHasPermission(
+    actorSupabase,
+    actorUserId,
+    "manage_salaries",
+  );
   if (!canManageSalaries) {
     return jsonError("ليس لديك صلاحية حذف المحاضرات.", 403);
   }
@@ -62,7 +72,8 @@ export async function DELETE(
       .eq("id", lectureId)
       .eq("school_id", targetSchoolId)
       .maybeSingle();
-    const teacherId = (lecture as Record<string, unknown> | null)?.teacher_id as string | null;
+    const teacherId = (lecture as Record<string, unknown> | null)
+      ?.teacher_id as string | null;
     if (!teacherId) return jsonError("المحاضرة غير موجودة.", 404);
     const { data: teacherCheck } = await applyBranchScopeToQuery(
       actorSupabase.from("teachers").select("id").eq("id", teacherId),
@@ -79,7 +90,13 @@ export async function DELETE(
     .eq("id", lectureId)
     .eq("school_id", targetSchoolId);
 
-  if (error) return jsonError(error.message || "تعذر حذف المحاضرة.", 500);
+  if (error)
+    return jsonServerError(
+      "web-salaries-lectures-id",
+      error,
+      "تعذر حذف المحاضرة.",
+      500,
+    );
 
   return NextResponse.json({ ok: true });
 }

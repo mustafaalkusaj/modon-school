@@ -1,18 +1,24 @@
 import { NextRequest, NextResponse } from "next/server";
 
-import { applyBranchScopeToQuery, resolveBranchScope } from "@/lib/branch-scope";
+import {
+  applyBranchScopeToQuery,
+  resolveBranchScope,
+} from "@/lib/branch-scope";
 import { resolveSchoolScopedActorContext } from "@/lib/managed-users-server";
 import { enforceRateLimit } from "@/lib/rate-limit";
 import { jsonError } from "@/lib/route-utils";
 import { generateFinancialSummaryReport } from "@/lib/reports/pdf-generator";
 import { buildResolvedStudentFinancials } from "@/lib/students/financials";
+import { excludeDeletedStudents } from "@/lib/students/soft-delete";
 
 export async function GET(req: NextRequest) {
   const url = new URL(req.url);
   const schoolId = url.searchParams.get("schoolId");
   const from = url.searchParams.get("from");
   const to = url.searchParams.get("to");
-  const locale = (url.searchParams.get("locale") === "en" ? "en" : "ar") as "ar" | "en";
+  const locale = (url.searchParams.get("locale") === "en" ? "en" : "ar") as
+    | "ar"
+    | "en";
 
   if (!schoolId || !from || !to) {
     return jsonError("schoolId, from, and to are required.", 400);
@@ -31,7 +37,10 @@ export async function GET(req: NextRequest) {
 
   const context = await resolveSchoolScopedActorContext(
     schoolId,
-    { allowedRoles: ["super_admin", "admin"], roleDeniedMessage: "غير مصرح بالوصول." },
+    {
+      allowedRoles: ["super_admin", "admin"],
+      roleDeniedMessage: "غير مصرح بالوصول.",
+    },
     req.headers.get("authorization"),
   );
   if (!context.ok) {
@@ -51,83 +60,93 @@ export async function GET(req: NextRequest) {
   });
   if (rateLimited) return rateLimited;
 
-  const requestedBranchId = url.searchParams.get("branchId") ?? url.searchParams.get("branch_id");
+  const requestedBranchId =
+    url.searchParams.get("branchId") ?? url.searchParams.get("branch_id");
   const branchScope = resolveBranchScope(context.value, requestedBranchId);
   if (!branchScope.ok) {
     return jsonError(branchScope.message, branchScope.status);
   }
 
-  const [studentsRes, classFeesRes, paymentsRes, expensesRes, salariesRes, incomesRes, schoolRes] =
-    await Promise.all([
-      applyBranchScopeToQuery(
+  const [
+    studentsRes,
+    classFeesRes,
+    paymentsRes,
+    expensesRes,
+    salariesRes,
+    incomesRes,
+    schoolRes,
+  ] = await Promise.all([
+    applyBranchScopeToQuery(
+      excludeDeletedStudents(
         actorSupabase
           .from("students")
-          .select("id, full_name, class_name, total_fee, paid_fee, discount_value, status")
-          .eq("school_id", targetSchoolId)
-          .neq("status", "deleted")
-          .is("deleted_at", null)
-          .limit(10_000),
-        branchScope.value,
-      ),
-      applyBranchScopeToQuery(
-        actorSupabase
-          .from("class_fees")
-          .select("class_name, total_fee")
-          .eq("school_id", targetSchoolId)
-          .limit(10_000),
-        branchScope.value,
-      ),
-      applyBranchScopeToQuery(
-        actorSupabase
-          .from("payments")
-          .select("id, amount, payment_method")
-          .eq("school_id", targetSchoolId)
-          .is("deleted_at", null)
-          .gte("created_at", from)
-          .lte("created_at", to.includes("T") ? to : `${to}T23:59:59.999`)
-          .limit(10_000),
-        branchScope.value,
-      ),
-      applyBranchScopeToQuery(
-        actorSupabase
-          .from("expenses")
-          .select("id, amount")
-          .eq("school_id", targetSchoolId)
-          .is("deleted_at", null)
-          .gte("expense_date", from)
-          .lte("expense_date", to)
-          .limit(10_000),
-        branchScope.value,
-      ),
-      applyBranchScopeToQuery(
-        actorSupabase
-          .from("salaries")
-          .select("id, gross_salary, deductions")
-          .eq("school_id", targetSchoolId)
-          // `month` is stored as YYYY-MM text; without this the report added
-          // every salary ever paid to a date-ranged summary.
-          .gte("month", from.slice(0, 7))
-          .lte("month", to.slice(0, 7))
-          .limit(10_000),
-        branchScope.value,
-      ),
-      applyBranchScopeToQuery(
-        actorSupabase
-          .from("incomes")
-          .select("id, amount")
-          .eq("school_id", targetSchoolId)
-          .is("deleted_at", null)
-          .gte("income_date", from)
-          .lte("income_date", to)
-          .limit(10_000),
-        branchScope.value,
-      ),
+          .select(
+            "id, full_name, class_name, total_fee, paid_fee, discount_value, status",
+          ),
+      )
+        .eq("school_id", targetSchoolId)
+        .limit(10_000),
+      branchScope.value,
+    ),
+    applyBranchScopeToQuery(
       actorSupabase
-        .from("schools")
-        .select("name, logo_url, primary_color")
-        .eq("id", targetSchoolId)
-        .maybeSingle(),
-    ]);
+        .from("class_fees")
+        .select("class_name, total_fee")
+        .eq("school_id", targetSchoolId)
+        .limit(10_000),
+      branchScope.value,
+    ),
+    applyBranchScopeToQuery(
+      actorSupabase
+        .from("payments")
+        .select("id, amount, payment_method")
+        .eq("school_id", targetSchoolId)
+        .is("deleted_at", null)
+        .gte("created_at", from)
+        .lte("created_at", to.includes("T") ? to : `${to}T23:59:59.999`)
+        .limit(10_000),
+      branchScope.value,
+    ),
+    applyBranchScopeToQuery(
+      actorSupabase
+        .from("expenses")
+        .select("id, amount")
+        .eq("school_id", targetSchoolId)
+        .is("deleted_at", null)
+        .gte("expense_date", from)
+        .lte("expense_date", to)
+        .limit(10_000),
+      branchScope.value,
+    ),
+    applyBranchScopeToQuery(
+      actorSupabase
+        .from("salaries")
+        .select("id, gross_salary, deductions")
+        .eq("school_id", targetSchoolId)
+        // `month` is stored as YYYY-MM text; without this the report added
+        // every salary ever paid to a date-ranged summary.
+        .gte("month", from.slice(0, 7))
+        .lte("month", to.slice(0, 7))
+        .limit(10_000),
+      branchScope.value,
+    ),
+    applyBranchScopeToQuery(
+      actorSupabase
+        .from("incomes")
+        .select("id, amount")
+        .eq("school_id", targetSchoolId)
+        .is("deleted_at", null)
+        .gte("income_date", from)
+        .lte("income_date", to)
+        .limit(10_000),
+      branchScope.value,
+    ),
+    actorSupabase
+      .from("schools")
+      .select("name, logo_url, primary_color")
+      .eq("id", targetSchoolId)
+      .maybeSingle(),
+  ]);
 
   const students = (studentsRes.data ?? []) as Array<{
     id: string;
@@ -166,7 +185,9 @@ export async function GET(req: NextRequest) {
       ...student,
       // Transferred students have their remaining balance written off, exactly
       // as the reports page treats them.
-      total_fee: isTransferred ? resolved.paid_fee : resolved.resolved_total_fee,
+      total_fee: isTransferred
+        ? resolved.paid_fee
+        : resolved.resolved_total_fee,
       remaining_fee: isTransferred ? 0 : resolved.remaining_fee,
     };
   });
@@ -175,20 +196,36 @@ export async function GET(req: NextRequest) {
     amount: number | null;
     payment_method: string | null;
   }>;
-  const expenses = (expensesRes.data ?? []) as Array<{ id: string; amount: number | null }>;
+  const expenses = (expensesRes.data ?? []) as Array<{
+    id: string;
+    amount: number | null;
+  }>;
   const salaries = (salariesRes.data ?? []) as Array<{
     id: string;
     gross_salary: number | null;
     deductions: number | null;
   }>;
-  const incomes = (incomesRes.data ?? []) as Array<{ id: string; amount: number | null }>;
+  const incomes = (incomesRes.data ?? []) as Array<{
+    id: string;
+    amount: number | null;
+  }>;
 
-  const totalFees = resolvedStudents.reduce((s, st) => s + (st.total_fee ?? 0), 0);
-  const totalPaid = resolvedStudents.reduce((s, st) => s + (st.paid_fee ?? 0), 0);
-  const totalRemaining = resolvedStudents.reduce((s, st) => s + (st.remaining_fee ?? 0), 0);
+  const totalFees = resolvedStudents.reduce(
+    (s, st) => s + (st.total_fee ?? 0),
+    0,
+  );
+  const totalPaid = resolvedStudents.reduce(
+    (s, st) => s + (st.paid_fee ?? 0),
+    0,
+  );
+  const totalRemaining = resolvedStudents.reduce(
+    (s, st) => s + (st.remaining_fee ?? 0),
+    0,
+  );
   const totalExpenses = expenses.reduce((s, e) => s + (e.amount ?? 0), 0);
   const totalSalaries = salaries.reduce(
-    (s, sal) => s + Math.max(0, (sal.gross_salary ?? 0) - (sal.deductions ?? 0)),
+    (s, sal) =>
+      s + Math.max(0, (sal.gross_salary ?? 0) - (sal.deductions ?? 0)),
     0,
   );
   const totalIncomes = incomes.reduce((s, inc) => s + (inc.amount ?? 0), 0);
@@ -202,11 +239,13 @@ export async function GET(req: NextRequest) {
     existing.count += 1;
     methodMap.set(m, existing);
   }
-  const paymentsByMethod = Array.from(methodMap.entries()).map(([method, v]) => ({
-    method,
-    total: v.total,
-    count: v.count,
-  }));
+  const paymentsByMethod = Array.from(methodMap.entries()).map(
+    ([method, v]) => ({
+      method,
+      total: v.total,
+      count: v.count,
+    }),
+  );
 
   // Top debtors
   const topDebtors = resolvedStudents
@@ -219,7 +258,11 @@ export async function GET(req: NextRequest) {
       remaining: st.remaining_fee ?? 0,
     }));
 
-  const school = schoolRes.data as { name: string; logo_url: string | null; primary_color: string | null } | null;
+  const school = schoolRes.data as {
+    name: string;
+    logo_url: string | null;
+    primary_color: string | null;
+  } | null;
 
   const html = generateFinancialSummaryReport({
     dateRange: { from, to },

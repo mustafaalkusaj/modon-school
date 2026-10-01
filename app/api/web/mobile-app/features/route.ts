@@ -2,8 +2,12 @@ import { NextRequest, NextResponse } from "next/server";
 
 import { resolveSuperAdminActorContext } from "@/lib/super-admin-server";
 import { createServiceSupabaseClient } from "@/lib/supabase-server";
-import { MOBILE_FEATURE_KEYS, type MobileFeatureKey } from "@/lib/mobile-api-server";
+import {
+  MOBILE_FEATURE_KEYS,
+  type MobileFeatureKey,
+} from "@/lib/mobile-api-server";
 import { invalidateSchoolCacheDomains } from "@/lib/server-cache";
+import { jsonServerError } from "@/lib/route-utils";
 
 const ENDPOINT_GET = "GET /api/web/mobile-app/features";
 const ENDPOINT_PUT = "PUT /api/web/mobile-app/features";
@@ -13,27 +17,35 @@ function jsonError(message: string, status: number) {
 }
 
 function isFeatureKey(value: unknown): value is MobileFeatureKey {
-  return typeof value === "string" && (MOBILE_FEATURE_KEYS as readonly string[]).includes(value);
+  return (
+    typeof value === "string" &&
+    (MOBILE_FEATURE_KEYS as readonly string[]).includes(value)
+  );
 }
 
 function defaultsRecord(): Record<MobileFeatureKey, boolean> {
-  return Object.fromEntries(MOBILE_FEATURE_KEYS.map((k) => [k, true])) as Record<
-    MobileFeatureKey,
-    boolean
-  >;
+  return Object.fromEntries(
+    MOBILE_FEATURE_KEYS.map((k) => [k, true]),
+  ) as Record<MobileFeatureKey, boolean>;
 }
 
 /** GET /api/web/mobile-app/features?schoolId=...  → flags for one school. */
 export async function GET(request: NextRequest) {
-  const context = await resolveSuperAdminActorContext(request.headers.get("authorization"));
+  const context = await resolveSuperAdminActorContext(
+    request.headers.get("authorization"),
+  );
   if (!context.ok) {
     return jsonError(
-      "message" in context ? context.message : "تعذر التحقق من صلاحيات المستخدم.",
+      "message" in context
+        ? context.message
+        : "تعذر التحقق من صلاحيات المستخدم.",
       "status" in context ? context.status : 500,
     );
   }
 
-  const schoolId = (new URL(request.url).searchParams.get("schoolId") ?? "").trim();
+  const schoolId = (
+    new URL(request.url).searchParams.get("schoolId") ?? ""
+  ).trim();
   if (!schoolId) {
     return jsonError(`${ENDPOINT_GET}: schoolId مطلوب.`, 400);
   }
@@ -45,11 +57,19 @@ export async function GET(request: NextRequest) {
     .eq("school_id", schoolId);
 
   if (error) {
-    return jsonError(`تعذر تحميل إعدادات الميزات: ${error.message}`, 500);
+    return jsonServerError(
+      "web-mobile-app-features",
+      error,
+      "تعذر تحميل إعدادات الميزات",
+      500,
+    );
   }
 
   const features = defaultsRecord();
-  for (const row of (data ?? []) as Array<{ feature_key: string; is_enabled: boolean }>) {
+  for (const row of (data ?? []) as Array<{
+    feature_key: string;
+    is_enabled: boolean;
+  }>) {
     if (isFeatureKey(row.feature_key)) {
       features[row.feature_key] = Boolean(row.is_enabled);
     }
@@ -64,10 +84,14 @@ export async function GET(request: NextRequest) {
  * Upserts each provided flag for the school.
  */
 export async function PUT(request: NextRequest) {
-  const context = await resolveSuperAdminActorContext(request.headers.get("authorization"));
+  const context = await resolveSuperAdminActorContext(
+    request.headers.get("authorization"),
+  );
   if (!context.ok) {
     return jsonError(
-      "message" in context ? context.message : "تعذر التحقق من صلاحيات المستخدم.",
+      "message" in context
+        ? context.message
+        : "تعذر التحقق من صلاحيات المستخدم.",
       "status" in context ? context.status : 500,
     );
   }
@@ -104,7 +128,12 @@ export async function PUT(request: NextRequest) {
     .upsert(rows, { onConflict: "school_id,feature_key" });
 
   if (error) {
-    return jsonError(`تعذر حفظ إعدادات الميزات: ${error.message}`, 500);
+    return jsonServerError(
+      "web-mobile-app-features",
+      error,
+      "تعذر حفظ إعدادات الميزات",
+      500,
+    );
   }
 
   // Clear cached feature flags so the mobile app picks up the change at once.
@@ -117,7 +146,10 @@ export async function PUT(request: NextRequest) {
     .eq("school_id", schoolId);
 
   const features = defaultsRecord();
-  for (const row of (data ?? []) as Array<{ feature_key: string; is_enabled: boolean }>) {
+  for (const row of (data ?? []) as Array<{
+    feature_key: string;
+    is_enabled: boolean;
+  }>) {
     if (isFeatureKey(row.feature_key)) {
       features[row.feature_key] = Boolean(row.is_enabled);
     }

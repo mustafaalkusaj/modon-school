@@ -8,6 +8,8 @@ import {
 import { resolveBranchScope } from "@/lib/branch-scope";
 import { resolveSchoolScopedActorContext } from "@/lib/managed-users/context";
 import { enforceRateLimit } from "@/lib/rate-limit";
+import { jsonServerError } from "@/lib/route-utils";
+import { excludeDeletedStudents } from "@/lib/students/soft-delete";
 
 function jsonError(message: string, status: number) {
   return NextResponse.json({ error: { message } }, { status });
@@ -36,16 +38,25 @@ export async function POST(request: NextRequest) {
     return jsonError(actorContext.message, actorContext.status);
   }
 
-  const body = (await request.json().catch(() => null)) as { names?: unknown; branch_id?: unknown; branchId?: unknown } | null;
+  const body = (await request.json().catch(() => null)) as {
+    names?: unknown;
+    branch_id?: unknown;
+    branchId?: unknown;
+  } | null;
   const names = Array.isArray(body?.names)
-    ? body.names.filter((item): item is string => typeof item === "string" && item.trim().length > 0)
+    ? body.names.filter(
+        (item): item is string =>
+          typeof item === "string" && item.trim().length > 0,
+      )
     : [];
 
   if (names.length === 0) {
     return jsonError("لم يتم إرسال أسماء صالحة لفحص التكرار.", 400);
   }
 
-  const fileDuplicates = collectDuplicateStudentNames(names.map((fullName) => ({ fullName })));
+  const fileDuplicates = collectDuplicateStudentNames(
+    names.map((fullName) => ({ fullName })),
+  );
   if (fileDuplicates.length > 0) {
     return NextResponse.json(
       {
@@ -59,7 +70,11 @@ export async function POST(request: NextRequest) {
   }
 
   const requestedBranchId =
-    typeof body?.branch_id === "string" ? body.branch_id : typeof body?.branchId === "string" ? body.branchId : null;
+    typeof body?.branch_id === "string"
+      ? body.branch_id
+      : typeof body?.branchId === "string"
+        ? body.branchId
+        : null;
   const branchScope = resolveBranchScope(
     actorContext.value,
     requestedBranchId,
@@ -70,9 +85,9 @@ export async function POST(request: NextRequest) {
   }
 
   const { actorSupabase, targetSchoolId } = actorContext.value;
-  let query = actorSupabase
-    .from("students")
-    .select("full_name, status")
+  let query = excludeDeletedStudents(
+    actorSupabase.from("students").select("full_name, status"),
+  )
     .eq("school_id", targetSchoolId)
     .neq("status", "deleted");
   if (branchScope.value.branchIds.length > 0) {
@@ -82,7 +97,12 @@ export async function POST(request: NextRequest) {
   const { data, error } = await query;
 
   if (error) {
-    return jsonError(error.message || "تعذر فحص تكرار أسماء الطلاب.", 500);
+    return jsonServerError(
+      "students-import-check",
+      error,
+      "تعذر فحص تكرار أسماء الطلاب.",
+      500,
+    );
   }
 
   const existingDuplicates = findExistingDuplicateStudentNames(

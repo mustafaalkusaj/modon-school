@@ -1,10 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 
 import { enrichAssignmentRows } from "@/lib/academic-records-server";
-import {
-  normalizeClassKey,
-  resolveMobileRouteContext,
-} from "@/lib/mobile-api-server";
+import { resolveMobileRouteContext } from "@/lib/mobile-api-server";
+
+import { isAssignmentVisibleToStudent } from "../assignment-visibility";
 
 type Params = { params: Promise<{ id: string }> };
 
@@ -72,7 +71,7 @@ export async function GET(req: NextRequest, { params }: Params) {
       (row.status === "deleted_by_admin" ||
         (row.deleted_at !== undefined && row.deleted_at !== null));
 
-    if (!row || isModeratedAway || !isVisibleToStudent(row, student)) {
+    if (!row || isModeratedAway || !isAssignmentVisibleToStudent(row, student)) {
       return NextResponse.json(
         { ok: false, error: { message: "الواجب غير موجود." } },
         { status: 404 },
@@ -99,38 +98,4 @@ export async function GET(req: NextRequest, { params }: Params) {
       { status: 500 },
     );
   }
-}
-
-/**
- * Mirrors the class/section matching in `queryStudentAssignments`: an exact
- * student_id match always wins; otherwise the row must be a class-wide one
- * (student_id null) whose normalized class matches, and whose section either is
- * unset (whole-class) or matches the student's section.
- */
-function isVisibleToStudent(
-  row: Record<string, unknown>,
-  student: { id: string; class_name?: string | null; section?: string | null },
-): boolean {
-  const rowStudentId =
-    typeof row.student_id === "string" ? row.student_id.trim() : "";
-  if (rowStudentId) {
-    return rowStudentId === student.id;
-  }
-
-  const studentClassKey = student.class_name
-    ? normalizeClassKey(student.class_name)
-    : null;
-  if (!studentClassKey) return false;
-  if (normalizeClassKey(row.class_name) !== studentClassKey) return false;
-
-  const rowSection = row.section;
-  if (rowSection == null) return true; // whole-class assignment
-
-  const studentSectionKey = student.section
-    ? normalizeClassKey(student.section)
-    : null;
-  return (
-    studentSectionKey !== null &&
-    normalizeClassKey(rowSection) === studentSectionKey
-  );
 }

@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 
 import { resolveAdminMobileRouteContext } from "@/lib/mobile-admin-server";
+import { isValidUUID } from "@/lib/route-utils";
+import { excludeDeletedStudents } from "@/lib/students/soft-delete";
 import { todayBaghdadIso } from "@/lib/tz";
 
 type AttendanceStatus = "present" | "absent" | "late" | "excused";
@@ -39,19 +41,16 @@ export async function GET(req: NextRequest) {
     const { searchParams } = new URL(req.url);
     const date =
       searchParams.get("date") ?? todayBaghdadIso();
-    // The class filter is keyed by class_name — `students` has no class_id
-    // column. The param name is kept for client compatibility.
-    const className = searchParams.get("class_id") ?? null;
+    const classParam = searchParams.get("class_id") ?? null;
     const status = searchParams.get("status") ?? null;
 
     // Read the canonical `attendance_records` table (the same one POST writes and
     // the teacher mobile routes write). The legacy `attendance` table this route
     // used to read is only a mirror and misses rows written directly to records.
-    // `students!inner(...)` makes the class filter actually constrain the rows.
     let query = serviceSupabase
       .from("attendance_records")
       .select(
-        "id, attendance_date, status, note, students!inner(id, full_name, class_name)",
+        "id, attendance_date, status, note, student_id, students(id, full_name, class_name)",
       )
       .eq("school_id", schoolId)
       .eq("attendance_date", date);
@@ -60,8 +59,51 @@ export async function GET(req: NextRequest) {
       query = query.eq("status", status);
     }
 
-    if (className) {
-      query = query.eq("students.class_name", className);
+    if (classParam) {
+      // `class_id` may be a `classes.id` (the app's class picker) or a plain
+      // class name. `students` has no class_id column — it is keyed by
+      // `class_name` — so resolve an id to its name, then constrain the rows by
+      // the ids of the live students in that class. Filtering through an
+      // embedded `students!inner(...)` join is avoided on purpose.
+      let className: string | null = classParam;
+      if (isValidUUID(classParam)) {
+        const { data: classRow, error: classError } = await serviceSupabase
+          .from("classes")
+          .select("id, name, grade")
+          .eq("id", classParam)
+          .eq("school_id", schoolId)
+          .maybeSingle();
+
+        if (classError) throw classError;
+
+        className =
+          (classRow as { name: string | null; grade: string | null } | null)
+            ?.name ??
+          (classRow as { grade: string | null } | null)?.grade ??
+          null;
+      }
+
+      if (!className) {
+        return NextResponse.json({ ok: true, items: [] });
+      }
+
+      const { data: classStudents, error: classStudentsError } =
+        await excludeDeletedStudents(
+          serviceSupabase.from("students").select("id"),
+        )
+          .eq("school_id", schoolId)
+          .eq("class_name", className);
+
+      if (classStudentsError) throw classStudentsError;
+
+      const classStudentIds = (classStudents ?? []).map(
+        (student) => (student as { id: string }).id,
+      );
+      if (classStudentIds.length === 0) {
+        return NextResponse.json({ ok: true, items: [] });
+      }
+
+      query = query.in("student_id", classStudentIds);
     }
 
     const { data, error } = await query.order("attendance_date", {
@@ -156,14 +198,15 @@ export async function POST(req: NextRequest) {
 
     // The service client bypasses RLS, so school ownership is enforced here:
     // every student id must belong to the actor's school.
-    const { data: students, error: studentsError } = await serviceSupabase
-      .from("students")
-      .select("id, branch_id")
-      .eq("school_id", schoolId)
-      .in(
-        "id",
-        entries.map((entry) => entry.student_id),
-      );
+    const { data: students, error: studentsError } =
+      await excludeDeletedStudents(
+        serviceSupabase.from("students").select("id, branch_id"),
+      )
+        .eq("school_id", schoolId)
+        .in(
+          "id",
+          entries.map((entry) => entry.student_id),
+        );
 
     if (studentsError) {
       return NextResponse.json(

@@ -1,7 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
+import { openTemporaryPassword } from "@/lib/managed-users/password-vault";
 import { resolveSchoolScopedActorContext } from "@/lib/managed-users-server";
 import { createServiceSupabaseClient } from "@/lib/supabase-server";
 
+import { jsonServerError, logRouteError } from "@/lib/route-utils";
 function jsonError(message: string, status: number) {
   return NextResponse.json({ error: { message } }, { status });
 }
@@ -38,10 +40,8 @@ export async function GET(request: NextRequest) {
     .order("full_name", { ascending: true });
 
   if (teachersError) {
-    return NextResponse.json(
-      { ok: false, error: teachersError.message },
-      { status: 500 },
-    );
+    logRouteError("web-teacher-accounts", teachersError);
+    return NextResponse.json({ ok: false, error: "تعذر إكمال العملية. حاول مرة أخرى لاحقاً." }, { status: 500 });
   }
 
   if (!teacherRows || teacherRows.length === 0) {
@@ -66,10 +66,8 @@ export async function GET(request: NextRequest) {
       .in("auth_user_id", batch);
 
     if (error) {
-      return NextResponse.json(
-        { ok: false, error: error.message },
-        { status: 500 },
-      );
+      logRouteError("web-teacher-accounts", error);
+      return NextResponse.json({ ok: false, error: "تعذر إكمال العملية. حاول مرة أخرى لاحقاً." }, { status: 500 });
     }
     if (data) allCredentials.push(...data);
   }
@@ -84,7 +82,7 @@ export async function GET(request: NextRequest) {
       subject: t.subject ?? "",
       jobTitle: t.job_title ?? "",
       username: t.app_username ?? cred?.login_identifier ?? "",
-      password: cred?.temporary_password_plain ?? "",
+      password: openTemporaryPassword(cred?.temporary_password_plain),
       appStatus: t.app_status ?? "",
     };
   });
@@ -184,7 +182,7 @@ export async function POST(request: NextRequest) {
   });
 
   if (createError || !createdUser.user?.id) {
-    return jsonError(createError?.message ?? "فشل إنشاء الحساب", 500);
+    return jsonServerError("web-teacher-accounts", createError, "فشل إنشاء الحساب", 500);
   }
 
   const authUserId = createdUser.user.id;

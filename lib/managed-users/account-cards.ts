@@ -5,10 +5,10 @@ import type { RouteSupabaseClient } from "./types";
 import { fetchManagedUserCredentials } from "./credentials";
 import { tableHasColumn } from "./queries";
 
-async function generateQrDataUrl(loginIdentifier: string, password: string): Promise<string | null> {
-  if (!password || password === "••••••••") return null;
+async function generateQrDataUrl(loginIdentifier: string): Promise<string | null> {
+  if (!loginIdentifier) return null;
   try {
-    const payload = `schoolapp://login?u=${encodeURIComponent(loginIdentifier)}&p=${encodeURIComponent(password)}`;
+    const payload = `schoolapp://identify?u=${encodeURIComponent(loginIdentifier)}`;
     return await QRCode.toDataURL(payload, { width: 180, margin: 1, errorCorrectionLevel: "M" });
   } catch {
     return null;
@@ -104,11 +104,12 @@ export async function buildManagedUserAccountCard(
     throw new Error("لا توجد كلمة مرور مؤقتة محفوظة لهذا الحساب. أعد تعيين كلمة المرور المؤقتة أولاً.");
   }
 
-  // The hash is one-way, so it cannot be printed. A row that has a hash but no
-  // plaintext (and no caller-supplied password) would render the "••••••••"
-  // placeholder and hand the school an unusable card. Refuse instead, so callers
-  // issue a fresh temporary password the way the card route already does.
-  if (!options?.temporaryPassword && !credential.temporary_password_plain) {
+  // The hash is one-way and the stored password is never reloaded, so a card
+  // can only be printed with a freshly issued, caller-supplied password.
+  // Otherwise it would render the "••••••••" placeholder and hand the school an
+  // unusable card. Callers issue a fresh temporary password first, the way the
+  // card route does.
+  if (!options?.temporaryPassword) {
     throw new Error("لا توجد كلمة مرور مؤقتة قابلة للعرض لهذا الحساب. أعد تعيين كلمة المرور المؤقتة أولاً.");
   }
 
@@ -117,8 +118,8 @@ export async function buildManagedUserAccountCard(
       ? user.teacher?.assignments.find((assignment) => assignment.is_active) ?? user.teacher?.assignments[0] ?? null
       : null;
 
-  const displayPassword = options?.temporaryPassword ?? credential.temporary_password_plain ?? "••••••••";
-  const qrDataUrl = await generateQrDataUrl(credential.login_identifier, displayPassword);
+  const displayPassword = options?.temporaryPassword ?? "••••••••";
+  const qrDataUrl = await generateQrDataUrl(credential.login_identifier);
 
   return {
     auth_user_id: user.auth_user_id,

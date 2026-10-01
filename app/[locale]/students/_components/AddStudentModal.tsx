@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import NextImage from "next/image";
 import { useTranslations } from "next-intl";
 import { Check } from "lucide-react";
 import { Modal, ModalHeader, ModalBody, ModalFooter } from "@/components/ui/modal";
@@ -109,6 +110,9 @@ export function AddStudentModal({
 
   if (isReadOnlyView || !canManageStudentAccounts) return null;
 
+  // "Already exists" is a recoverable conflict, not a failure: show it as a warning.
+  const isAlreadyExistsError = Boolean(error) && /موجود مسبقاً|موجود بالفعل|مكرر/.test(error);
+
   const STEPS = [
     { n: 1, label: t("steps.info") },
     { n: 2, label: t("steps.contact") },
@@ -164,10 +168,23 @@ export function AddStudentModal({
       >
         <ModalBody>
           {error && (
-            <div role="alert" className="mb-4 p-4 rounded-[var(--radius-md)] bg-[var(--danger)] text-white text-sm font-semibold flex items-center gap-3">
-              <svg className="w-5 h-5 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
-                <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clipRule="evenodd" />
-              </svg>
+            <div
+              role="alert"
+              className={`mb-4 p-4 rounded-[var(--radius-md)] text-sm font-semibold flex items-center gap-3 ${
+                isAlreadyExistsError
+                  ? "bg-amber-50 border border-amber-300 text-amber-800"
+                  : "bg-[var(--danger)] text-white"
+              }`}
+            >
+              {isAlreadyExistsError ? (
+                <svg className="w-5 h-5 flex-shrink-0 text-amber-500" fill="currentColor" viewBox="0 0 20 20">
+                  <path fillRule="evenodd" d="M8.485 2.495c.673-1.167 2.357-1.167 3.03 0l6.28 10.875c.673 1.167-.168 2.625-1.516 2.625H3.72c-1.347 0-2.189-1.458-1.515-2.625L8.485 2.495zM10 5a.75.75 0 01.75.75v3.5a.75.75 0 01-1.5 0v-3.5A.75.75 0 0110 5zm0 9a1 1 0 100-2 1 1 0 000 2z" clipRule="evenodd" />
+                </svg>
+              ) : (
+                <svg className="w-5 h-5 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
+                  <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clipRule="evenodd" />
+                </svg>
+              )}
               <span>{error}</span>
             </div>
           )}
@@ -181,7 +198,7 @@ export function AddStudentModal({
                   <div className="relative group">
                     <div className="w-20 h-20 rounded-full overflow-hidden border-2 border-[var(--border)] bg-[var(--surface-muted)] flex items-center justify-center">
                       {(photoPreview || form.photo_url) ? (
-                        <img src={photoPreview ?? form.photo_url!} alt="" className="w-full h-full object-cover" />
+                        <NextImage unoptimized width={800} height={800} src={photoPreview ?? form.photo_url!} alt="" className="w-full h-full object-cover" />
                       ) : (
                         <svg className="w-8 h-8 text-[var(--text-muted)]" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />

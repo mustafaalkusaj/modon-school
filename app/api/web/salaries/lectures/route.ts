@@ -1,10 +1,18 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 
-import { applyBranchScopeToQuery, resolveBranchIdForWrite, resolveBranchScope } from "@/lib/branch-scope";
-import { resolveSchoolScopedActorContext, tableHasColumn } from "@/lib/managed-users-server";
+import {
+  applyBranchScopeToQuery,
+  resolveBranchIdForWrite,
+  resolveBranchScope,
+} from "@/lib/branch-scope";
+import {
+  resolveSchoolScopedActorContext,
+  tableHasColumn,
+} from "@/lib/managed-users-server";
 import { enforceRateLimit } from "@/lib/rate-limit";
 import { routeUserHasPermission } from "@/lib/route-permissions";
+import { jsonServerError } from "@/lib/route-utils";
 
 function jsonError(message: string, status: number) {
   return NextResponse.json({ error: { message } }, { status });
@@ -14,18 +22,17 @@ function jsonError(message: string, status: number) {
 // dropped (school_id / branch_id are forced server-side, never trusted here).
 const MAX_LECTURE_PRICE = 100_000_000; // sane upper bound (integer minor units)
 
-const lectureRowSchema = z
-  .object({
-    teacher_id: z.string().uuid(),
-    grade: z.string().trim().min(1).max(100),
-    section: z.string().trim().max(100).nullish(),
-    // period column is integer
-    period: z.coerce.number().int().nullish(),
-    // real DB values are 'morning' | 'evening'
-    session_type: z.enum(["morning", "evening"]).nullish(),
-    lecture_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "تاريخ غير صالح"),
-    price: z.coerce.number().int().min(0).max(MAX_LECTURE_PRICE),
-  });
+const lectureRowSchema = z.object({
+  teacher_id: z.string().uuid(),
+  grade: z.string().trim().min(1).max(100),
+  section: z.string().trim().max(100).nullish(),
+  // period column is integer
+  period: z.coerce.number().int().nullish(),
+  // real DB values are 'morning' | 'evening'
+  session_type: z.enum(["morning", "evening"]).nullish(),
+  lecture_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "تاريخ غير صالح"),
+  price: z.coerce.number().int().min(0).max(MAX_LECTURE_PRICE),
+});
 // unknown keys are stripped (whitelist) rather than rejected, so an extra
 // client field never 400s a valid lecture import.
 
@@ -59,10 +66,17 @@ export async function GET(req: NextRequest) {
   );
 
   if (!context.ok) {
-    return jsonError("message" in context ? context.message : "تعذر التحقق من صلاحيات المستخدم.", "status" in context ? context.status : 500);
+    return jsonError(
+      "message" in context
+        ? context.message
+        : "تعذر التحقق من صلاحيات المستخدم.",
+      "status" in context ? context.status : 500,
+    );
   }
 
-  const requestedBranchId = req.nextUrl.searchParams.get("branchId") ?? req.nextUrl.searchParams.get("branch_id");
+  const requestedBranchId =
+    req.nextUrl.searchParams.get("branchId") ??
+    req.nextUrl.searchParams.get("branch_id");
   const branchScope = resolveBranchScope(context.value, requestedBranchId);
   if (!branchScope.ok) {
     return jsonError(branchScope.message, branchScope.status);
@@ -95,7 +109,9 @@ export async function GET(req: NextRequest) {
     const { data, error } = await applyBranchScopeToQuery(
       context.value.actorSupabase
         .from("daily_lectures")
-        .select("id, teacher_id, grade, section, period, session_type, lecture_date, price, teachers(id, full_name)")
+        .select(
+          "id, teacher_id, grade, section, period, session_type, lecture_date, price, teachers(id, full_name)",
+        )
         .eq("school_id", context.value.targetSchoolId)
         .eq("lecture_date", date)
         .order("teacher_id")
@@ -103,10 +119,26 @@ export async function GET(req: NextRequest) {
         .order("period"),
       branchScope.value,
     );
-    if (error) return jsonError(error.message || "تعذر تحميل المحاضرات.", 500);
+    if (error)
+      return jsonServerError(
+        "web-salaries-lectures",
+        error,
+        "تعذر تحميل المحاضرات.",
+        500,
+      );
     const records = (data ?? []).map((r) => {
       const t = Array.isArray(r.teachers) ? r.teachers[0] : r.teachers;
-      return { id: r.id, teacher_id: r.teacher_id, teacher_name: t?.full_name ?? "—", grade: r.grade, section: r.section, period: r.period, session_type: r.session_type, lecture_date: r.lecture_date, price: r.price };
+      return {
+        id: r.id,
+        teacher_id: r.teacher_id,
+        teacher_name: t?.full_name ?? "—",
+        grade: r.grade,
+        section: r.section,
+        period: r.period,
+        session_type: r.session_type,
+        lecture_date: r.lecture_date,
+        price: r.price,
+      };
     });
     return NextResponse.json({ ok: true, records });
   }
@@ -121,12 +153,23 @@ export async function GET(req: NextRequest) {
       return jsonError("الأستاذ المطلوب غير صالح.", 400);
     }
 
-    const hasLecturePrice = await tableHasColumn(context.value.actorSupabase, "teachers", "lecture_price").catch(() => false);
-    const [{ data: teacher, error: teacherError }, { data: lectures, error: lecturesError }] = await Promise.all([
+    const hasLecturePrice = await tableHasColumn(
+      context.value.actorSupabase,
+      "teachers",
+      "lecture_price",
+    ).catch(() => false);
+    const [
+      { data: teacher, error: teacherError },
+      { data: lectures, error: lecturesError },
+    ] = await Promise.all([
       applyBranchScopeToQuery(
         context.value.actorSupabase
           .from("teachers")
-          .select((hasLecturePrice ? "id, lecture_price" : "id") as unknown as "id, lecture_price")
+          .select(
+            (hasLecturePrice
+              ? "id, lecture_price"
+              : "id") as unknown as "id, lecture_price",
+          )
           .eq("id", teacherId)
           .eq("school_id", context.value.targetSchoolId),
         branchScope.value,
@@ -148,7 +191,12 @@ export async function GET(req: NextRequest) {
     }
 
     if (lecturesError) {
-      return jsonError(lecturesError.message || "تعذر تحميل ملخص محاضرات الأستاذ.", 500);
+      return jsonServerError(
+        "web-salaries-lectures",
+        lecturesError,
+        "تعذر تحميل ملخص محاضرات الأستاذ.",
+        500,
+      );
     }
 
     const fallbackPrice = Number(teacher.lecture_price ?? 0);
@@ -180,10 +228,17 @@ export async function GET(req: NextRequest) {
   );
 
   if (error) {
-    return jsonError(error.message || "تعذر تحميل تقويم المحاضرات.", 500);
+    return jsonServerError(
+      "web-salaries-lectures",
+      error,
+      "تعذر تحميل تقويم المحاضرات.",
+      500,
+    );
   }
 
-  const dates = Array.from(new Set((data ?? []).map((item) => item.lecture_date).filter(Boolean)));
+  const dates = Array.from(
+    new Set((data ?? []).map((item) => item.lecture_date).filter(Boolean)),
+  );
   return NextResponse.json({
     ok: true,
     dates,
@@ -191,7 +246,11 @@ export async function GET(req: NextRequest) {
 }
 
 export async function POST(req: NextRequest) {
-  const body = await req.json().catch(() => null) as { schoolId?: string; branchId?: string; rows?: unknown[] } | null;
+  const body = (await req.json().catch(() => null)) as {
+    schoolId?: string;
+    branchId?: string;
+    rows?: unknown[];
+  } | null;
 
   if (!body?.schoolId || !Array.isArray(body.rows) || body.rows.length === 0) {
     return jsonError("بيانات غير صالحة.", 400);
@@ -207,7 +266,12 @@ export async function POST(req: NextRequest) {
   );
 
   if (!context.ok) {
-    return jsonError("message" in context ? context.message : "تعذر التحقق من صلاحيات المستخدم.", "status" in context ? context.status : 500);
+    return jsonError(
+      "message" in context
+        ? context.message
+        : "تعذر التحقق من صلاحيات المستخدم.",
+      "status" in context ? context.status : 500,
+    );
   }
 
   const branchScope = resolveBranchScope(context.value, body.branchId ?? null);
@@ -225,13 +289,20 @@ export async function POST(req: NextRequest) {
   });
   if (rateLimited) return rateLimited;
 
-  const canManageSalaries = await routeUserHasPermission(actorSupabase, actorUserId, "manage_salaries");
+  const canManageSalaries = await routeUserHasPermission(
+    actorSupabase,
+    actorUserId,
+    "manage_salaries",
+  );
   if (!canManageSalaries) {
     return jsonError("ليس لديك صلاحية تسجيل المحاضرات.", 403);
   }
 
   // Branch isolation: force branch_id from resolved scope — ignore any branch_id in row data
-  const writeBranch = resolveBranchIdForWrite(branchScope.value, body.branchId ?? null);
+  const writeBranch = resolveBranchIdForWrite(
+    branchScope.value,
+    body.branchId ?? null,
+  );
   if (!writeBranch.ok) {
     return jsonError(writeBranch.message, writeBranch.status);
   }
@@ -240,8 +311,15 @@ export async function POST(req: NextRequest) {
   // every row. Reject the whole payload on any invalid row (negative/huge
   // price, bad date, unknown columns, wrong session_type, etc.).
   const sanitizedInput = body.rows.map((r) => {
-    const { school_id: _s, branch_id: _b, id: _id, ...rest } = (r ?? {}) as Record<string, unknown>;
-    void _s; void _b; void _id;
+    const {
+      school_id: _s,
+      branch_id: _b,
+      id: _id,
+      ...rest
+    } = (r ?? {}) as Record<string, unknown>;
+    void _s;
+    void _b;
+    void _id;
     return rest;
   });
 
@@ -256,9 +334,17 @@ export async function POST(req: NextRequest) {
     ...(writeBranch.value !== null ? { branch_id: writeBranch.value } : {}),
   }));
 
-  const { data, error } = await actorSupabase.from("daily_lectures").insert(rows).select("id");
+  const { data, error } = await actorSupabase
+    .from("daily_lectures")
+    .insert(rows)
+    .select("id");
   if (error) {
-    return jsonError(error.message || "تعذر تسجيل المحاضرات.", 500);
+    return jsonServerError(
+      "web-salaries-lectures",
+      error,
+      "تعذر تسجيل المحاضرات.",
+      500,
+    );
   }
 
   return NextResponse.json({ ok: true, count: data?.length ?? 0 });

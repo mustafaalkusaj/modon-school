@@ -2,14 +2,29 @@ import { NextRequest, NextResponse } from "next/server";
 
 import { dashboardOverviewQuerySchema } from "@/lib/api-schemas";
 import { resolveBranchScope } from "@/lib/branch-scope";
-import { resolveSchoolScopedActorContext, tableHasColumn } from "@/lib/managed-users-server";
+import {
+  resolveSchoolScopedActorContext,
+  tableHasColumn,
+} from "@/lib/managed-users-server";
 import { enforceRateLimit } from "@/lib/rate-limit";
-import { jsonError, jsonValidationError, logRouteError } from "@/lib/route-utils";
+import {
+  jsonError,
+  jsonValidationError,
+  logRouteError,
+} from "@/lib/route-utils";
 import { buildSchoolCacheTag, rememberWithTtl } from "@/lib/server-cache";
 import { getCacheHeaders, CACHE_STRATEGIES } from "@/lib/cache-strategies";
-import { buildResolvedStudentFinancials, calculateStudentPaidPercentage } from "@/lib/students/financials";
+import {
+  buildResolvedStudentFinancials,
+  calculateStudentPaidPercentage,
+} from "@/lib/students/financials";
 import { createServiceSupabaseClient } from "@/lib/supabase-server";
-import { addMonthsBaghdadIsoMonth, baghdadIsoMonth, todayBaghdadIso } from "@/lib/tz";
+import {
+  addMonthsBaghdadIsoMonth,
+  baghdadIsoMonth,
+  todayBaghdadIso,
+} from "@/lib/tz";
+import { excludeDeletedStudents } from "@/lib/students/soft-delete";
 
 // Server-side cache for schema column detection (10-minute TTL)
 let schemaColumnsCache: {
@@ -31,7 +46,10 @@ async function getSchemaColumns(
   serviceSupabase: ReturnType<typeof createServiceSupabaseClient>,
 ) {
   const now = Date.now();
-  if (schemaColumnsCache && now - schemaColumnsCache.timestamp < SCHEMA_CACHE_TTL_MS) {
+  if (
+    schemaColumnsCache &&
+    now - schemaColumnsCache.timestamp < SCHEMA_CACHE_TTL_MS
+  ) {
     return schemaColumnsCache.value;
   }
 
@@ -44,13 +62,27 @@ async function getSchemaColumns(
     classFeesSchoolScope,
     classFeesBranchScope,
   ] = await Promise.all([
-    tableHasColumn(serviceSupabase as never, "students", "status").catch(() => false),
-    tableHasColumn(serviceSupabase as never, "students", "branch_id").catch(() => false),
-    tableHasColumn(serviceSupabase as never, "payments", "branch_id").catch(() => false),
-    tableHasColumn(serviceSupabase as never, "salaries", "branch_id").catch(() => false),
-    tableHasColumn(serviceSupabase as never, "class_fees", "id").catch(() => false),
-    tableHasColumn(serviceSupabase as never, "class_fees", "school_id").catch(() => false),
-    tableHasColumn(serviceSupabase as never, "class_fees", "branch_id").catch(() => false),
+    tableHasColumn(serviceSupabase as never, "students", "status").catch(
+      () => false,
+    ),
+    tableHasColumn(serviceSupabase as never, "students", "branch_id").catch(
+      () => false,
+    ),
+    tableHasColumn(serviceSupabase as never, "payments", "branch_id").catch(
+      () => false,
+    ),
+    tableHasColumn(serviceSupabase as never, "salaries", "branch_id").catch(
+      () => false,
+    ),
+    tableHasColumn(serviceSupabase as never, "class_fees", "id").catch(
+      () => false,
+    ),
+    tableHasColumn(serviceSupabase as never, "class_fees", "school_id").catch(
+      () => false,
+    ),
+    tableHasColumn(serviceSupabase as never, "class_fees", "branch_id").catch(
+      () => false,
+    ),
   ]);
 
   const result = {
@@ -128,7 +160,9 @@ function buildEmptyDashboardOverviewPayload(warning?: string | null) {
 export async function GET(req: NextRequest) {
   const parsed = dashboardOverviewQuerySchema.safeParse({
     schoolId: req.nextUrl.searchParams.get("schoolId"),
-    branchId: req.nextUrl.searchParams.get("branchId") ?? req.nextUrl.searchParams.get("branch_id"),
+    branchId:
+      req.nextUrl.searchParams.get("branchId") ??
+      req.nextUrl.searchParams.get("branch_id"),
   });
   if (!parsed.success) {
     return jsonValidationError(parsed.error, "معرّف المدرسة غير صالح.");
@@ -147,7 +181,9 @@ export async function GET(req: NextRequest) {
 
   if (!context.ok) {
     return jsonError(
-      "message" in context ? context.message : "تعذر التحقق من صلاحيات المستخدم.",
+      "message" in context
+        ? context.message
+        : "تعذر التحقق من صلاحيات المستخدم.",
       "status" in context ? context.status : 500,
     );
   }
@@ -174,25 +210,25 @@ export async function GET(req: NextRequest) {
     const serviceSupabase = createServiceSupabaseClient();
     const loadDashboardOverview = async () => {
       const {
-        studentsStatusScope,
         studentsBranchScope,
         paymentsBranchScope,
         salariesBranchScope,
         classFeesTableExists,
-        classFeesSchoolScope,
         classFeesBranchScope,
       } = await getSchemaColumns(serviceSupabase);
 
-      const todayDate = todayBaghdadIso(); // "YYYY-MM-DD"
+      const todayDate = todayBaghdadIso(); // "YYYY-MM-DD" in Baghdad
       const currentMonth = todayDate.slice(0, 7); // "YYYY-MM"
 
-      let studentsPromise = serviceSupabase
-        .from("students")
-        .select("id, full_name, class_name, total_fee, paid_fee, remaining_fee, discount_value, status, branch_id")
-        .eq("school_id", targetSchoolId);
-      if (studentsStatusScope) {
-        studentsPromise = studentsPromise.or("status.neq.deleted,status.is.null");
-      }
+      // excludeDeletedStudents() already applies status != 'deleted' AND
+      // deleted_at IS NULL, which subsumes the old status-scoped `.or`.
+      let studentsPromise = excludeDeletedStudents(
+        serviceSupabase
+          .from("students")
+          .select(
+            "id, full_name, class_name, total_fee, paid_fee, remaining_fee, discount_value, status, branch_id",
+          ),
+      ).eq("school_id", targetSchoolId);
       // Apply branch_id filter if branchId is requested and column detection says it exists
       // If detection is wrong (false positive/negative), the query will fail and return degraded
       if (effectiveBranchId && studentsBranchScope) {
@@ -201,26 +237,36 @@ export async function GET(req: NextRequest) {
 
       let recentPaymentsPromise = serviceSupabase
         .from("payments")
-        .select("id, amount, created_at, student_id, students(full_name,class_name)")
+        .select(
+          "id, amount, created_at, student_id, students(full_name,class_name)",
+        )
         .eq("school_id", targetSchoolId)
         .is("deleted_at", null)
         .order("created_at", { ascending: false })
         .limit(5);
       if (effectiveBranchId && paymentsBranchScope) {
-        recentPaymentsPromise = recentPaymentsPromise.eq("branch_id", effectiveBranchId);
+        recentPaymentsPromise = recentPaymentsPromise.eq(
+          "branch_id",
+          effectiveBranchId,
+        );
       }
 
       const classFeesPromise = classFeesTableExists
         ? (() => {
             let classFeesQuery = serviceSupabase
               .from("class_fees")
-              .select("id, class_name, total_fee, installments, installment_amount, notes, created_at")
-              .order("class_name", { ascending: true });
-            if (classFeesSchoolScope) {
-              classFeesQuery = classFeesQuery.eq("school_id", targetSchoolId);
-            }
+              .select(
+                "id, class_name, total_fee, installments, installment_amount, notes, created_at",
+              )
+              .order("class_name", { ascending: true })
+              // Tenant predicate is unconditional: a schema probe must never be
+              // able to strip it (service-role client has no RLS fallback).
+              .eq("school_id", targetSchoolId);
             if (effectiveBranchId && classFeesBranchScope) {
-              classFeesQuery = classFeesQuery.eq("branch_id", effectiveBranchId);
+              classFeesQuery = classFeesQuery.eq(
+                "branch_id",
+                effectiveBranchId,
+              );
             }
             return classFeesQuery;
           })()
@@ -232,7 +278,10 @@ export async function GET(req: NextRequest) {
         .eq("school_id", targetSchoolId)
         .eq("month", currentMonth);
       if (effectiveBranchId && salariesBranchScope) {
-        monthlySalariesPromise = monthlySalariesPromise.eq("branch_id", effectiveBranchId);
+        monthlySalariesPromise = monthlySalariesPromise.eq(
+          "branch_id",
+          effectiveBranchId,
+        );
       }
 
       let incomesPromise = serviceSupabase
@@ -255,11 +304,18 @@ export async function GET(req: NextRequest) {
 
       const branchesPromise = serviceSupabase
         .from("branches")
-        .select("id, name_ar, name_en, is_active, principal_name")
+        // `branches` has a single `name` column on the live schema; there is no
+        // name_ar/name_en/principal_name. Selecting them failed the whole query
+        // with PostgREST 42703, which silently emptied the branch breakdown.
+        .select("id, name, is_active")
         .eq("school_id", targetSchoolId)
         .eq("is_active", true);
 
-      const employeesPromise = (serviceSupabase as unknown as { from: (table: string) => any })
+      const employeesPromise = (
+        serviceSupabase as unknown as {
+          from: (table: string) => ReturnType<typeof serviceSupabase.from>;
+        }
+      )
         .from("employees")
         .select("id, branch_id, position, full_name_ar")
         .eq("school_id", targetSchoolId)
@@ -280,7 +336,10 @@ export async function GET(req: NextRequest) {
         .is("deleted_at", null)
         .gte("created_at", `${sixMonthsAgoMonth}-01`);
       if (effectiveBranchId && paymentsBranchScope) {
-        paymentsMonthlyPromise = paymentsMonthlyPromise.eq("branch_id", effectiveBranchId);
+        paymentsMonthlyPromise = paymentsMonthlyPromise.eq(
+          "branch_id",
+          effectiveBranchId,
+        );
       }
 
       const subjectsPromise = serviceSupabase
@@ -297,8 +356,18 @@ export async function GET(req: NextRequest) {
         .limit(5000);
 
       const [
-        studentsResult, recentPaymentsResult, classFeesResult, monthlySalariesResult, incomesResult, expensesResult,
-        branchesResult, employeesResult, attendanceResult, paymentsMonthlyResult, subjectsResult, gradesTeacherResult,
+        studentsResult,
+        recentPaymentsResult,
+        classFeesResult,
+        monthlySalariesResult,
+        incomesResult,
+        expensesResult,
+        branchesResult,
+        employeesResult,
+        attendanceResult,
+        paymentsMonthlyResult,
+        subjectsResult,
+        gradesTeacherResult,
       ] = await Promise.allSettled([
         studentsPromise,
         recentPaymentsPromise,
@@ -314,14 +383,24 @@ export async function GET(req: NextRequest) {
         gradesTeacherPromise,
       ]);
 
-      const studentsFailed = studentsResult.status !== "fulfilled" || Boolean(studentsResult.value?.error);
-      const recentPaymentsFailed = recentPaymentsResult.status !== "fulfilled" || Boolean(recentPaymentsResult.value?.error);
-      const classFeesFailed = classFeesResult.status !== "fulfilled" || Boolean(classFeesResult.value?.error);
+      const studentsFailed =
+        studentsResult.status !== "fulfilled" ||
+        Boolean(studentsResult.value?.error);
+      const recentPaymentsFailed =
+        recentPaymentsResult.status !== "fulfilled" ||
+        Boolean(recentPaymentsResult.value?.error);
+      const classFeesFailed =
+        classFeesResult.status !== "fulfilled" ||
+        Boolean(classFeesResult.value?.error);
       const monthlySalariesFailed =
-        monthlySalariesResult.status !== "fulfilled" || Boolean(monthlySalariesResult.value?.error);
+        monthlySalariesResult.status !== "fulfilled" ||
+        Boolean(monthlySalariesResult.value?.error);
 
       const warning =
-        studentsFailed || recentPaymentsFailed || classFeesFailed || monthlySalariesFailed
+        studentsFailed ||
+        recentPaymentsFailed ||
+        classFeesFailed ||
+        monthlySalariesFailed
           ? "degraded_dashboard_overview"
           : undefined;
 
@@ -339,9 +418,11 @@ export async function GET(req: NextRequest) {
         if (!salariesBranchScope) missingBranchScopes.push("salaries");
         if (missingBranchScopes.length > 0) {
           console.warn(
-            `[dashboard-overview] Branch requested but columns not found in: ${missingBranchScopes.join(", ")}. Returning degraded.`
+            `[dashboard-overview] Branch requested but columns not found in: ${missingBranchScopes.join(", ")}. Returning degraded.`,
           );
-          return buildEmptyDashboardOverviewPayload("degraded_dashboard_overview");
+          return buildEmptyDashboardOverviewPayload(
+            "degraded_dashboard_overview",
+          );
         }
       }
       const classFeeMap = new Map<string, number>();
@@ -349,42 +430,71 @@ export async function GET(req: NextRequest) {
         ? (classFeesResult.value.data ?? [])
         : []
       ).forEach((fee: Record<string, unknown>) => {
-        const className = normalizeDashboardOverviewName(String(fee.class_name ?? ""));
+        const className = normalizeDashboardOverviewName(
+          String(fee.class_name ?? ""),
+        );
         const totalFee = Number(fee.total_fee ?? 0);
         if (className && Number.isFinite(totalFee) && totalFee > 0) {
           classFeeMap.set(className, totalFee);
         }
       });
 
-      const resolvedStudents: ResolvedDashboardStudentRow[] = students.map((student) => {
-        const className = normalizeDashboardOverviewName(student.class_name);
-        const classFeeTotal = classFeeMap.get(className);
-        const resolved = buildResolvedStudentFinancials(
-          {
-            total_fee: student.total_fee,
-            paid_fee: student.paid_fee,
-            discount_value: student.discount_value,
-          },
-          classFeeTotal,
-        );
+      const resolvedStudents: ResolvedDashboardStudentRow[] = students.map(
+        (student) => {
+          const className = normalizeDashboardOverviewName(student.class_name);
+          const classFeeTotal = classFeeMap.get(className);
+          const resolved = buildResolvedStudentFinancials(
+            {
+              total_fee: student.total_fee,
+              paid_fee: student.paid_fee,
+              discount_value: student.discount_value,
+            },
+            classFeeTotal,
+          );
 
-        return {
-          ...student,
-          total_fee: resolved.total_fee,
-          paid_fee: resolved.paid_fee,
-          discount_value: resolved.discount_value,
-          remaining_fee: resolved.remaining_fee,
-          resolved_total_fee: resolved.resolved_total_fee,
-        };
-      });
-      const studentsById = new Map(resolvedStudents.map((student) => [student.id, student]));
+          return {
+            ...student,
+            total_fee: resolved.total_fee,
+            paid_fee: resolved.paid_fee,
+            discount_value: resolved.discount_value,
+            remaining_fee: resolved.remaining_fee,
+            resolved_total_fee: resolved.resolved_total_fee,
+          };
+        },
+      );
+      const studentsById = new Map(
+        resolvedStudents.map((student) => [student.id, student]),
+      );
       const classStatsByKey = Object.fromEntries(
         Object.entries(
-          resolvedStudents.reduce<Record<string, { className: string; activeCount: number; transferredCount: number; count: number; totalPaid: number; totalRemaining: number; transferredPaid: number }>>((acc, student) => {
-            const className = normalizeDashboardOverviewName(student.class_name);
+          resolvedStudents.reduce<
+            Record<
+              string,
+              {
+                className: string;
+                activeCount: number;
+                transferredCount: number;
+                count: number;
+                totalPaid: number;
+                totalRemaining: number;
+                transferredPaid: number;
+              }
+            >
+          >((acc, student) => {
+            const className = normalizeDashboardOverviewName(
+              student.class_name,
+            );
             const classKey = normalizeDashboardOverviewKey(className);
             if (!classKey) return acc;
-            const current = acc[classKey] ?? { className, activeCount: 0, transferredCount: 0, count: 0, totalPaid: 0, totalRemaining: 0, transferredPaid: 0 };
+            const current = acc[classKey] ?? {
+              className,
+              activeCount: 0,
+              transferredCount: 0,
+              count: 0,
+              totalPaid: 0,
+              totalRemaining: 0,
+              transferredPaid: 0,
+            };
             if (student.status === "transferred") {
               current.transferredCount += 1;
               current.transferredPaid += Number(student.paid_fee ?? 0);
@@ -401,21 +511,29 @@ export async function GET(req: NextRequest) {
       );
 
       const recentPayments =
-        recentPaymentsResult.status === "fulfilled" && !recentPaymentsResult.value.error
+        recentPaymentsResult.status === "fulfilled" &&
+        !recentPaymentsResult.value.error
           ? (recentPaymentsResult.value.data ?? []).map((payment) => {
-              const relation = Array.isArray(payment.students) ? payment.students[0] ?? null : payment.students ?? null;
-              const student = studentsById.get(String(payment.student_id)) ?? null;
+              const relation = Array.isArray(payment.students)
+                ? (payment.students[0] ?? null)
+                : (payment.students ?? null);
+              const student =
+                studentsById.get(String(payment.student_id)) ?? null;
               return {
                 id: payment.id,
                 amount: payment.amount ?? 0,
                 created_at: payment.created_at,
                 student_id: payment.student_id,
                 student_name:
-                  (relation && typeof relation.full_name === "string" ? relation.full_name : null) ??
+                  (relation && typeof relation.full_name === "string"
+                    ? relation.full_name
+                    : null) ??
                   student?.full_name ??
                   "—",
                 class_name:
-                  (relation && typeof relation.class_name === "string" ? relation.class_name : null) ??
+                  (relation && typeof relation.class_name === "string"
+                    ? relation.class_name
+                    : null) ??
                   student?.class_name ??
                   "—",
               };
@@ -425,20 +543,31 @@ export async function GET(req: NextRequest) {
       const classFees =
         classFeesResult.status === "fulfilled" && !classFeesResult.value.error
           ? (classFeesResult.value.data ?? []).map((fee) => {
-                const className = normalizeDashboardOverviewName(String(fee.class_name ?? ""));
-                const studentStats =
-                  classStatsByKey[normalizeDashboardOverviewKey(className)] ?? {
-                  className,
-                  activeCount: 0,
-                  transferredCount: 0,
-                  count: 0,
-                  totalPaid: 0,
-                  totalRemaining: 0,
-                  transferredPaid: 0,
-                };
+              const className = normalizeDashboardOverviewName(
+                String(fee.class_name ?? ""),
+              );
+              const studentStats = classStatsByKey[
+                normalizeDashboardOverviewKey(className)
+              ] ?? {
+                className,
+                activeCount: 0,
+                transferredCount: 0,
+                count: 0,
+                totalPaid: 0,
+                totalRemaining: 0,
+                transferredPaid: 0,
+              };
               const feeTotal = Number(fee.total_fee ?? 0);
               const totalExpected = studentStats.activeCount * feeTotal;
-              const paidPct = totalExpected > 0 ? Math.min(100, Math.round((studentStats.totalPaid / totalExpected) * 100)) : 0;
+              const paidPct =
+                totalExpected > 0
+                  ? Math.min(
+                      100,
+                      Math.round(
+                        (studentStats.totalPaid / totalExpected) * 100,
+                      ),
+                    )
+                  : 0;
 
               return {
                 ...fee,
@@ -461,12 +590,18 @@ export async function GET(req: NextRequest) {
           : [];
 
       const monthlySalaryRows =
-        monthlySalariesResult.status === "fulfilled" && !monthlySalariesResult.value.error
+        monthlySalariesResult.status === "fulfilled" &&
+        !monthlySalariesResult.value.error
           ? (monthlySalariesResult.value.data ?? [])
           : [];
 
       const monthlySalaries = monthlySalaryRows.reduce(
-        (sum, row) => sum + Math.max(0, Number(row.gross_salary ?? 0) - Number(row.deductions ?? 0)),
+        (sum, row) =>
+          sum +
+          Math.max(
+            0,
+            Number(row.gross_salary ?? 0) - Number(row.deductions ?? 0),
+          ),
         0,
       );
 
@@ -476,7 +611,8 @@ export async function GET(req: NextRequest) {
           : [];
 
       const totalIncomes = incomeRows.reduce(
-        (sum, row) => sum + Number((row as Record<string, unknown>).amount ?? 0),
+        (sum, row) =>
+          sum + Number((row as Record<string, unknown>).amount ?? 0),
         0,
       );
 
@@ -502,21 +638,43 @@ export async function GET(req: NextRequest) {
       );
 
       // Split into current vs transferred so transferred fees don't inflate global totals
-      const currentStudents = resolvedStudents.filter((s) => s.status !== "transferred");
-      const transferredStudents = resolvedStudents.filter((s) => s.status === "transferred");
+      const currentStudents = resolvedStudents.filter(
+        (s) => s.status !== "transferred",
+      );
+      const transferredStudents = resolvedStudents.filter(
+        (s) => s.status === "transferred",
+      );
 
       const totals = {
         studentsCount: resolvedStudents.length,
         transferredCount: transferredStudents.length,
         // totalFees and totalRemaining reflect current students only (transferred are written off)
-        totalFees: currentStudents.reduce((sum, s) => sum + Number(s.resolved_total_fee ?? 0), 0),
+        totalFees: currentStudents.reduce(
+          (sum, s) => sum + Number(s.resolved_total_fee ?? 0),
+          0,
+        ),
         // totalPaid reflects current students only — transferred students are completely isolated
-        totalPaid: currentStudents.reduce((sum, s) => sum + Number(s.paid_fee ?? 0), 0),
-        totalDiscount: currentStudents.reduce((sum, s) => sum + Number(s.discount_value ?? 0), 0),
-        totalRemaining: currentStudents.reduce((sum, s) => sum + Number(s.remaining_fee ?? 0), 0),
+        totalPaid: currentStudents.reduce(
+          (sum, s) => sum + Number(s.paid_fee ?? 0),
+          0,
+        ),
+        totalDiscount: currentStudents.reduce(
+          (sum, s) => sum + Number(s.discount_value ?? 0),
+          0,
+        ),
+        totalRemaining: currentStudents.reduce(
+          (sum, s) => sum + Number(s.remaining_fee ?? 0),
+          0,
+        ),
         totalFeesWithTransferred:
-          currentStudents.reduce((sum, s) => sum + Number(s.resolved_total_fee ?? 0), 0) +
-          transferredStudents.reduce((sum, s) => sum + Number(s.paid_fee ?? 0), 0),
+          currentStudents.reduce(
+            (sum, s) => sum + Number(s.resolved_total_fee ?? 0),
+            0,
+          ) +
+          transferredStudents.reduce(
+            (sum, s) => sum + Number(s.paid_fee ?? 0),
+            0,
+          ),
         monthlySalaries,
         totalIncomes,
         todayIncomes,
@@ -533,34 +691,66 @@ export async function GET(req: NextRequest) {
       // --- Branch breakdown ---
       const branches =
         branchesResult.status === "fulfilled" && !branchesResult.value?.error
-          ? (branchesResult.value.data ?? []) as unknown as { id: string; name_ar: string; name_en: string }[]
+          ? ((branchesResult.value.data ?? []) as unknown as {
+              id: string;
+              name: string | null;
+            }[])
           : [];
 
       const employees =
         employeesResult.status === "fulfilled" && !employeesResult.value?.error
-          ? (employeesResult.value.data ?? []) as unknown as { id: string; branch_id: string; position: string; full_name_ar: string }[]
+          ? ((employeesResult.value.data ?? []) as unknown as {
+              id: string;
+              branch_id: string;
+              position: string;
+              full_name_ar: string;
+            }[])
           : [];
 
       const teachersByBranchMap = new Map<string, number>();
       for (const emp of employees) {
         if (emp.position === "teacher") {
-          teachersByBranchMap.set(emp.branch_id, (teachersByBranchMap.get(emp.branch_id) ?? 0) + 1);
+          teachersByBranchMap.set(
+            emp.branch_id,
+            (teachersByBranchMap.get(emp.branch_id) ?? 0) + 1,
+          );
         }
       }
 
       const branchBreakdown = branches.map((branch) => {
-        const branchStudents = resolvedStudents.filter((s) => s.branch_id === branch.id && s.status !== "transferred");
-        const branchTotalFees = branchStudents.reduce((sum, s) => sum + Number(s.resolved_total_fee ?? 0), 0);
-        const branchTotalPaid = branchStudents.reduce((sum, s) => sum + Number(s.paid_fee ?? 0), 0);
-        const branchTotalRemaining = branchStudents.reduce((sum, s) => sum + Number(s.remaining_fee ?? 0), 0);
-        const branchDiscount = branchStudents.reduce((sum, s) => sum + Number(s.discount_value ?? 0), 0);
-        const branchPaidPct = branchTotalFees > branchDiscount
-          ? Math.min(100, Math.round((branchTotalPaid / (branchTotalFees - branchDiscount)) * 100))
-          : 0;
+        const branchStudents = resolvedStudents.filter(
+          (s) => s.branch_id === branch.id && s.status !== "transferred",
+        );
+        const branchTotalFees = branchStudents.reduce(
+          (sum, s) => sum + Number(s.resolved_total_fee ?? 0),
+          0,
+        );
+        const branchTotalPaid = branchStudents.reduce(
+          (sum, s) => sum + Number(s.paid_fee ?? 0),
+          0,
+        );
+        const branchTotalRemaining = branchStudents.reduce(
+          (sum, s) => sum + Number(s.remaining_fee ?? 0),
+          0,
+        );
+        const branchDiscount = branchStudents.reduce(
+          (sum, s) => sum + Number(s.discount_value ?? 0),
+          0,
+        );
+        const branchPaidPct =
+          branchTotalFees > branchDiscount
+            ? Math.min(
+                100,
+                Math.round(
+                  (branchTotalPaid / (branchTotalFees - branchDiscount)) * 100,
+                ),
+              )
+            : 0;
         return {
           id: branch.id,
-          nameAr: branch.name_ar,
-          nameEn: branch.name_en,
+          // Response shape kept for existing consumers; the schema stores one name.
+          nameAr: branch.name,
+          nameEn: branch.name,
           studentsCount: branchStudents.length,
           teachersCount: teachersByBranchMap.get(branch.id) ?? 0,
           totalFees: branchTotalFees,
@@ -572,21 +762,30 @@ export async function GET(req: NextRequest) {
 
       // --- Teacher-subject mapping ---
       const gradesRows =
-        gradesTeacherResult.status === "fulfilled" && !gradesTeacherResult.value?.error
-          ? (gradesTeacherResult.value.data ?? []) as { teacher_id: string; subject: string }[]
+        gradesTeacherResult.status === "fulfilled" &&
+        !gradesTeacherResult.value?.error
+          ? ((gradesTeacherResult.value.data ?? []) as {
+              teacher_id: string;
+              subject: string;
+            }[])
           : [];
 
       const subjectTeacherSets = new Map<string, Set<string>>();
       for (const g of gradesRows) {
         const subName = (g.subject ?? "").trim();
         if (!subName || !g.teacher_id) continue;
-        if (!subjectTeacherSets.has(subName)) subjectTeacherSets.set(subName, new Set());
+        if (!subjectTeacherSets.has(subName))
+          subjectTeacherSets.set(subName, new Set());
         subjectTeacherSets.get(subName)!.add(g.teacher_id);
       }
 
       const subjectsRows =
         subjectsResult.status === "fulfilled" && !subjectsResult.value?.error
-          ? (subjectsResult.value.data ?? []) as { id: string; name: string; is_active: boolean }[]
+          ? ((subjectsResult.value.data ?? []) as {
+              id: string;
+              name: string;
+              is_active: boolean;
+            }[])
           : [];
 
       const teachersBySubject = subjectsRows
@@ -599,21 +798,32 @@ export async function GET(req: NextRequest) {
 
       // --- Monthly income/payments chart ---
       const paymentRows =
-        paymentsMonthlyResult.status === "fulfilled" && !paymentsMonthlyResult.value?.error
-          ? (paymentsMonthlyResult.value.data ?? []) as { amount: number; created_at: string }[]
+        paymentsMonthlyResult.status === "fulfilled" &&
+        !paymentsMonthlyResult.value?.error
+          ? ((paymentsMonthlyResult.value.data ?? []) as {
+              amount: number;
+              created_at: string;
+            }[])
           : [];
 
-      const monthlyMap = new Map<string, { income: number; payments: number }>();
+      const monthlyMap = new Map<
+        string,
+        { income: number; payments: number }
+      >();
       for (let i = 5; i >= 0; i--) {
         const key = addMonthsBaghdadIsoMonth(-i);
         monthlyMap.set(key, { income: 0, payments: 0 });
       }
 
       for (const row of incomeRows) {
-        const incDate = String((row as Record<string, unknown>).income_date ?? "");
+        const incDate = String(
+          (row as Record<string, unknown>).income_date ?? "",
+        );
         const monthKey = incDate.slice(0, 7);
         if (monthlyMap.has(monthKey)) {
-          monthlyMap.get(monthKey)!.income += Number((row as Record<string, unknown>).amount ?? 0);
+          monthlyMap.get(monthKey)!.income += Number(
+            (row as Record<string, unknown>).amount ?? 0,
+          );
         }
       }
 
@@ -624,18 +834,26 @@ export async function GET(req: NextRequest) {
         }
       }
 
-      const monthlyIncome = Array.from(monthlyMap.entries()).map(([month, data]) => ({
-        month,
-        income: data.income,
-        payments: data.payments,
-      }));
+      const monthlyIncome = Array.from(monthlyMap.entries()).map(
+        ([month, data]) => ({
+          month,
+          income: data.income,
+          payments: data.payments,
+        }),
+      );
 
       // --- Month-over-month change ---
       const thisMonthKey = baghdadIsoMonth();
       const lastMonthKey = addMonthsBaghdadIsoMonth(-1);
 
-      const thisMonthData = monthlyMap.get(thisMonthKey) ?? { income: 0, payments: 0 };
-      const lastMonthData = monthlyMap.get(lastMonthKey) ?? { income: 0, payments: 0 };
+      const thisMonthData = monthlyMap.get(thisMonthKey) ?? {
+        income: 0,
+        payments: 0,
+      };
+      const lastMonthData = monthlyMap.get(lastMonthKey) ?? {
+        income: 0,
+        payments: 0,
+      };
 
       function pctChange(current: number, previous: number): number | null {
         if (previous === 0) return current > 0 ? 100 : null;
@@ -652,18 +870,27 @@ export async function GET(req: NextRequest) {
 
       // --- Attendance summary ---
       const attendanceRows =
-        attendanceResult.status === "fulfilled" && !attendanceResult.value?.error
-          ? (attendanceResult.value.data ?? []) as { status: string }[]
+        attendanceResult.status === "fulfilled" &&
+        !attendanceResult.value?.error
+          ? ((attendanceResult.value.data ?? []) as { status: string }[])
           : [];
 
       const attendanceSummary = {
         totalToday: attendanceRows.length,
-        presentCount: attendanceRows.filter((r) => r.status === "present").length,
+        presentCount: attendanceRows.filter((r) => r.status === "present")
+          .length,
         absentCount: attendanceRows.filter((r) => r.status === "absent").length,
         lateCount: attendanceRows.filter((r) => r.status === "late").length,
-        attendancePct: attendanceRows.length > 0
-          ? Math.round((attendanceRows.filter((r) => r.status === "present" || r.status === "late").length / attendanceRows.length) * 100)
-          : 0,
+        attendancePct:
+          attendanceRows.length > 0
+            ? Math.round(
+                (attendanceRows.filter(
+                  (r) => r.status === "present" || r.status === "late",
+                ).length /
+                  attendanceRows.length) *
+                  100,
+              )
+            : 0,
       };
 
       return {
@@ -676,7 +903,11 @@ export async function GET(req: NextRequest) {
         recentPayments,
         overdueStudents: [...resolvedStudents]
           .filter((student) => Number(student.remaining_fee ?? 0) > 0)
-          .sort((left, right) => Number(right.remaining_fee ?? 0) - Number(left.remaining_fee ?? 0))
+          .sort(
+            (left, right) =>
+              Number(right.remaining_fee ?? 0) -
+              Number(left.remaining_fee ?? 0),
+          )
           .slice(0, 3)
           .map((student) => ({
             id: student.id,
@@ -686,7 +917,10 @@ export async function GET(req: NextRequest) {
           })),
         classFees,
         studentCountByClass: Object.fromEntries(
-          Object.values(classStatsByKey).map((stats) => [stats.className, stats.count]),
+          Object.values(classStatsByKey).map((stats) => [
+            stats.className,
+            stats.count,
+          ]),
         ),
         branchBreakdown,
         teachersBySubject,
@@ -708,12 +942,15 @@ export async function GET(req: NextRequest) {
           },
         );
 
-    return NextResponse.json({
-      ok: true,
-      ...payload,
-    }, {
-      headers: getCacheHeaders(CACHE_STRATEGIES.DASHBOARD_OVERVIEW),
-    });
+    return NextResponse.json(
+      {
+        ok: true,
+        ...payload,
+      },
+      {
+        headers: getCacheHeaders(CACHE_STRATEGIES.DASHBOARD_OVERVIEW),
+      },
+    );
   } catch (error) {
     logRouteError("dashboard-overview", error, {
       actorUserId,

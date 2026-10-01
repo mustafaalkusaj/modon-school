@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { enforceRateLimit } from "@/lib/rate-limit";
 import { resolveStudentContext, unauthorized } from "@/lib/student-api";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "@/types/database.types";
@@ -103,6 +104,16 @@ export async function POST(
 ) {
   const ctx = await resolveStudentContext(req);
   if (!ctx) return unauthorized();
+
+  // Autosave fires on a timer for the whole exam duration — generous but
+  // bounded, per student, so a stuck client can't hammer the DB.
+  const rlResponse = await enforceRateLimit(req, {
+    namespace: "student-exam-autosave",
+    windowMs: 60_000,
+    maxHits: 60,
+    identifier: ctx.studentId,
+  });
+  if (rlResponse) return rlResponse;
 
   const { supabase, schoolId, studentId } = ctx;
   const { examId } = await params;

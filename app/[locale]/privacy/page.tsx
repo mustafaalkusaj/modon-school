@@ -37,16 +37,18 @@ const SECTIONS = [
   {
     title: "Account Deletion",
     titleAr: "حذف الحساب",
-    body: "Request deletion via: Settings, Privacy and Security, Request Account Deletion. Processed within a few days by school administration.",
+    body: "Request deletion via: Settings, Privacy and Security, Request Account Deletion, or the /account-deletion page. Your identity is verified first, and requests are normally processed within seven business days. Some school or financial records required by law may be retained with restricted access.",
     bodyAr:
-      "يمكنك طلب حذف حسابك عبر: الإعدادات، الخصوصية والأمان، طلب حذف الحساب. تتم المعالجة خلال أيام قليلة.",
+      // One SLA across every surface: /account-deletion already promises seven
+      // business days, so this policy must not say «أيام قليلة».
+      "يمكنك طلب حذف حسابك عبر: الإعدادات، الخصوصية والأمان، طلب حذف الحساب، أو من صفحة /account-deletion. يتم التحقق من الهوية أولاً، وتتم المعالجة عادةً خلال سبعة أيام عمل. قد يُحتفظ ببعض السجلات المدرسية أو المالية المطلوبة نظاماً مع تقييد الوصول إليها.",
   },
   {
-    title: "Third-Party Sharing",
-    titleAr: "مشاركة البيانات مع أطراف ثالثة",
-    body: "Your data is never sold. Only database hosting and push notification services are used to operate the app.",
+    title: "Third-Party Services (Processors)",
+    titleAr: "الخدمات والأطراف الثالثة التي تعالج البيانات",
+    body: "Your data is never sold. The following external services receive data as part of operating the app: Supabase (Frankfurt, EU) stores all application data. Expo (exp.host) receives your device push token and the title and body of each notification sent to you. Telegram (api.telegram.org) receives the alerts and replies of an internal platform-operations bot, which can include user roles, sales-lead contact names and phone numbers, and aggregate counts and totals of outstanding fees. It also receives an alert for every account-deletion request, containing the requester's name and role and, depending on the channel, their email address, school name or stated reason. Anthropic (api.anthropic.com) receives the text of the calendar-suggestions AI feature: the school name, student count and upcoming event titles and dates. Meta/WhatsApp (graph.facebook.com) and Resend (api.resend.com) are used only to deliver operational alerts to the platform operator. Cloudflare sits in front of the service, so all traffic to and from the app passes through it. Upstash Redis stores rate-limiting identifiers (a user ID or IP address) for short periods.",
     bodyAr:
-      "لا تُباع بياناتك. تُستخدم خدمات استضافة وإشعارات فقط لتشغيل التطبيق.",
+      "لا تُباع بياناتك. الخدمات الخارجية التالية تتلقى بيانات كجزء من تشغيل التطبيق: Supabase (فرانكفورت، الاتحاد الأوروبي) تُخزَّن عليها كل بيانات التطبيق. Expo‏ (exp.host) يتلقى رمز الإشعارات الخاص بجهازك وعنوان ونص كل إشعار يُرسل إليك. Telegram‏ (api.telegram.org) يتلقى تنبيهات وردود بوت تشغيلي داخلي قد تتضمن أدوار المستخدمين، وأسماء وأرقام هواتف جهات الاتصال التجارية، وأعداد ومجاميع الأقساط المتبقية. كما يتلقى تنبيهاً عند كل طلب حذف حساب يتضمن اسم مقدّم الطلب ودوره، وحسب قناة الطلب بريده الإلكتروني أو اسم مدرسته أو السبب الذي ذكره. Anthropic‏ (api.anthropic.com) يتلقى نص ميزة اقتراحات التقويم بالذكاء الاصطناعي: اسم المدرسة وعدد الطلاب وعناوين وتواريخ الأحداث القادمة. Meta/WhatsApp‏ (graph.facebook.com) وResend‏ (api.resend.com) يُستخدمان فقط لإيصال تنبيهات التشغيل إلى مشغّل المنصة. Cloudflare يقع أمام الخدمة، لذا تمر كل حركة البيانات من التطبيق وإليه عبره. Upstash Redis يحفظ معرّفات تحديد معدّل الطلبات (معرّف المستخدم أو عنوان IP) لفترات قصيرة.",
   },
   {
     title: "Contact Us",

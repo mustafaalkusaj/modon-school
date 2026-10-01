@@ -6,9 +6,37 @@ import { useAutoRefresh } from "@/hooks/useAutoRefresh";
 import type { UserProfile } from "@/lib/auth";
 import { DashboardNotification } from "../_components/types";
 
+const NOTIFICATIONS_LIMIT = 25;
+
 interface UseNotificationsProps {
   profile: UserProfile | null;
   scopeLoading: boolean;
+}
+
+function playNotificationSound() {
+  try {
+    const audio = new Audio("/sounds/notification.mp3");
+    audio.volume = 0.5;
+    audio.play().catch(() => {
+      // Autoplay blocked or asset missing: fall back to a short Web Audio beep.
+      try {
+        const ctx = new AudioContext();
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        osc.frequency.value = 880;
+        gain.gain.value = 0.3;
+        osc.start();
+        gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.3);
+        osc.stop(ctx.currentTime + 0.3);
+      } catch {
+        // silent: audio not supported
+      }
+    });
+  } catch {
+    // silent: audio not supported
+  }
 }
 
 export function useNotifications({ profile, scopeLoading }: UseNotificationsProps) {
@@ -16,6 +44,7 @@ export function useNotifications({ profile, scopeLoading }: UseNotificationsProp
   const [notificationsEnabled, setNotificationsEnabled] = useState(true);
   const [notificationsLoading, setNotificationsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [notificationsUserId, setNotificationsUserId] = useState<string | null>(null);
 
   const fetchDashboardNotifications = useCallback(async () => {
     if (!profile || (profile.role !== "super_admin" && profile.role !== "admin")) {
@@ -36,12 +65,14 @@ export function useNotifications({ profile, scopeLoading }: UseNotificationsProp
         return;
       }
 
+      setNotificationsUserId(userId);
+
       const { data, error: fetchError } = await supabase
         .from("notifications")
         .select("id, title, message, type, is_read, created_at")
         .eq("user_id", userId)
         .order("created_at", { ascending: false })
-        .limit(8);
+        .limit(NOTIFICATIONS_LIMIT);
 
       if (fetchError) {
         const relationMissing = fetchError.message.includes('relation "notifications" does not exist');
@@ -73,10 +104,50 @@ export function useNotifications({ profile, scopeLoading }: UseNotificationsProp
     );
   }, []);
 
+  const markAllAsRead = useCallback(async () => {
+    if (!notificationsUserId) return;
+    await supabase
+      .from("notifications")
+      .update({ is_read: true })
+      .eq("user_id", notificationsUserId)
+      .eq("is_read", false);
+    setNotifications((current) => current.map((item) => ({ ...item, is_read: true })));
+  }, [notificationsUserId]);
+
   useEffect(() => {
     if (!profile || scopeLoading) return;
     void fetchDashboardNotifications();
   }, [profile, scopeLoading, fetchDashboardNotifications]);
+
+  // Supabase Realtime: surface new notifications immediately and play a sound.
+  useEffect(() => {
+    if (!notificationsUserId || !notificationsEnabled) return;
+
+    const channel = supabase
+      .channel(`dashboard-notifications:${notificationsUserId}`)
+      .on(
+        "postgres_changes",
+        {
+          event: "INSERT",
+          schema: "public",
+          table: "notifications",
+          filter: `user_id=eq.${notificationsUserId}`,
+        },
+        (payload: { new: unknown }) => {
+          const row = payload.new as DashboardNotification;
+          setNotifications((current) => {
+            if (current.some((item) => item.id === row.id)) return current;
+            return [row, ...current].slice(0, NOTIFICATIONS_LIMIT);
+          });
+          playNotificationSound();
+        },
+      )
+      .subscribe();
+
+    return () => {
+      void supabase.removeChannel(channel);
+    };
+  }, [notificationsUserId, notificationsEnabled]);
 
   const backgroundRefetch = useCallback(async () => {
     if (!profile || scopeLoading) return;
@@ -90,7 +161,7 @@ export function useNotifications({ profile, scopeLoading }: UseNotificationsProp
         .select("id, title, message, type, is_read, created_at")
         .eq("user_id", userId)
         .order("created_at", { ascending: false })
-        .limit(8);
+        .limit(NOTIFICATIONS_LIMIT);
       if (data) setNotifications(data as DashboardNotification[]);
     } catch { /* silent */ }
   }, [profile, scopeLoading]);
@@ -111,5 +182,6 @@ export function useNotifications({ profile, scopeLoading }: UseNotificationsProp
     unreadNotifications,
     fetchDashboardNotifications,
     markNotificationAsRead,
-  }), [notifications, notificationsEnabled, notificationsLoading, error, unreadNotifications, fetchDashboardNotifications, markNotificationAsRead]);
+    markAllAsRead,
+  }), [notifications, notificationsEnabled, notificationsLoading, error, unreadNotifications, fetchDashboardNotifications, markNotificationAsRead, markAllAsRead]);
 }

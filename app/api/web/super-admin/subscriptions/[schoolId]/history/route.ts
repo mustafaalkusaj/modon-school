@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { resolveSuperAdminActorContext } from "@/lib/super-admin-server";
+import { jsonServerError } from "@/lib/route-utils";
 
 function jsonError(message: string, status: number) {
   return NextResponse.json({ error: { message } }, { status });
@@ -10,9 +11,16 @@ export async function GET(
   { params }: { params: Promise<{ schoolId: string }> },
 ) {
   const { schoolId } = await params;
-  const context = await resolveSuperAdminActorContext(req.headers.get("authorization"));
+  const context = await resolveSuperAdminActorContext(
+    req.headers.get("authorization"),
+  );
   if (!context.ok) {
-    return jsonError("message" in context ? context.message : "تعذر التحقق من صلاحيات المستخدم.", "status" in context ? context.status : 500);
+    return jsonError(
+      "message" in context
+        ? context.message
+        : "تعذر التحقق من صلاحيات المستخدم.",
+      "status" in context ? context.status : 500,
+    );
   }
 
   const normalizedSchoolId = schoolId.trim();
@@ -29,7 +37,12 @@ export async function GET(
     .order("created_at", { ascending: false });
 
   if (error) {
-    return jsonError(error.message || "تعذر تحميل سجل الاشتراكات.", 500);
+    return jsonServerError(
+      "web-super-admin-subscriptions-schoolId-history",
+      error,
+      "تعذر تحميل سجل الاشتراكات.",
+      500,
+    );
   }
 
   return NextResponse.json({ ok: true, subscriptions: data ?? [] });

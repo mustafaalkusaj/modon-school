@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { resolveSchoolScopedActorContext } from "@/lib/managed-users-server";
 
+import { logRouteError } from "@/lib/route-utils";
 interface RouteParams {
   params: Promise<{ id: string }>;
 }
@@ -48,7 +49,8 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
     .eq("school_id", targetSchoolId);
 
   if (error) {
-    return NextResponse.json({ ok: false, error: error.message }, { status: 500 });
+    logRouteError("web-ads-id", error);
+    return NextResponse.json({ ok: false, error: "تعذر إكمال العملية. حاول مرة أخرى لاحقاً." }, { status: 500 });
   }
 
   return NextResponse.json({ ok: true });
@@ -76,7 +78,8 @@ export async function DELETE(request: NextRequest, { params }: RouteParams) {
     .eq("school_id", targetSchoolId);
 
   if (error) {
-    return NextResponse.json({ ok: false, error: error.message }, { status: 500 });
+    logRouteError("web-ads-id", error);
+    return NextResponse.json({ ok: false, error: "تعذر إكمال العملية. حاول مرة أخرى لاحقاً." }, { status: 500 });
   }
 
   return NextResponse.json({ ok: true });
