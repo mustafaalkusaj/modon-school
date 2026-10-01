@@ -2,6 +2,7 @@ import { toManagedAuthEmail } from "@/lib/managed-users/auth-email";
 import { NextRequest, NextResponse } from "next/server";
 import {
   buildManagedAuthIdentityPayload,
+  findManagedProfileByLinkedRecord,
   generateManagedLoginIdentifier,
   generateTemporaryPassword,
   hashPassword,
@@ -50,15 +51,23 @@ async function resetMissingTeacherPasswords(
     const authUserId = t.auth_user_id as string;
     const cred = credMap.get(authUserId);
     if (cred?.temporary_password_plain) continue;
-    const loginIdentifier = (t.app_username as string | null) ?? cred?.login_identifier;
+    const loginIdentifier =
+      (t.app_username as string | null) ?? cred?.login_identifier;
     if (!loginIdentifier) continue;
 
     const temporaryPassword = generateTemporaryPassword();
-    const { error: pwError } = await serviceSupabase.auth.admin.updateUserById(authUserId, {
-      password: temporaryPassword,
-    });
+    const { error: pwError } = await serviceSupabase.auth.admin.updateUserById(
+      authUserId,
+      {
+        password: temporaryPassword,
+      },
+    );
     if (pwError) {
-      console.error("[teacher-ensure-all] password update failed", authUserId, pwError.message);
+      console.error(
+        "[teacher-ensure-all] password update failed",
+        authUserId,
+        pwError.message,
+      );
       continue;
     }
     await upsertManagedUserCredential(actorSupabase, {
@@ -83,10 +92,15 @@ export async function POST(request: NextRequest) {
   });
   if (rateLimited) return rateLimited;
 
-  const body = (await request.json().catch(() => null)) as Record<string, unknown> | null;
+  const body = (await request.json().catch(() => null)) as Record<
+    string,
+    unknown
+  > | null;
 
   const context = await resolveSchoolScopedActorContext(
-    typeof body?.schoolId === "string" ? body.schoolId : request.nextUrl.searchParams.get("schoolId"),
+    typeof body?.schoolId === "string"
+      ? body.schoolId
+      : request.nextUrl.searchParams.get("schoolId"),
     {
       allowedRoles: ["admin", "super_admin"],
       roleDeniedMessage: "إنشاء حسابات المعلمين متاح لمدير المدرسة فقط.",
@@ -118,7 +132,11 @@ export async function POST(request: NextRequest) {
 
   let reset = 0;
   try {
-    reset = await resetMissingTeacherPasswords(serviceSupabase, actorSupabase, targetSchoolId);
+    reset = await resetMissingTeacherPasswords(
+      serviceSupabase,
+      actorSupabase,
+      targetSchoolId,
+    );
   } catch (err) {
     console.error("[teacher-ensure-all] password reset failed", err);
   }
@@ -129,9 +147,10 @@ export async function POST(request: NextRequest) {
       created: 0,
       reset,
       failed: 0,
-      message: reset > 0
-        ? `تم توليد كلمة مرور جديدة لـ ${reset} معلم.`
-        : "جميع المعلمين لديهم حسابات بالفعل.",
+      message:
+        reset > 0
+          ? `تم توليد كلمة مرور جديدة لـ ${reset} معلم.`
+          : "جميع المعلمين لديهم حسابات بالفعل.",
     });
   }
 
@@ -140,16 +159,43 @@ export async function POST(request: NextRequest) {
 
   const CONCURRENCY = 10;
 
-  const createAccount = async (teacher: { id: string; full_name: unknown; phone: unknown }) => {
+  const createAccount = async (teacher: {
+    id: string;
+    full_name: unknown;
+    phone: unknown;
+  }) => {
     const fullName = (teacher.full_name as string).trim();
     const phone = typeof teacher.phone === "string" ? teacher.phone : null;
 
-    const loginIdentifier = await generateManagedLoginIdentifier(actorSupabase, {
-      schoolId: targetSchoolId,
-      role: "teacher",
-      fullName,
-      preferredEmail: "",
-    });
+    // A managed profile may already exist for this teacher (the teachers row
+    // just lost its link). Re-link it instead of minting a second auth user.
+    const existingProfile = await findManagedProfileByLinkedRecord(
+      actorSupabase,
+      {
+        schoolId: targetSchoolId,
+        role: "teacher",
+        relatedRecordId: teacher.id,
+      },
+    );
+    if (existingProfile?.authUserId) {
+      await serviceSupabase
+        .from("teachers")
+        .update({ auth_user_id: existingProfile.authUserId })
+        .eq("id", teacher.id)
+        .eq("school_id", targetSchoolId);
+      created++;
+      return;
+    }
+
+    const loginIdentifier = await generateManagedLoginIdentifier(
+      actorSupabase,
+      {
+        schoolId: targetSchoolId,
+        role: "teacher",
+        fullName,
+        preferredEmail: "",
+      },
+    );
     const temporaryPassword = generateTemporaryPassword();
     const createdAt = new Date().toISOString();
 
@@ -169,18 +215,19 @@ export async function POST(request: NextRequest) {
 
     const authEmail = toManagedAuthEmail(loginIdentifier);
 
-    const { data: createdUser, error: createError } = await serviceSupabase.auth.admin.createUser({
-      email: authEmail,
-      password: temporaryPassword,
-      email_confirm: true,
-      ...authIdentityPayload,
-    });
+    const { data: createdUser, error: createError } =
+      await serviceSupabase.auth.admin.createUser({
+        email: authEmail,
+        password: temporaryPassword,
+        email_confirm: true,
+        ...authIdentityPayload,
+      });
 
     if (createError || !createdUser.user?.id) {
       failed.push({
         teacherId: teacher.id,
         name: fullName,
-        reason: createError?.message ?? "فشل إنشاء الحساب",
+        reason: "فشل إنشاء الحساب",
       });
       return;
     }
@@ -195,7 +242,11 @@ export async function POST(request: NextRequest) {
 
     if (linkError) {
       await serviceSupabase.auth.admin.deleteUser(authUserId);
-      failed.push({ teacherId: teacher.id, name: fullName, reason: "فشل ربط الحساب" });
+      failed.push({
+        teacherId: teacher.id,
+        name: fullName,
+        reason: "فشل ربط الحساب",
+      });
       return;
     }
 

@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 
 import { resolveStudentContext, unauthorized } from "@/lib/student-api";
 import { enforceRateLimit } from "@/lib/rate-limit";
@@ -7,6 +8,16 @@ import {
   createHomeworkSignedDownloadUrl,
   isValidHomeworkPath,
 } from "@/lib/homework-storage";
+
+const downloadUrlSchema = z.object({
+  bucket: z.string().trim().min(1, "bucket مطلوب"),
+  path: z.string().trim().min(1, "path مطلوب"),
+  file_name: z
+    .string()
+    .trim()
+    .transform((value) => value.slice(0, 180))
+    .optional(),
+});
 
 /**
  * Signs a download URL for either:
@@ -26,16 +37,16 @@ export async function POST(req: NextRequest) {
     });
     if (limited) return limited;
 
-    const body = (await req.json().catch(() => null)) as Record<
-      string,
-      unknown
-    > | null;
-    const bucket = typeof body?.bucket === "string" ? body.bucket.trim() : "";
-    const path = typeof body?.path === "string" ? body.path.trim() : "";
-    const downloadName =
-      typeof body?.file_name === "string"
-        ? body.file_name.trim().slice(0, 180)
-        : "";
+    const raw = await req.json().catch(() => null);
+    const parsed = downloadUrlSchema.safeParse(raw);
+    if (!parsed.success) {
+      return NextResponse.json(
+        { ok: false, error: parsed.error.issues[0]?.message ?? "invalid_body" },
+        { status: 400 },
+      );
+    }
+    const { bucket, path, file_name } = parsed.data;
+    const downloadName = file_name ?? "";
 
     if (bucket !== HOMEWORK_BUCKET || !isValidHomeworkPath(ctx.schoolId, path)) {
       return NextResponse.json(

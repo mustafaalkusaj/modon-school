@@ -1,8 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 
 import { resolveMobileRouteContext } from "@/lib/mobile-api-server";
 import { enforceRateLimit } from "@/lib/rate-limit";
 import { createServiceSupabaseClient } from "@/lib/supabase-server";
+
+import { isAssignmentVisibleToStudent } from "../../assignment-visibility";
 
 type Params = { params: Promise<{ id: string }> };
 
@@ -49,12 +52,16 @@ export async function GET(req: NextRequest, { params }: Params) {
   }
 }
 
-interface SubmitBody {
-  notes?: string;
-  file_url?: string;
-  file_name?: string;
-  file_mime_type?: string;
-}
+const submitBodySchema = z.object({
+  notes: z.string().trim().max(5000, "الملاحظات طويلة جدًا.").nullish(),
+  file_url: z.string().trim().max(1000, "رابط الملف طويل جدًا.").nullish(),
+  file_name: z.string().trim().max(255, "اسم الملف طويل جدًا.").nullish(),
+  file_mime_type: z
+    .string()
+    .trim()
+    .max(255, "نوع الملف غير صالح.")
+    .nullish(),
+});
 
 export async function POST(req: NextRequest, { params }: Params) {
   try {
@@ -73,16 +80,27 @@ export async function POST(req: NextRequest, { params }: Params) {
     if (rateLimited) return rateLimited;
 
     const { schoolId, account } = context.value;
-    const studentId = account.student?.id;
-    if (!studentId) {
+    const student = account.student;
+    const studentId = student?.id;
+    if (!student || !studentId) {
       return NextResponse.json(
         { ok: false, error: "لا يوجد حساب طالب مرتبط." },
         { status: 403 },
       );
     }
 
-    const body = (await req.json()) as SubmitBody;
-    const { notes, file_url, file_name, file_mime_type } = body;
+    const raw = await req.json().catch(() => null);
+    const parsed = submitBodySchema.safeParse(raw);
+    if (!parsed.success) {
+      return NextResponse.json(
+        {
+          ok: false,
+          error: parsed.error.issues[0]?.message ?? "invalid_body",
+        },
+        { status: 400 },
+      );
+    }
+    const { notes, file_url, file_name, file_mime_type } = parsed.data;
 
     if (!notes && !file_url) {
       return NextResponse.json(
@@ -92,6 +110,40 @@ export async function POST(req: NextRequest, { params }: Params) {
     }
 
     const supabase = createServiceSupabaseClient();
+
+    // The service client bypasses RLS: confirm the assignment belongs to the
+    // caller's school, is not moderated away, and is addressed to this student
+    // before writing a submission against it.
+    const { data: assignmentData, error: assignmentError } = await supabase
+      .from("assignments")
+      .select("*")
+      .eq("id", assignmentId)
+      .eq("school_id", schoolId)
+      .maybeSingle();
+
+    if (assignmentError) throw assignmentError;
+
+    const assignmentRow = (assignmentData ?? null) as Record<
+      string,
+      unknown
+    > | null;
+    const isModeratedAway =
+      assignmentRow != null &&
+      (assignmentRow.status === "deleted_by_admin" ||
+        (assignmentRow.deleted_at !== undefined &&
+          assignmentRow.deleted_at !== null));
+
+    if (
+      !assignmentRow ||
+      isModeratedAway ||
+      !isAssignmentVisibleToStudent(assignmentRow, student)
+    ) {
+      return NextResponse.json(
+        { ok: false, error: "الواجب غير موجود." },
+        { status: 404 },
+      );
+    }
+
     const { data, error } = await assignmentSubmissionsTable(supabase)
       .upsert(
         {
@@ -110,6 +162,34 @@ export async function POST(req: NextRequest, { params }: Params) {
       .single();
 
     if (error) throw error;
+
+    // Event-driven notification to the owning teacher — additive, never blocks
+    // the write.
+    const teacherId =
+      typeof assignmentRow.teacher_id === "string" &&
+      assignmentRow.teacher_id.trim()
+        ? assignmentRow.teacher_id.trim()
+        : null;
+    if (teacherId) {
+      void import("@/lib/notify-events")
+        .then(async ({ notifySubmissionReceived }) => {
+          const { data: studentRow } = await supabase
+            .from("students")
+            .select("full_name")
+            .eq("id", studentId)
+            .maybeSingle();
+          return notifySubmissionReceived({
+            supabase,
+            schoolId,
+            teacherId,
+            studentName: (studentRow as Record<string, unknown> | null)
+              ?.full_name as string | undefined,
+            title: (assignmentRow.title as string) ?? "واجب",
+          });
+        })
+        .catch(() => {});
+    }
+
     return NextResponse.json({ ok: true, submission: data });
   } catch {
     return NextResponse.json(

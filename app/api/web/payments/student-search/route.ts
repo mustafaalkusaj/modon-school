@@ -5,6 +5,7 @@ import { enforceRateLimit } from "@/lib/rate-limit";
 import { resolveSchoolScopedActorContext } from "@/lib/managed-users-server";
 import { searchPaymentStudents } from "@/lib/payments/overview";
 
+import { jsonServerError } from "@/lib/route-utils";
 function jsonError(message: string, status: number) {
   return NextResponse.json({ error: { message } }, { status });
 }
@@ -59,6 +60,6 @@ export async function GET(req: NextRequest) {
       },
     );
   } catch (error) {
-    return jsonError(error instanceof Error ? error.message : "تعذر تحميل نتائج البحث.", 500);
+    return jsonServerError("web-payments-student-search", error, "تعذر تحميل نتائج البحث.", 500);
   }
 }

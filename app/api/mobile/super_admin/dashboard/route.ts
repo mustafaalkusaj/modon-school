@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 
 import { resolveSuperAdminMobileRouteContext } from "@/lib/mobile-super-admin-server";
+import { excludeDeletedStudents } from "@/lib/students/soft-delete";
 
 export async function GET(req: NextRequest) {
   try {
@@ -16,9 +17,9 @@ export async function GET(req: NextRequest) {
       inactiveResult,
       activitiesResult,
     ] = await Promise.all([
-      serviceSupabase
+      excludeDeletedStudents(serviceSupabase
         .from("students")
-        .select("*", { count: "exact", head: true }),
+        .select("*", { count: "exact", head: true })),
       serviceSupabase
         .from("teachers")
         .select("*", { count: "exact", head: true }),
@@ -26,9 +27,9 @@ export async function GET(req: NextRequest) {
         .from("managed_user_profiles")
         .select("*", { count: "exact", head: true })
         .eq("role", "admin"),
-      serviceSupabase
+      excludeDeletedStudents(serviceSupabase
         .from("students")
-        .select("*", { count: "exact", head: true })
+        .select("*", { count: "exact", head: true }))
         .eq("status", "inactive"),
       serviceSupabase
         .from("notifications")

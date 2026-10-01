@@ -14,8 +14,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const mockState = vi.hoisted(() => ({
   createRouteSupabaseClient: vi.fn(),
   resolveWebUserProfileWithStatus: vi.fn(),
-  enforceRateLimit: vi.fn(),
-  buildAuthRateLimitIdentifier: vi.fn(() => "127.0.0.1:test-hash"),
+  enforceLoginRateLimits: vi.fn(),
   normalizeRateLimitEmail: vi.fn((email: string) => email.trim().toLowerCase()),
   hasRBACSecret: vi.fn(() => true),
   signRBACSession: vi.fn(async () => "mock-signed-cookie"),
@@ -46,11 +45,7 @@ const mockState = vi.hoisted(() => ({
 // Module mocks
 // ---------------------------------------------------------------------------
 vi.mock("@/lib/rate-limit", () => ({
-  enforceRateLimit: mockState.enforceRateLimit,
-  buildAuthRateLimitIdentifier: mockState.buildAuthRateLimitIdentifier,
-  buildAccountRateLimitIdentifier: (account: string | null | undefined) =>
-    account ? `acct:${account}` : null,
-  ACCOUNT_LOGIN_RATE_LIMIT: { namespace: "auth-login-account", windowMs: 900_000, maxHits: 30 },
+  enforceLoginRateLimits: mockState.enforceLoginRateLimits,
   normalizeRateLimitEmail: mockState.normalizeRateLimitEmail,
 }));
 
@@ -170,12 +165,9 @@ describe("POST /api/auth/login", () => {
     vi.resetModules();
 
     // Safe defaults
-    mockState.enforceRateLimit.mockReturnValue(null);
+    mockState.enforceLoginRateLimits.mockReturnValue(null);
     mockState.hasRBACSecret.mockReturnValue(true);
     mockState.signRBACSession.mockResolvedValue("mock-signed-cookie");
-    mockState.buildAuthRateLimitIdentifier.mockReturnValue(
-      "127.0.0.1:test-hash",
-    );
     mockState.normalizeRateLimitEmail.mockImplementation((e: string) =>
       e.trim().toLowerCase(),
     );
@@ -390,7 +382,7 @@ describe("POST /api/auth/login", () => {
   // ── Rate limiting (429) ──────────────────────────────────────────────────
 
   it("returns 429 when rate limit is exceeded", async () => {
-    mockState.enforceRateLimit.mockReturnValue(
+    mockState.enforceLoginRateLimits.mockReturnValue(
       NextResponse.json(
         { error: "too_many_attempts", message: "محاولات كثيرة، حاول لاحقاً" },
         { status: 429 },

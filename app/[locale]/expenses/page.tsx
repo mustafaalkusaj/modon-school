@@ -1,4 +1,5 @@
 "use client";
+import NextImage from "next/image";
 import { useCallback, useDeferredValue, useEffect, useMemo, useState } from "react";
 import { fetchJsonWithAuthorizedSession, fetchWithAuthorizedSession, withJsonHeaders } from "@/lib/authorized-api";
 import { formatNumber, formatDate } from "@/lib/formatting";
@@ -285,10 +286,7 @@ export default function ExpensesPage() {
   // Filters
   const [expenseTypeFilter, setExpenseTypeFilter] = useState("");
   const [search, setSearch] = useState("");
-  const [filterFrom, setFilterFrom] = useState(() => {
-    const d = new Date(); d.setDate(1);
-    return d.toISOString().split("T")[0];
-  });
+  const [filterFrom, setFilterFrom] = useState(() => `${todayBaghdadIso().slice(0, 7)}-01`);
   const [filterTo, setFilterTo] = useState(() => todayBaghdadIso());
   const deferredSearch = useDeferredValue(search);
   const [expensePage, setExpensePage] = useState(1);
@@ -1208,7 +1206,7 @@ export default function ExpensesPage() {
                 <label className="text-[10px] font-black uppercase tracking-wider text-[var(--text-muted)] px-1">{tx("صورة الإيصال", locale)}</label>
                 {form.receipt_image_url ? (
                   <div className="relative inline-block mb-1">
-                    <img src={form.receipt_image_url} alt="receipt" className="h-20 rounded-xl object-cover border border-[var(--border)]" />
+                    <NextImage unoptimized width={800} height={800} src={form.receipt_image_url} alt="receipt" className="h-20 w-auto max-w-full rounded-xl object-cover border border-[var(--border)]" />
                     <button type="button" onClick={() => setForm(f => ({ ...f, receipt_image_url: null }))} className="absolute -top-2 -end-2 h-5 w-5 rounded-full bg-[var(--danger)] text-white text-xs flex items-center justify-center leading-none">×</button>
                   </div>
                 ) : null}

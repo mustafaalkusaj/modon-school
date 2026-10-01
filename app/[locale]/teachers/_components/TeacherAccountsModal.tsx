@@ -138,17 +138,32 @@ export function TeacherAccountsModal({
       ? "system-ui,-apple-system,sans-serif"
       : "'Noto Sans Arabic','Segoe UI',system-ui,sans-serif";
 
-    // Generate QR codes for all printable teachers
+    // Generate QR codes for all printable teachers. The QR carries only an
+    // opaque, revocable login token; no username or password is embedded.
     const qrMap: Record<string, string> = {};
     await Promise.all(
       printableTeachers.map(async (t) => {
-        if (t.app_username && t.app_password_plain) {
-          try {
-            qrMap[t.id] = await QRCode.toDataURL(
-              JSON.stringify({ username: t.app_username, password: t.app_password_plain }),
-              { width: 130, margin: 1, color: { dark: "#1e1b4b", light: "#ffffff" } }
-            );
-          } catch { /* skip */ }
+        if (!t.app_username || !t.auth_user_id || !schoolId) return;
+        try {
+          const res = await fetch("/api/admin/qr-tokens", {
+            method: "POST",
+            credentials: "include",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              action: "generate_qr",
+              auth_user_id: t.auth_user_id,
+              school_id: schoolId,
+            }),
+          });
+          const data = await res.json().catch(() => null);
+          const token = data?.ok ? (data.token?.token as string | undefined) : undefined;
+          if (!token) return;
+          qrMap[t.id] = await QRCode.toDataURL(
+            `${window.location.origin}/${locale}/qr-login?t=${encodeURIComponent(token)}`,
+            { width: 130, margin: 1, color: { dark: "#1e1b4b", light: "#ffffff" } },
+          );
+        } catch {
+          /* skip */
         }
       })
     );

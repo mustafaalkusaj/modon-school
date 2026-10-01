@@ -11,6 +11,7 @@ import { enforceRateLimit } from "@/lib/rate-limit";
 import { createServiceSupabaseClient } from "@/lib/supabase-server";
 import { writeAuditLog } from "@/lib/audit/audit-log";
 
+import { jsonServerError } from "@/lib/route-utils";
 function jsonError(message: string, status: number) {
   return NextResponse.json({ error: { message } }, { status });
 }
@@ -20,13 +21,21 @@ export async function POST(
   { params }: { params: Promise<{ authUserId: string }> },
 ) {
   const { authUserId } = await params;
-  const body = (await req.json().catch(() => null)) as Record<string, unknown> | null;
+  const body = (await req.json().catch(() => null)) as Record<
+    string,
+    unknown
+  > | null;
   const schoolId = typeof body?.school_id === "string" ? body.school_id : null;
-  const context = await resolveManagedUsersActorContext(schoolId, req.headers.get("authorization"));
+  const context = await resolveManagedUsersActorContext(
+    schoolId,
+    req.headers.get("authorization"),
+  );
 
   if (!context.ok) {
     return jsonError(
-      "message" in context ? context.message : "تعذر التحقق من صلاحيات المستخدم.",
+      "message" in context
+        ? context.message
+        : "تعذر التحقق من صلاحيات المستخدم.",
       "status" in context ? context.status : 500,
     );
   }
@@ -49,7 +58,7 @@ export async function POST(
       schoolId: targetSchoolId,
     });
   } catch (error) {
-    return jsonError(error instanceof Error ? error.message : "تعذر تحميل الحساب المطلوب.", 500);
+    return jsonServerError("dashboard-users-authUserId-reset-password", error, "تعذر تحميل الحساب المطلوب.", 500);
   }
 
   if (!user) {
@@ -58,12 +67,15 @@ export async function POST(
 
   const temporaryPassword = generateTemporaryPassword();
   const serviceSupabase = createServiceSupabaseClient();
-  const { error: authError } = await serviceSupabase.auth.admin.updateUserById(authUserId, {
-    password: temporaryPassword,
-  });
+  const { error: authError } = await serviceSupabase.auth.admin.updateUserById(
+    authUserId,
+    {
+      password: temporaryPassword,
+    },
+  );
 
   if (authError) {
-    return jsonError(authError.message || "تعذر إعادة تعيين كلمة المرور المؤقتة.", 500);
+    return jsonServerError("dashboard-users-authUserId-reset-password", authError, "تعذر إعادة تعيين كلمة المرور المؤقتة.", 500);
   }
 
   await upsertManagedUserCredential(actorSupabase, {
@@ -78,7 +90,7 @@ export async function POST(
     temporaryPassword,
   });
 
-  writeAuditLog({
+  await writeAuditLog({
     actor_user_id: actorUserId,
     action_type: "RESET_PASSWORD",
     entity_type: "user",

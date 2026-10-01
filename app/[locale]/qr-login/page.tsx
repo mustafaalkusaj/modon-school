@@ -4,13 +4,14 @@ import { useEffect, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useLocale } from "next-intl";
 import { SchoolLogo } from "@/components/brand";
+import { DEFAULT_PATH_BY_ROLE, type UserRole } from "@/types/roles";
 
 export default function QrLoginPage() {
   const router = useRouter();
   const locale = useLocale();
   const searchParams = useSearchParams();
   const [error, setError] = useState<string | null>(null);
-  const [status, setStatus] = useState<"processing" | "error">("processing");
+  const [status, setStatus] = useState<"processing" | "error" | "no-token">("processing");
   const attempted = useRef(false);
   const isAr = locale === "ar";
 
@@ -18,17 +19,15 @@ export default function QrLoginPage() {
     if (attempted.current) return;
     attempted.current = true;
 
+    // Only the opaque token is accepted. Username/password pairs in the URL
+    // are never read, so they cannot leak through history or referrers.
     const token = searchParams.get("t");
-    const username = searchParams.get("u");
-    const password = searchParams.get("p");
 
     if (token) {
       loginWithToken(token);
-    } else if (username && password) {
-      loginWithCredentials(username, password);
     } else {
       setError(isAr ? "رابط QR غير صالح" : "Invalid QR link");
-      setStatus("error");
+      setStatus("no-token");
     }
   }, []);
 
@@ -44,7 +43,9 @@ export default function QrLoginPage() {
       const data = await res.json().catch(() => null);
 
       if (res.ok && data?.ok) {
-        router.replace(`/${locale}/student`);
+        const role = data.profile?.role as UserRole | undefined;
+        const dest = (role && DEFAULT_PATH_BY_ROLE[role]) || "/student";
+        router.replace(`/${locale}${dest}`);
         return;
       }
 
@@ -53,37 +54,6 @@ export default function QrLoginPage() {
         setError(isAr ? "رمز QR غير صالح أو منتهي الصلاحية" : "Invalid or expired QR code");
       } else if (code === "QR_LOGIN_PROFILE_INACTIVE") {
         setError(isAr ? "الحساب معطل، راجع إدارة المدرسة" : "Account is disabled");
-      } else {
-        setError(isAr ? "فشل تسجيل الدخول" : "Login failed");
-      }
-      setStatus("error");
-    } catch {
-      setError(isAr ? "خطأ في الاتصال" : "Connection error");
-      setStatus("error");
-    }
-  }
-
-  async function loginWithCredentials(username: string, password: string) {
-    try {
-      const res = await fetch("/api/auth/student-login", {
-        method: "POST",
-        credentials: "include",
-        cache: "no-store",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email: username, password }),
-      });
-      const data = await res.json().catch(() => null);
-
-      if (res.ok && data?.ok) {
-        router.replace(`/${locale}/student`);
-        return;
-      }
-
-      const reason = data?.reason;
-      if (reason === "inactive_account") {
-        setError(isAr ? "الحساب معطل، راجع إدارة المدرسة" : "Account is disabled");
-      } else if (reason === "invalid_credentials") {
-        setError(isAr ? "بيانات الدخول غير صحيحة" : "Invalid credentials");
       } else {
         setError(isAr ? "فشل تسجيل الدخول" : "Login failed");
       }
@@ -156,7 +126,7 @@ export default function QrLoginPage() {
           </>
         )}
 
-        {status === "error" && (
+        {(status === "error" || status === "no-token") && (
           <>
             <div
               style={{

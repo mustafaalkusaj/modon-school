@@ -20,6 +20,7 @@ interface StudentDetailPanelProps {
   onAddPayment: (student: Student) => void;
   onDeletePayment: (paymentId: string) => void;
   onPrintReceipt: (payment: Payment, student: Student) => void;
+  onAuditPayment: (paymentId: string) => void;
   onPrintStatement: (student: Student, payments: Payment[]) => void;
   canAddPayments: boolean;
   canDeletePayments: boolean;
@@ -42,6 +43,7 @@ export function StudentDetailPanel({
   onAddPayment,
   onDeletePayment,
   onPrintReceipt,
+  onAuditPayment,
   onPrintStatement,
   canAddPayments,
   canDeletePayments,
@@ -77,9 +79,11 @@ export function StudentDetailPanel({
             animate={{ opacity: 1, scale: 1, y: 0 }}
             exit={{ opacity: 0, scale: 0.95, y: 20 }}
             transition={{ type: "spring", stiffness: 320, damping: 30 }}
-            className="fixed inset-0 z-50 flex items-center justify-center p-4 pointer-events-none"
+            className="fixed inset-0 z-50 flex items-center justify-center p-4"
+            onClick={onClose}
           >
-          <div className="pointer-events-auto flex flex-col w-full max-w-2xl max-h-[90vh] rounded-lg bg-[var(--surface-soft)] shadow-2xl overflow-hidden"
+          <div className="flex flex-col w-full max-w-2xl max-h-[90vh] rounded-lg bg-[var(--surface-soft)] shadow-2xl overflow-hidden"
+            onClick={(e) => e.stopPropagation()}
           >
             {/* Header */}
             <div
@@ -106,6 +110,7 @@ export function StudentDetailPanel({
                   </div>
                 </div>
                 <button
+                  type="button"
                   onClick={onClose}
                   className="flex-shrink-0 h-8 w-8 rounded-xl flex items-center justify-center text-white/70 hover:text-white hover:bg-white/15 transition-colors mt-0.5"
                 >
@@ -261,15 +266,14 @@ export function StudentDetailPanel({
                       </span>
                     </div>
                     {canAddPayments && (
-                      <motion.button
-                        whileHover={{ scale: 1.04 }}
-                        whileTap={{ scale: 0.96 }}
-                        onClick={() => onAddPayment(student)}
-                        className="inline-flex items-center gap-1.5 h-8 px-3 rounded-xl text-xs font-black text-white bg-[var(--primary)] shadow-md shadow-[var(--primary)]/25"
+                      <button
+                        type="button"
+                        onClick={(e) => { e.stopPropagation(); onAddPayment(student); }}
+                        className="inline-flex items-center gap-1.5 h-8 px-3 rounded-xl text-xs font-black text-white bg-[var(--primary)] shadow-md shadow-[var(--primary)]/25 hover:scale-[1.04] active:scale-[0.96] transition-transform"
                       >
                         <Plus size={13} />
                         {t("payments.detailPanel.addPayment")}
-                      </motion.button>
+                      </button>
                     )}
                   </div>
 
@@ -299,6 +303,7 @@ export function StudentDetailPanel({
                             index={i}
                             currency={currency}
                             onPrint={() => onPrintReceipt(p, student)}
+                            onAudit={() => onAuditPayment(p.id)}
                             onDelete={() => onDeletePayment(p.id)}
                             canDelete={canDeletePayments}
                             t={t}
@@ -315,12 +320,14 @@ export function StudentDetailPanel({
             {/* Footer */}
             <div className="flex-shrink-0 border-t border-[var(--border)] bg-[var(--card-bg)] px-5 py-4 flex items-center justify-between gap-3">
               <button
+                type="button"
                 onClick={onClose}
                 className="h-10 px-5 rounded-xl text-sm font-bold text-[var(--text-secondary)] bg-[var(--surface-soft)] border border-[var(--border)] hover:bg-[var(--surface-muted)] transition-colors"
               >
                 {t("payments.detailPanel.close")}
               </button>
               <button
+                type="button"
                 onClick={() => onPrintStatement(student, payments)}
                 className="inline-flex items-center gap-2 h-10 px-5 rounded-xl text-sm font-bold text-[var(--primary)] bg-[var(--primary)]/10 border border-[var(--primary)]/20 hover:bg-[var(--primary)]/15 transition-colors"
               >
@@ -341,12 +348,13 @@ interface PaymentRowProps {
   index: number;
   currency: string;
   onPrint: () => void;
+  onAudit: () => void;
   onDelete: () => void;
   canDelete: boolean;
   t: ReturnType<typeof useTranslations>;
 }
 
-function PaymentRow({ payment, index, currency, onPrint, onDelete, canDelete, t }: PaymentRowProps) {
+function PaymentRow({ payment, index, currency, onPrint, onAudit, onDelete, canDelete, t }: PaymentRowProps) {
   const method = METHOD_INFO[payment.payment_method] ?? { emoji: "💰", color: "var(--primary)", bg: "color-mix(in srgb, var(--primary) 12%, transparent)" };
   const methodLabels: Record<string, string> = {
     cash: t("common.paymentMethods.cash"),
@@ -383,9 +391,27 @@ function PaymentRow({ payment, index, currency, onPrint, onDelete, canDelete, t 
             </span>
           </div>
         </div>
-        <div className="flex items-center gap-1">
+        <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
           <button
-            onClick={onPrint}
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              e.preventDefault();
+              e.nativeEvent.stopImmediatePropagation();
+              onAudit();
+            }}
+            title={t("payments.detailPanel.auditPayment")}
+            className={`px-3 h-8 rounded-lg text-xs font-medium flex items-center gap-1.5 transition-colors hover:scale-105 active:scale-95 ${
+              payment.audited_at
+                ? "text-emerald-700 bg-emerald-500/20 border border-emerald-500/30"
+                : "text-[var(--text-muted)] bg-[var(--surface-secondary)] hover:text-emerald-600 hover:bg-emerald-500/12 border border-transparent"
+            }`}
+          >
+            {payment.audited_at ? "✓" : t("payments.detailPanel.audit")}
+          </button>
+          <button
+            type="button"
+            onClick={(e) => { e.stopPropagation(); onPrint(); }}
             title={t("payments.detailPanel.printReceipt")}
             className="h-8 w-8 rounded-xl flex items-center justify-center text-[var(--text-muted)] hover:text-[var(--primary)] hover:bg-[var(--primary)]/10 transition-colors"
           >
@@ -393,7 +419,8 @@ function PaymentRow({ payment, index, currency, onPrint, onDelete, canDelete, t 
           </button>
           {canDelete && (
             <button
-              onClick={onDelete}
+              type="button"
+              onClick={(e) => { e.stopPropagation(); onDelete(); }}
               title={t("payments.detailPanel.deletePayment")}
               className="h-8 w-8 rounded-xl flex items-center justify-center text-[var(--text-muted)] hover:text-[var(--danger)] hover:bg-[var(--danger)]/10 transition-colors"
             >

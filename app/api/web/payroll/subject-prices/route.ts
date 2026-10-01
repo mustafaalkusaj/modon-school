@@ -3,7 +3,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { applyBranchScopeToQuery, resolveBranchIdForWrite, resolveBranchScope } from "@/lib/branch-scope";
 import { resolveSchoolScopedActorContext } from "@/lib/managed-users-server";
 import { enforceRateLimit } from "@/lib/rate-limit";
-import { jsonError, logRouteError } from "@/lib/route-utils";
+import { jsonError, logRouteError, jsonServerError } from "@/lib/route-utils";
 import { routeUserHasPermission } from "@/lib/route-permissions";
 
 export async function GET(req: NextRequest) {
@@ -56,7 +56,7 @@ export async function GET(req: NextRequest) {
   );
 
   if (error) {
-    return jsonError(error.message || "تعذر تحميل أسعار المواد.", 500);
+    return jsonServerError("web/payroll/subject-prices", error, "تعذر تحميل أسعار المواد.");
   }
 
   return NextResponse.json({ ok: true, subjectPrices: data ?? [] });
@@ -137,7 +137,7 @@ export async function PUT(req: NextRequest) {
 
   if (error) {
     logRouteError("payroll-subject-prices-put", error, { actorUserId, schoolId: targetSchoolId });
-    return jsonError(error.message || "تعذر حفظ أسعار المواد.", 500);
+    return jsonServerError("web/payroll/subject-prices", error, "تعذر حفظ أسعار المواد.");
   }
 
   return NextResponse.json({ ok: true, subjectPrices: data ?? [] });

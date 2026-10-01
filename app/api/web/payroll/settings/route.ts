@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { resolveSchoolScopedActorContext } from "@/lib/managed-users-server";
 import { createServiceSupabaseClient } from "@/lib/supabase-server";
+import { jsonServerError } from "@/lib/route-utils";
 
 function jsonError(message: string, status: number) {
   return NextResponse.json({ error: { message } }, { status });
@@ -44,7 +45,7 @@ export async function GET(request: NextRequest) {
   // not be applied yet; fall back to defaults so the settings form still
   // renders instead of failing the whole page.
   if (error && error.code !== "42P01") {
-    return jsonError(error.message, 500);
+    return jsonServerError("web/payroll/settings", error, "تعذر إتمام العملية. حاول مرة أخرى.");
   }
 
   return NextResponse.json({
@@ -110,7 +111,7 @@ export async function PUT(request: NextRequest) {
     .select("school_id, working_days_per_month, default_lecture_price, updated_at")
     .single();
 
-  if (error) return jsonError(error.message, 500);
+  if (error) return jsonServerError("web/payroll/settings", error, "تعذر إتمام العملية. حاول مرة أخرى.");
 
   return NextResponse.json({
     ok: true,

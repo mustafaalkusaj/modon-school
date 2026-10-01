@@ -1,7 +1,7 @@
 "use client";
 
 import { useTranslations } from "next-intl";
-import { Bell, RefreshCw, Info, AlertTriangle } from "@/lib/icons";
+import { Bell, RefreshCw, Info, AlertTriangle, CheckCheck } from "@/lib/icons";
 import { formatDate } from "@/lib/formatting";
 import { DashboardNotification } from "./types";
 import { cn } from "@/lib/brand/brand-utils";
@@ -16,6 +16,7 @@ interface NotificationsPanelProps {
   unreadNotifications: number;
   onRefresh: () => Promise<void>;
   onMarkAsRead: (id: string) => Promise<void>;
+  onMarkAllAsRead?: () => Promise<void>;
 }
 
 export function NotificationsPanel({
@@ -26,6 +27,7 @@ export function NotificationsPanel({
   unreadNotifications,
   onRefresh,
   onMarkAsRead,
+  onMarkAllAsRead,
 }: NotificationsPanelProps) {
   const t = useTranslations("dashboard.notifications");
   const dashboardT = useTranslations("dashboard");
@@ -57,14 +59,27 @@ export function NotificationsPanel({
         </div>
 
         {notificationsEnabled && (
-          <button
-            onClick={() => void onRefresh()}
-            disabled={notificationsLoading}
-            className="inline-flex items-center gap-1.5 h-8 px-3 rounded-xl border border-[var(--border)] text-xs font-bold text-[var(--text-secondary)] hover:bg-[var(--surface-soft)] transition-colors disabled:opacity-50"
-          >
-            <RefreshCw size={12} className={cn(notificationsLoading && "animate-spin")} />
-            {t("refresh")}
-          </button>
+          <div className="flex items-center gap-1.5">
+            {unreadNotifications > 0 && onMarkAllAsRead && (
+              <button
+                type="button"
+                onClick={() => void onMarkAllAsRead()}
+                className="inline-flex items-center gap-1.5 h-8 px-3 rounded-xl border border-[var(--border)] text-xs font-bold text-[var(--primary)] hover:bg-[color-mix(in_srgb,var(--primary)_6%,transparent)] transition-colors"
+              >
+                <CheckCheck size={12} />
+                {t("markAllRead")}
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={() => void onRefresh()}
+              disabled={notificationsLoading}
+              className="inline-flex items-center gap-1.5 h-8 px-3 rounded-xl border border-[var(--border)] text-xs font-bold text-[var(--text-secondary)] hover:bg-[var(--surface-soft)] transition-colors disabled:opacity-50"
+            >
+              <RefreshCw size={12} className={cn(notificationsLoading && "animate-spin")} />
+              {t("refresh")}
+            </button>
+          </div>
         )}
       </div>
 

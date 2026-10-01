@@ -1,4 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
+import { enforceRateLimit } from "@/lib/rate-limit";
 import { resolveStudentContext, unauthorized } from "@/lib/student-api";
 
 /**
@@ -16,9 +18,26 @@ const VALID_EVENT_TYPES = [
   "focus_lost",
 ];
 
+const metadataSchema = z
+  .record(z.string(), z.unknown())
+  .refine((obj) => Object.keys(obj).length <= 20, {
+    message: "metadata must have at most 20 keys",
+  })
+  .refine((obj) => JSON.stringify(obj).length <= 10000, {
+    message: "metadata JSON must be under 10000 characters",
+  });
+
 export async function POST(req: NextRequest) {
   const ctx = await resolveStudentContext(req);
   if (!ctx) return unauthorized();
+
+  const rlResponse = await enforceRateLimit(req, {
+    namespace: "student-exam-integrity",
+    windowMs: 60_000,
+    maxHits: 20,
+    identifier: ctx.studentId,
+  });
+  if (rlResponse) return rlResponse;
 
   const { supabase, schoolId, studentId } = ctx;
 
@@ -58,16 +77,20 @@ export async function POST(req: NextRequest) {
 
   const attemptRow = attempt as { id: string; exam_id: string };
 
-  const metadata = body.metadata ?? null;
-  if (metadata !== null) {
-    const isPlainObject =
-      typeof metadata === "object" && !Array.isArray(metadata);
-    if (!isPlainObject || JSON.stringify(metadata).length > 5000) {
+  let validatedMetadata: Record<string, unknown> | null = null;
+  if (body?.metadata != null) {
+    const metaParsed = metadataSchema.safeParse(body.metadata);
+    if (!metaParsed.success) {
       return NextResponse.json(
-        { ok: false, error: "invalid_metadata" },
+        {
+          ok: false,
+          error: "invalid_metadata",
+          details: metaParsed.error.issues.map((i) => i.message),
+        },
         { status: 400 },
       );
     }
+    validatedMetadata = metaParsed.data;
   }
 
   const { data, error } = await supabase
@@ -78,7 +101,8 @@ export async function POST(req: NextRequest) {
       student_id: studentId,
       school_id: schoolId,
       event_type: eventType,
-      metadata,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      metadata: validatedMetadata as any,
     })
     .select("id, event_type, created_at")
     .single();

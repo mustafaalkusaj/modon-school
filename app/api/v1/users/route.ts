@@ -2,7 +2,9 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { resolveSchoolScopedActorContext } from "@/lib/managed-users-server";
 import { createServiceSupabaseClient } from "@/lib/supabase-server";
-import { jsonError } from "@/lib/route-utils";
+import { jsonError, jsonServerError } from "@/lib/route-utils";
+import { loadDeepPermissionsForUser } from "@/lib/authorization/deep-permissions";
+import { effectivePermissionKeys } from "@/lib/authorization/permission-ceiling";
 import { filterAllowedPageCodes } from "@/lib/authorization/page-access";
 
 const createEmployeeSchema = z.object({
@@ -23,13 +25,18 @@ export async function GET(req: NextRequest) {
     req.headers.get("authorization"),
   );
   if (!context.ok) {
-    return jsonError("message" in context ? context.message : "غير مصرح", "status" in context ? context.status : 403);
+    return jsonError(
+      "message" in context ? context.message : "غير مصرح",
+      "status" in context ? context.status : 403,
+    );
   }
   const { targetSchoolId, actorBranchId } = context.value;
   const service = createServiceSupabaseClient();
   let query = service
     .from("user_profiles")
-    .select("id, full_name, email, avatar_url, is_active, job_title, school_role_id")
+    .select(
+      "id, full_name, email, avatar_url, is_active, job_title, school_role_id",
+    )
     .eq("school_id", targetSchoolId);
   if (actorBranchId) {
     query = query.eq("branch_id", actorBranchId);
@@ -46,7 +53,10 @@ export async function POST(req: NextRequest) {
     req.headers.get("authorization"),
   );
   if (!context.ok) {
-    return jsonError("message" in context ? context.message : "غير مصرح", "status" in context ? context.status : 403);
+    return jsonError(
+      "message" in context ? context.message : "غير مصرح",
+      "status" in context ? context.status : 403,
+    );
   }
 
   const body = await req.json().catch(() => null);
@@ -73,16 +83,51 @@ export async function POST(req: NextRequest) {
 
   if (!role) return jsonError("الدور المحدد غير موجود", 404);
 
+  // Ceiling guard: an admin must not create an employee bound to a role more
+  // privileged than themselves. The target role's permission key set must be a
+  // SUBSET of the actor's effective keys. super_admin is exempt (holds every key).
+  if (context.value.actorRole !== "super_admin") {
+    const { data: roleAssignments, error: roleAssignError } = await service
+      .from("role_perm_assignments")
+      .select("perm_definitions(key)")
+      .eq("role_id", parsed.data.school_role_id);
+
+    if (roleAssignError) return jsonError("تعذر التحقق من صلاحيات الدور", 500);
+
+    const targetRoleKeys = (roleAssignments ?? [])
+      .map(
+        (r) => (r.perm_definitions as unknown as { key: string } | null)?.key,
+      )
+      .filter((k): k is string => Boolean(k));
+
+    const { permMap } = await loadDeepPermissionsForUser(
+      service,
+      context.value.actorUserId,
+      targetSchoolId,
+    );
+    const actorKeys = effectivePermissionKeys(permMap);
+
+    const hasUnheldKey = targetRoleKeys.some((key) => !actorKeys.has(key));
+    if (hasUnheldKey) {
+      return jsonError("لا يمكنك إسناد دور يفوق صلاحياتك", 403);
+    }
+  }
+
   // Create Supabase auth user
-  const { data: authData, error: authError } = await service.auth.admin.createUser({
-    email: parsed.data.email.trim().toLowerCase(),
-    password: parsed.data.password,
-    email_confirm: true,
-  });
+  const { data: authData, error: authError } =
+    await service.auth.admin.createUser({
+      email: parsed.data.email.trim().toLowerCase(),
+      password: parsed.data.password,
+      email_confirm: true,
+    });
 
   if (authError || !authData?.user) {
-    const status = authError?.message?.toLowerCase().includes("already") ? 409 : 400;
-    return jsonError(authError?.message ?? "تعذر إنشاء الحساب", status);
+    const status = authError?.message?.toLowerCase().includes("already")
+      ? 409
+      : 400;
+    return status === 409
+      ? jsonError("يوجد حساب بهذا البريد الإلكتروني مسبقاً", 409)
+      : jsonServerError("v1-users", authError, "تعذر إنشاء الحساب", status);
   }
 
   const authUserId = authData.user.id;
@@ -102,7 +147,9 @@ export async function POST(req: NextRequest) {
       is_single_page_user: allowedPages.length === 1,
       is_active: true,
     })
-    .select("id, full_name, email, avatar_url, is_active, job_title, school_id, is_single_page_user")
+    .select(
+      "id, full_name, email, avatar_url, is_active, job_title, school_id, is_single_page_user",
+    )
     .single();
 
   if (profileError) {
@@ -114,15 +161,17 @@ export async function POST(req: NextRequest) {
   // matters: a user created with no page access lands on an empty shell and
   // looks "broken" rather than "half-saved".
   if (allowedPages.length > 0) {
-    const { error: pageAccessError } = await service.from("user_page_access").insert(
-      allowedPages.map((pageCode) => ({
-        user_id: authUserId,
-        school_id: targetSchoolId,
-        branch_id: actorBranchId ?? null,
-        page_code: pageCode,
-        can_view: true,
-      })),
-    );
+    const { error: pageAccessError } = await service
+      .from("user_page_access")
+      .insert(
+        allowedPages.map((pageCode) => ({
+          user_id: authUserId,
+          school_id: targetSchoolId,
+          branch_id: actorBranchId ?? null,
+          page_code: pageCode,
+          can_view: true,
+        })),
+      );
 
     if (pageAccessError) {
       await service.from("user_page_access").delete().eq("user_id", authUserId);
@@ -133,7 +182,10 @@ export async function POST(req: NextRequest) {
   }
 
   return NextResponse.json(
-    { ok: true, user: { ...profile, auth_user_id: authUserId, school_id: targetSchoolId } },
+    {
+      ok: true,
+      user: { ...profile, auth_user_id: authUserId, school_id: targetSchoolId },
+    },
     { status: 201 },
   );
 }

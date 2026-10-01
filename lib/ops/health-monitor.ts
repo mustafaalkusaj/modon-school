@@ -54,7 +54,11 @@ type ServiceSupabase = ReturnType<typeof createServiceSupabaseClient>;
 
 const OFFICIAL_DOMAIN_URL = "https://modon-school.com";
 const OFFICIAL_LOGIN_URL = "https://modon-school.com/ar/login";
-const VERCEL_FALLBACK_URL = "https://appschoolmustafa2002.vercel.app";
+// Secondary probe target. It used to point at another project's Vercel
+// deployment, so its health was reported as this school's. Set
+// HEALTH_FALLBACK_URL to a real secondary host if there is one.
+const VERCEL_FALLBACK_URL =
+  process.env.HEALTH_FALLBACK_URL?.trim() || OFFICIAL_LOGIN_URL;
 
 function safeErrorMessage(error: unknown) {
   if (error instanceof Error && error.message) {

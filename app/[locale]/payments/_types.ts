@@ -54,6 +54,7 @@ export type Payment = {
   manual_receipt_number?: string;
   created_at: string;
   verification_token?: string | null;
+  audited_at?: string | null;
 };
 
 export type PaymentArchive = {

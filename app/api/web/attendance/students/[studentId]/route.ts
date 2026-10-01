@@ -1,10 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
 
-import { applyBranchScopeToQuery, resolveBranchScope } from "@/lib/branch-scope";
+import {
+  applyBranchScopeToQuery,
+  resolveBranchScope,
+} from "@/lib/branch-scope";
 import { resolveSchoolScopedActorContext } from "@/lib/managed-users-server";
 import { enforceRateLimit } from "@/lib/rate-limit";
 import { routeUserHasPermission } from "@/lib/route-permissions";
+import { jsonServerError } from "@/lib/route-utils";
 import { addDaysBaghdadIso, todayBaghdadIso } from "@/lib/tz";
+import { excludeDeletedStudents } from "@/lib/students/soft-delete";
 
 type AttendanceStatus = "present" | "absent" | "late" | "excused";
 type AttendanceStatusFilter = AttendanceStatus | "all";
@@ -26,7 +31,8 @@ function jsonError(message: string, status: number) {
   return NextResponse.json({ error: { message } }, { status });
 }
 
-const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const UUID_REGEX =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 function normalizeDate(value: string | null) {
   const v = (value ?? "").trim();
@@ -46,7 +52,12 @@ function normalizeStatus(value: string | null): AttendanceStatusFilter {
   }
 }
 
-function clampNumber(value: string | null, fallback: number, min: number, max: number) {
+function clampNumber(
+  value: string | null,
+  fallback: number,
+  min: number,
+  max: number,
+) {
   const parsed = Number.parseInt(value ?? "", 10);
   if (!Number.isFinite(parsed)) return fallback;
   return Math.min(max, Math.max(min, parsed));
@@ -59,7 +70,13 @@ function daysBetween(from: string, to: string) {
 }
 
 function buildCounts(records: AttendanceRecordRow[]) {
-  const counts = { present: 0, absent: 0, late: 0, excused: 0, total: 0 } as const;
+  const counts = {
+    present: 0,
+    absent: 0,
+    late: 0,
+    excused: 0,
+    total: 0,
+  } as const;
   const next = { ...counts };
   for (const row of records) {
     next.total += 1;
@@ -71,7 +88,10 @@ function buildCounts(records: AttendanceRecordRow[]) {
   return next;
 }
 
-export async function GET(req: NextRequest, { params }: { params: Promise<{ studentId: string }> }) {
+export async function GET(
+  req: NextRequest,
+  { params }: { params: Promise<{ studentId: string }> },
+) {
   const { studentId } = await params;
   if (!studentId || !UUID_REGEX.test(studentId)) {
     return jsonError("معرف الطالب غير صالح.", 400);
@@ -89,7 +109,9 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ stud
 
   if (!context.ok) {
     return jsonError(
-      "message" in context ? context.message : "تعذر التحقق من صلاحيات المستخدم.",
+      "message" in context
+        ? context.message
+        : "تعذر التحقق من صلاحيات المستخدم.",
       "status" in context ? context.status : 500,
     );
   }
@@ -115,10 +137,16 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ stud
 
   const status = normalizeStatus(req.nextUrl.searchParams.get("status"));
   const page = clampNumber(req.nextUrl.searchParams.get("page"), 1, 1, 1000);
-  const pageSize = clampNumber(req.nextUrl.searchParams.get("pageSize"), 100, 10, 200);
+  const pageSize = clampNumber(
+    req.nextUrl.searchParams.get("pageSize"),
+    100,
+    10,
+    200,
+  );
   const defaultTo = todayBaghdadIso();
   const defaultFrom = addDaysBaghdadIso(-90);
-  const fromDate = normalizeDate(req.nextUrl.searchParams.get("from")) ?? defaultFrom;
+  const fromDate =
+    normalizeDate(req.nextUrl.searchParams.get("from")) ?? defaultFrom;
   const toDate = normalizeDate(req.nextUrl.searchParams.get("to")) ?? defaultTo;
 
   if (fromDate > toDate) {
@@ -126,7 +154,10 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ stud
   }
 
   if (daysBetween(fromDate, toDate) > 366) {
-    return jsonError("نطاق التاريخ كبير جدًا. يرجى تقليص الفترة إلى سنة واحدة كحد أقصى.", 400);
+    return jsonError(
+      "نطاق التاريخ كبير جدًا. يرجى تقليص الفترة إلى سنة واحدة كحد أقصى.",
+      400,
+    );
   }
 
   const branchScope = resolveBranchScope(context.value);
@@ -135,16 +166,23 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ stud
   }
 
   const { data: student, error: studentError } = await applyBranchScopeToQuery(
-    context.value.actorSupabase
-      .from("students")
-      .select("id, full_name, class_name, section, branch_id")
+    excludeDeletedStudents(
+      context.value.actorSupabase
+        .from("students")
+        .select("id, full_name, class_name, section, branch_id"),
+    )
       .eq("school_id", context.value.targetSchoolId)
       .eq("id", studentId),
     branchScope.value,
   ).maybeSingle<StudentPreview>();
 
   if (studentError) {
-    return jsonError(studentError.message || "تعذر تحميل بيانات الطالب.", 500);
+    return jsonServerError(
+      "web-attendance-students-studentId",
+      studentError,
+      "تعذر تحميل بيانات الطالب.",
+      500,
+    );
   }
 
   if (!student?.id) {
@@ -170,16 +208,29 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ stud
 
   const { data: summaryRows, error: summaryError } = await summaryQuery;
   if (summaryError) {
-    return jsonError(summaryError.message || "تعذر تحميل ملخص الحضور.", 500);
+    return jsonServerError(
+      "web-attendance-students-studentId",
+      summaryError,
+      "تعذر تحميل ملخص الحضور.",
+      500,
+    );
   }
 
   const normalizedSummary = (Array.isArray(summaryRows) ? summaryRows : [])
     .map((row) => ({
-      attendance_date: String((row as Record<string, unknown>).attendance_date ?? ""),
-      status: (String((row as Record<string, unknown>).status ?? "") as AttendanceStatus),
+      attendance_date: String(
+        (row as Record<string, unknown>).attendance_date ?? "",
+      ),
+      status: String(
+        (row as Record<string, unknown>).status ?? "",
+      ) as AttendanceStatus,
       note: null,
     }))
-    .filter((row) => row.attendance_date && ["present", "absent", "late", "excused"].includes(row.status));
+    .filter(
+      (row) =>
+        row.attendance_date &&
+        ["present", "absent", "late", "excused"].includes(row.status),
+    );
 
   const counts = buildCounts(normalizedSummary);
 
@@ -203,18 +254,38 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ stud
     detailsQuery = detailsQuery.eq("status", status);
   }
 
-  const { data: rows, error: rowsError, count } = await detailsQuery.range(from, to);
+  const {
+    data: rows,
+    error: rowsError,
+    count,
+  } = await detailsQuery.range(from, to);
   if (rowsError) {
-    return jsonError(rowsError.message || "تعذر تحميل تفاصيل الحضور.", 500);
+    return jsonServerError(
+      "web-attendance-students-studentId",
+      rowsError,
+      "تعذر تحميل تفاصيل الحضور.",
+      500,
+    );
   }
 
   const items = (Array.isArray(rows) ? rows : [])
     .map((row) => ({
-      attendance_date: String((row as Record<string, unknown>).attendance_date ?? ""),
-      status: (String((row as Record<string, unknown>).status ?? "") as AttendanceStatus),
-      note: typeof (row as Record<string, unknown>).note === "string" ? ((row as Record<string, unknown>).note as string) : null,
+      attendance_date: String(
+        (row as Record<string, unknown>).attendance_date ?? "",
+      ),
+      status: String(
+        (row as Record<string, unknown>).status ?? "",
+      ) as AttendanceStatus,
+      note:
+        typeof (row as Record<string, unknown>).note === "string"
+          ? ((row as Record<string, unknown>).note as string)
+          : null,
     }))
-    .filter((row) => row.attendance_date && ["present", "absent", "late", "excused"].includes(row.status));
+    .filter(
+      (row) =>
+        row.attendance_date &&
+        ["present", "absent", "late", "excused"].includes(row.status),
+    );
 
   return NextResponse.json({
     ok: true,
@@ -229,4 +300,3 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ stud
     },
   });
 }
-

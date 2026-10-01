@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { resolveAdminMobileRouteContext } from "@/lib/mobile-admin-server";
 import { buildSchoolCacheTag, rememberWithTtl } from "@/lib/server-cache";
 import { createServiceSupabaseClient } from "@/lib/supabase-server";
+import { excludeDeletedStudents } from "@/lib/students/soft-delete";
 
 type ActivityItem = {
   id: string;
@@ -22,9 +23,9 @@ async function buildAdminDashboard(schoolId: string) {
     notificationsResult,
     assignmentsResult,
   ] = await Promise.all([
-    serviceSupabase
+    excludeDeletedStudents(serviceSupabase
       .from("students")
-      .select("id, status", { count: "exact" })
+      .select("id, status", { count: "exact" }))
       .eq("school_id", schoolId),
     serviceSupabase
       .from("teachers")

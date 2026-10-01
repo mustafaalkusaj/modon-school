@@ -1,9 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
-import { applyBranchScopeToQuery, resolveBranchScope } from "@/lib/branch-scope";
+import {
+  applyBranchScopeToQuery,
+  resolveBranchScope,
+} from "@/lib/branch-scope";
 import { resolveSchoolScopedActorContext } from "@/lib/managed-users-server";
 import { enforceRateLimit } from "@/lib/rate-limit";
 import { routeUserHasPermission } from "@/lib/route-permissions";
-import { jsonError, logRouteError } from "@/lib/route-utils";
+import { jsonError, jsonServerError, logRouteError } from "@/lib/route-utils";
 
 export async function GET(
   req: NextRequest,
@@ -23,7 +26,9 @@ export async function GET(
 
   if (!context.ok) {
     return jsonError(
-      "message" in context ? context.message : "تعذر التحقق من صلاحيات المستخدم.",
+      "message" in context
+        ? context.message
+        : "تعذر التحقق من صلاحيات المستخدم.",
       "status" in context ? context.status : 500,
     );
   }
@@ -52,8 +57,11 @@ export async function GET(
 
   // Branch isolation: verify teacher belongs to this school and branch
   const { data: teacherCheck } = await applyBranchScopeToQuery(
-    actorSupabase.from("teachers").select("id")
-      .eq("id", teacherId).eq("school_id", targetSchoolId),
+    actorSupabase
+      .from("teachers")
+      .select("id")
+      .eq("id", teacherId)
+      .eq("school_id", targetSchoolId),
     branchScope.value,
   ).maybeSingle();
   if (!teacherCheck) {
@@ -69,13 +77,19 @@ export async function GET(
       .order("created_at", { ascending: false });
 
     if (error) {
-      logRouteError("teachers-leaves-get", error, { teacherId, schoolId: targetSchoolId });
+      logRouteError("teachers-leaves-get", error, {
+        teacherId,
+        schoolId: targetSchoolId,
+      });
       return jsonError("تعذر تحميل سجل الإجازات.", 500);
     }
 
     return NextResponse.json({ ok: true, leaves: data ?? [] });
   } catch (error) {
-    logRouteError("teachers-leaves-get", error, { teacherId, schoolId: targetSchoolId });
+    logRouteError("teachers-leaves-get", error, {
+      teacherId,
+      schoolId: targetSchoolId,
+    });
     return jsonError("تعذر تحميل سجل الإجازات.", 500);
   }
 }
@@ -85,7 +99,10 @@ export async function POST(
   { params }: { params: Promise<{ teacherId: string }> },
 ) {
   const { teacherId } = await params;
-  const body = (await req.json().catch(() => null)) as Record<string, unknown> | null;
+  const body = (await req.json().catch(() => null)) as Record<
+    string,
+    unknown
+  > | null;
   const schoolId = typeof body?.school_id === "string" ? body.school_id : null;
 
   const context = await resolveSchoolScopedActorContext(
@@ -99,7 +116,9 @@ export async function POST(
 
   if (!context.ok) {
     return jsonError(
-      "message" in context ? context.message : "تعذر التحقق من صلاحيات المستخدم.",
+      "message" in context
+        ? context.message
+        : "تعذر التحقق من صلاحيات المستخدم.",
       "status" in context ? context.status : 500,
     );
   }
@@ -128,8 +147,11 @@ export async function POST(
 
   // Branch isolation: verify teacher belongs to this school and branch
   const { data: teacherCheckPost } = await applyBranchScopeToQuery(
-    actorSupabase.from("teachers").select("id")
-      .eq("id", teacherId).eq("school_id", targetSchoolId),
+    actorSupabase
+      .from("teachers")
+      .select("id")
+      .eq("id", teacherId)
+      .eq("school_id", targetSchoolId),
     branchScope.value,
   ).maybeSingle();
   if (!teacherCheckPost) {
@@ -137,11 +159,17 @@ export async function POST(
   }
 
   try {
-    const leaveType = typeof body?.leave_type === "string" ? body.leave_type : "annual";
-    const startDate = typeof body?.start_date === "string" ? body.start_date : null;
+    const leaveType =
+      typeof body?.leave_type === "string" ? body.leave_type : "annual";
+    const startDate =
+      typeof body?.start_date === "string" ? body.start_date : null;
     const endDate = typeof body?.end_date === "string" ? body.end_date : null;
-    const daysCount = typeof body?.days_count === "number" ? body.days_count : 1;
-    const reason = typeof body?.reason === "string" && body.reason.trim() ? body.reason.trim() : null;
+    const daysCount =
+      typeof body?.days_count === "number" ? body.days_count : 1;
+    const reason =
+      typeof body?.reason === "string" && body.reason.trim()
+        ? body.reason.trim()
+        : null;
 
     if (!startDate || !endDate) {
       return jsonError("تاريخ بداية ونهاية الإجازة مطلوبان.", 400);
@@ -158,19 +186,34 @@ export async function POST(
         days_count: daysCount,
         reason,
         status: "pending",
-        ...(branchScope.value.branchId ? { branch_id: branchScope.value.branchId } : {}),
+        ...(branchScope.value.branchId
+          ? { branch_id: branchScope.value.branchId }
+          : {}),
       })
       .select("*")
       .single();
 
     if (error || !data) {
-      logRouteError("teachers-leaves-create", error, { teacherId, actorUserId, schoolId: targetSchoolId });
-      return jsonError(error?.message || "تعذر إضافة الإجازة.", 500);
+      logRouteError("teachers-leaves-create", error, {
+        teacherId,
+        actorUserId,
+        schoolId: targetSchoolId,
+      });
+      return jsonServerError(
+        "web-teachers-teacherId-leaves",
+        error,
+        "تعذر إضافة الإجازة.",
+        500,
+      );
     }
 
     return NextResponse.json({ ok: true, leave: data }, { status: 201 });
   } catch (error) {
-    logRouteError("teachers-leaves-create", error, { teacherId, actorUserId, schoolId: targetSchoolId });
+    logRouteError("teachers-leaves-create", error, {
+      teacherId,
+      actorUserId,
+      schoolId: targetSchoolId,
+    });
     return jsonError("تعذر إضافة الإجازة.", 500);
   }
 }

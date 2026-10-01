@@ -11,6 +11,7 @@ import {
 } from "@/lib/grades/grade-entries-server";
 import type { GradeEntryInput } from "@/lib/grades/types";
 import { resolveBranchScope, applyBranchScopeToQuery } from "@/lib/branch-scope";
+import { excludeDeletedStudents } from "@/lib/students/soft-delete";
 
 function jsonError(message: string, status: number) {
   return NextResponse.json({ error: { message } }, { status });
@@ -153,11 +154,10 @@ export async function GET(req: NextRequest) {
   let branchStudentIds: string[] | null = null;
   if (branchScope.value.branchIds.length > 0) {
     const { data: branchStudents } = await applyBranchScopeToQuery(
-      actorSupabase
+      excludeDeletedStudents(actorSupabase
         .from("students")
-        .select("id")
-        .eq("school_id", targetSchoolId)
-        .neq("status", "deleted"),
+        .select("id"))
+        .eq("school_id", targetSchoolId),
       branchScope.value,
     );
     branchStudentIds = ((branchStudents ?? []) as Array<{ id: string }>).map((s) => s.id);

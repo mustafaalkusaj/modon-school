@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { resolveSchoolScopedActorContext } from "@/lib/managed-users-server";
+import { jsonServerError } from "@/lib/route-utils";
 
 export const dynamic = "force-dynamic";
 
@@ -99,7 +100,7 @@ export async function POST(request: NextRequest) {
       .insert(examQuestions);
 
     if (insertError) {
-      return NextResponse.json({ ok: false, error: insertError.message }, { status: 500 });
+      return jsonServerError("web/exams/exam-builder", insertError, "تعذر إتمام العملية. حاول مرة أخرى.");
     }
 
     // Create default exam settings
@@ -156,7 +157,7 @@ export async function POST(request: NextRequest) {
     .insert(examQuestions);
 
   if (insertError) {
-    return NextResponse.json({ ok: false, error: insertError.message }, { status: 500 });
+    return jsonServerError("web/exams/exam-builder", insertError, "تعذر إتمام العملية. حاول مرة أخرى.");
   }
 
   // Create default exam settings if not exists

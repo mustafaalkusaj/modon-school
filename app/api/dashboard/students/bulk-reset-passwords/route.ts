@@ -5,21 +5,34 @@ import {
   upsertManagedUserCredential,
   fetchManagedUserCredentials,
 } from "@/lib/managed-users-server";
-import { applyBranchScopeToQuery, resolveBranchScope } from "@/lib/branch-scope";
+import {
+  applyBranchScopeToQuery,
+  resolveBranchScope,
+} from "@/lib/branch-scope";
 import { enforceRateLimit } from "@/lib/rate-limit";
 import { createServiceSupabaseClient } from "@/lib/supabase-server";
+import { excludeDeletedStudents } from "@/lib/students/soft-delete";
 
 function jsonError(message: string, status: number) {
   return NextResponse.json({ error: { message } }, { status });
 }
 
 export async function POST(req: NextRequest) {
-  const body = (await req.json().catch(() => null)) as Record<string, unknown> | null;
+  const body = (await req.json().catch(() => null)) as Record<
+    string,
+    unknown
+  > | null;
   const schoolId = typeof body?.school_id === "string" ? body.school_id : null;
 
-  const context = await resolveManagedUsersActorContext(schoolId, req.headers.get("authorization"));
+  const context = await resolveManagedUsersActorContext(
+    schoolId,
+    req.headers.get("authorization"),
+  );
   if (!context.ok) {
-    return jsonError("message" in context ? context.message : "تعذر التحقق من الصلاحيات.", 401);
+    return jsonError(
+      "message" in context ? context.message : "تعذر التحقق من الصلاحيات.",
+      401,
+    );
   }
 
   const requestedBranchId =
@@ -43,9 +56,9 @@ export async function POST(req: NextRequest) {
   // Fetch all students with auth accounts in scope
   type StudentRow = { auth_user_id: string | null; full_name: string };
   const { data: students, error } = (await applyBranchScopeToQuery(
-    serviceSupabase
-      .from("students")
-      .select("auth_user_id, full_name")
+    excludeDeletedStudents(
+      serviceSupabase.from("students").select("auth_user_id, full_name"),
+    )
       .eq("school_id", targetSchoolId)
       .in("status", ["active", "graduated", "archived", "withdrawn"])
       .not("auth_user_id", "is", null)
@@ -60,7 +73,8 @@ export async function POST(req: NextRequest) {
   }
 
   const validStudents = (students ?? []).filter(
-    (s): s is typeof s & { auth_user_id: string } => typeof s.auth_user_id === "string",
+    (s): s is typeof s & { auth_user_id: string } =>
+      typeof s.auth_user_id === "string",
   );
 
   if (validStudents.length === 0) {
@@ -69,7 +83,10 @@ export async function POST(req: NextRequest) {
 
   // Fetch existing login identifiers for all students
   const authUserIds = validStudents.map((s) => s.auth_user_id);
-  const credentialsMap = await fetchManagedUserCredentials(serviceSupabase, authUserIds).catch(() => new Map());
+  const credentialsMap = await fetchManagedUserCredentials(
+    serviceSupabase,
+    authUserIds,
+  ).catch(() => new Map());
 
   // Reset passwords in batches of 10 to avoid overwhelming auth service
   const BATCH_SIZE = 10;
@@ -80,13 +97,16 @@ export async function POST(req: NextRequest) {
     await Promise.allSettled(
       batch.map(async (student) => {
         const temporaryPassword = generateTemporaryPassword();
-        const { error: authError } = await serviceSupabase.auth.admin.updateUserById(
-          student.auth_user_id,
-          { password: temporaryPassword },
-        );
+        const { error: authError } =
+          await serviceSupabase.auth.admin.updateUserById(
+            student.auth_user_id,
+            { password: temporaryPassword },
+          );
         if (authError) return;
 
-        const existingLoginIdentifier = credentialsMap.get(student.auth_user_id)?.login_identifier;
+        const existingLoginIdentifier = credentialsMap.get(
+          student.auth_user_id,
+        )?.login_identifier;
         if (!existingLoginIdentifier) return;
 
         await upsertManagedUserCredential(actorSupabase, {
@@ -94,7 +114,9 @@ export async function POST(req: NextRequest) {
           schoolId: targetSchoolId,
           loginIdentifier: existingLoginIdentifier,
           temporaryPassword,
-        }).catch(() => { /* fire-and-forget: credential store failure must not abort the batch */ });
+        }).catch(() => {
+          /* fire-and-forget: credential store failure must not abort the batch */
+        });
 
         successCount++;
       }),

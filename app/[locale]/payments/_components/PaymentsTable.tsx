@@ -7,7 +7,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button, IconButton } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Student, PAGE_SIZE } from "../_types";
-import { CreditCard, Eye } from "lucide-react";
+import { CreditCard, Eye, Pencil } from "lucide-react";
 import { containerVariants, itemVariants, usePrefersReducedMotion, getVariants } from "@/lib/motion-variants";
 
 interface PaymentsTableProps {
@@ -20,6 +20,7 @@ interface PaymentsTableProps {
   onPageChange: (page: number) => void;
   onStudentClick: (student: Student) => void;
   onAddPayment?: (student: Student) => void;
+  onEditDiscount?: (student: Student) => void;
   currency?: string;
 }
 
@@ -33,6 +34,7 @@ export function PaymentsTable({
   onPageChange,
   onStudentClick,
   onAddPayment,
+  onEditDiscount,
   currency,
 }: PaymentsTableProps) {
   const t = useTranslations();
@@ -163,10 +165,15 @@ export function PaymentsTable({
               </div>
 
               {/* Actions */}
-              <div className={`grid grid-cols-1 gap-3 ${onAddPayment ? "sm:grid-cols-2" : ""}`}>
+              <div className={`grid grid-cols-1 gap-3 ${onAddPayment || onEditDiscount ? "sm:grid-cols-2" : ""}`}>
                 {onAddPayment && (
                   <Button variant="primary" size="sm" onClick={() => onAddPayment(s)}>
                     {t("payments.table.addPayment")}
+                  </Button>
+                )}
+                {onEditDiscount && (
+                  <Button variant="outline" size="sm" onClick={() => onEditDiscount(s)}>
+                    {t("payments.table.editDiscount")}
                   </Button>
                 )}
                 <Button variant="outline" size="sm" onClick={() => onStudentClick(s)}>
@@ -299,6 +306,16 @@ export function PaymentsTable({
                           onClick={() => onAddPayment(s)}
                         >
                           <CreditCard className="h-4 w-4" />
+                        </IconButton>
+                      )}
+                      {onEditDiscount && (
+                        <IconButton
+                          variant="ghost"
+                          size="sm"
+                          aria-label={t("payments.table.editDiscount")}
+                          onClick={() => onEditDiscount(s)}
+                        >
+                          <Pencil className="h-4 w-4" />
                         </IconButton>
                       )}
                       <IconButton

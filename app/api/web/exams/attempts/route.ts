@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { resolveSchoolScopedActorContext } from "@/lib/managed-users-server";
 import { resolveBranchScope } from "@/lib/branch-scope";
+import { jsonServerError } from "@/lib/route-utils";
+import { excludeDeletedStudents } from "@/lib/students/soft-delete";
 
 export const dynamic = "force-dynamic";
 
@@ -52,9 +54,9 @@ export async function GET(request: NextRequest) {
 
   let branchStudentIds: string[] | null = null;
   if (branchScope.value.branchIds.length > 0) {
-    const { data: branchStudents } = await actorSupabase
+    const { data: branchStudents } = await excludeDeletedStudents(actorSupabase
       .from("students")
-      .select("id")
+      .select("id"))
       .eq("school_id", targetSchoolId)
       .in("branch_id", branchScope.value.branchIds);
     branchStudentIds = ((branchStudents ?? []) as Array<{ id: string }>).map((s) => s.id);
@@ -74,7 +76,7 @@ export async function GET(request: NextRequest) {
   const { data: attempts, error } = await attemptsQuery.order("submitted_at", { ascending: false });
 
   if (error) {
-    return NextResponse.json({ ok: false, error: error.message }, { status: 500 });
+    return jsonServerError("web/exams/attempts", error, "تعذر إتمام العملية. حاول مرة أخرى.");
   }
 
   const studentIds = Array.from(
@@ -82,9 +84,9 @@ export async function GET(request: NextRequest) {
   );
   const nameMap = new Map<string, string>();
   if (studentIds.length > 0) {
-    const { data: students } = await actorSupabase
+    const { data: students } = await excludeDeletedStudents(actorSupabase
       .from("students")
-      .select("id, full_name")
+      .select("id, full_name"))
       .eq("school_id", targetSchoolId)
       .in("id", studentIds);
     for (const s of students ?? []) nameMap.set(s.id, s.full_name);

@@ -11,6 +11,8 @@ import {
 import { ensureManagedUserProfileLink } from "@/lib/managed-users-server";
 import { enforceRateLimit } from "@/lib/rate-limit";
 import { createServiceSupabaseClient } from "@/lib/supabase-server";
+import { jsonServerError, logRouteError } from "@/lib/route-utils";
+import { sealTemporaryPassword } from "@/lib/managed-users/password-vault";
 
 /**
  * POST /api/mobile/admin/provision-accounts
@@ -80,9 +82,10 @@ export async function POST(request: NextRequest) {
         .is("deleted_at", null);
 
     if (studentsError) {
-      return jsonError(
-        `خطأ في جلب الطلاب: ${studentsError.message}`,
-        500,
+      return jsonServerError(
+        "mobile/admin/provision-accounts",
+        studentsError,
+        "تعذر جلب الطلاب.",
       );
     }
 
@@ -96,9 +99,10 @@ export async function POST(request: NextRequest) {
         .eq("is_active", true);
 
     if (teachersError) {
-      return jsonError(
-        `خطأ في جلب المدرسين: ${teachersError.message}`,
-        500,
+      return jsonServerError(
+        "mobile/admin/provision-accounts",
+        teachersError,
+        "تعذر جلب المدرسين.",
       );
     }
 
@@ -186,7 +190,7 @@ export async function POST(request: NextRequest) {
             login_identifier: loginIdentifier,
             temporary_password: "",
             status: "error",
-            error: createAuthError?.message ?? "فشل إنشاء حساب المصادقة",
+            error: "فشل إنشاء حساب المصادقة",
           });
           continue;
         }
@@ -221,7 +225,7 @@ export async function POST(request: NextRequest) {
             school_id: targetSchoolId,
             login_identifier: loginIdentifier,
             temporary_password_hash: hashPassword(temporaryPassword),
-            temporary_password_plain: temporaryPassword,
+            temporary_password_plain: sealTemporaryPassword(temporaryPassword),
             has_pending_setup: true,
             password_last_reset_at: createdAt,
           },
@@ -258,6 +262,7 @@ export async function POST(request: NextRequest) {
           status: "provisioned",
         });
       } catch (err) {
+        logRouteError("mobile/admin/provision-accounts", err);
         errorCount++;
         results.push({
           id: student.id,
@@ -266,8 +271,7 @@ export async function POST(request: NextRequest) {
           login_identifier: "",
           temporary_password: "",
           status: "error",
-          error:
-            err instanceof Error ? err.message : "خطأ غير متوقع أثناء التزويد",
+          error: "خطأ غير متوقع أثناء التزويد",
         });
       }
     }
@@ -322,7 +326,7 @@ export async function POST(request: NextRequest) {
             login_identifier: loginIdentifier,
             temporary_password: "",
             status: "error",
-            error: createAuthError?.message ?? "فشل إنشاء حساب المصادقة",
+            error: "فشل إنشاء حساب المصادقة",
           });
           continue;
         }
@@ -355,7 +359,7 @@ export async function POST(request: NextRequest) {
             school_id: targetSchoolId,
             login_identifier: loginIdentifier,
             temporary_password_hash: hashPassword(temporaryPassword),
-            temporary_password_plain: temporaryPassword,
+            temporary_password_plain: sealTemporaryPassword(temporaryPassword),
             has_pending_setup: true,
             password_last_reset_at: createdAt,
           },
@@ -392,6 +396,7 @@ export async function POST(request: NextRequest) {
           status: "provisioned",
         });
       } catch (err) {
+        logRouteError("mobile/admin/provision-accounts", err);
         errorCount++;
         results.push({
           id: teacher.id,
@@ -400,8 +405,7 @@ export async function POST(request: NextRequest) {
           login_identifier: "",
           temporary_password: "",
           status: "error",
-          error:
-            err instanceof Error ? err.message : "خطأ غير متوقع أثناء التزويد",
+          error: "خطأ غير متوقع أثناء التزويد",
         });
       }
     }
@@ -417,15 +421,10 @@ export async function POST(request: NextRequest) {
       results,
     });
   } catch (err) {
-    return NextResponse.json(
-      {
-        ok: false,
-        error: {
-          message:
-            err instanceof Error ? err.message : "خطأ داخلي في الخادم",
-        },
-      },
-      { status: 500 },
+    return jsonServerError(
+      "mobile/admin/provision-accounts",
+      err,
+      "خطأ داخلي في الخادم",
     );
   }
 }

@@ -4,6 +4,7 @@ import { applyBranchScopeToQuery, resolveBranchScope } from "@/lib/branch-scope"
 import { resolveSchoolScopedActorContext } from "@/lib/managed-users-server";
 import { enforceRateLimit } from "@/lib/rate-limit";
 
+import { jsonServerError } from "@/lib/route-utils";
 function jsonError(message: string, status: number) {
   return NextResponse.json({ error: { message } }, { status });
 }
@@ -84,7 +85,7 @@ export async function GET(
   const { data, error } = await paymentsQuery;
 
   if (error) {
-    return jsonError(error.message || "تعذر تحميل سجل دفعات الطالب.", 500);
+    return jsonServerError("web-payments-students-studentId", error, "تعذر تحميل سجل دفعات الطالب.", 500);
   }
 
   return NextResponse.json({

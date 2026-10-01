@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { resolveSchoolScopedActorContext } from "@/lib/managed-users-server";
+import { jsonServerError } from "@/lib/route-utils";
+import { excludeDeletedStudents } from "@/lib/students/soft-delete";
 
 export const dynamic = "force-dynamic";
 
@@ -64,7 +66,7 @@ export async function GET(request: NextRequest) {
 
   const { data: exams, error: examsError } = await examsQuery;
   if (examsError) {
-    return NextResponse.json({ ok: false, error: examsError.message }, { status: 500 });
+    return jsonServerError("web/exams/analytics", examsError, "تعذر إتمام العملية. حاول مرة أخرى.");
   }
 
   const examIds = (exams ?? []).map((e) => (e as { id: string }).id);
@@ -199,9 +201,9 @@ export async function GET(request: NextRequest) {
   const studentIds = Array.from(studentScores.keys());
   const studentNameMap = new Map<string, string>();
   if (studentIds.length > 0) {
-    const { data: students } = await actorSupabase
+    const { data: students } = await excludeDeletedStudents(actorSupabase
       .from("students")
-      .select("id, full_name")
+      .select("id, full_name"))
       .in("id", studentIds.slice(0, 200));
 
     for (const s of (students ?? []) as Array<{ id: string; full_name: string }>) {

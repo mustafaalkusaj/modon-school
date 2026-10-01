@@ -157,12 +157,24 @@ export async function listQrTokensBySchool(
   return (data as unknown as QrLoginToken[]) ?? [];
 }
 
+const DEFAULT_QR_LOGIN_BASE_URL = "https://modon-school.com";
+
+export function buildQrLoginUrl(token: string, locale = "ar"): string {
+  const configured =
+    process.env.APP_URL?.trim() ||
+    process.env.NEXT_PUBLIC_APP_URL?.trim() ||
+    process.env.OFFICIAL_DOMAIN_URL?.trim() ||
+    DEFAULT_QR_LOGIN_BASE_URL;
+  const base = configured.replace(/\/+$/, "");
+  return `${base}/${encodeURIComponent(locale)}/qr-login?t=${encodeURIComponent(token)}`;
+}
+
 export async function generateQrLoginDataUrl(
   token: string,
+  locale = "ar",
 ): Promise<string | null> {
   try {
-    const payload = `https://modon-school.com/ar/qr-login?t=${encodeURIComponent(token)}`;
-    return await QRCode.toDataURL(payload, {
+    return await QRCode.toDataURL(buildQrLoginUrl(token, locale), {
       width: 200,
       margin: 1,
       errorCorrectionLevel: "M",

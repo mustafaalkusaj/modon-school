@@ -3,7 +3,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { applyBranchScopeToQuery, resolveBranchScope } from "@/lib/branch-scope";
 import { resolveSchoolScopedActorContext } from "@/lib/managed-users-server";
 import { enforceRateLimit } from "@/lib/rate-limit";
-import { jsonError, logRouteError } from "@/lib/route-utils";
+import { jsonError, logRouteError, jsonServerError } from "@/lib/route-utils";
 import { routeUserHasPermission } from "@/lib/route-permissions";
 
 type RouteContext = { params: Promise<{ id: string }> };
@@ -61,7 +61,7 @@ export async function GET(req: NextRequest, ctx: RouteContext) {
   ).maybeSingle();
 
   if (error) {
-    return jsonError(error.message || "تعذر تحميل المسمى الوظيفي.", 500);
+    return jsonServerError("web/payroll/job-titles/[id]", error, "تعذر تحميل المسمى الوظيفي.");
   }
 
   if (!data) {
@@ -149,7 +149,7 @@ export async function PATCH(req: NextRequest, ctx: RouteContext) {
 
   if (error) {
     logRouteError("payroll-job-titles-patch", error, { actorUserId, schoolId: targetSchoolId, id });
-    return jsonError(error.message || "تعذر تحديث المسمى الوظيفي.", 500);
+    return jsonServerError("web/payroll/job-titles/[id]", error, "تعذر تحديث المسمى الوظيفي.");
   }
 
   return NextResponse.json({ ok: true, jobTitle: data });
@@ -207,7 +207,7 @@ export async function DELETE(req: NextRequest, ctx: RouteContext) {
 
   if (error) {
     logRouteError("payroll-job-titles-delete", error, { actorUserId, schoolId: targetSchoolId, id });
-    return jsonError(error.message || "تعذر حذف المسمى الوظيفي.", 500);
+    return jsonServerError("web/payroll/job-titles/[id]", error, "تعذر حذف المسمى الوظيفي.");
   }
 
   return NextResponse.json({ ok: true });

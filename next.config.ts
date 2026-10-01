@@ -1,11 +1,12 @@
 import type { NextConfig } from "next";
 import nextIntl from "next-intl/plugin";
 /**
- * CSP and Security headers are primarily handled by middleware.ts (per-request nonces).
+ * CSP and Security headers are primarily handled by proxy.ts (per-request nonces).
  * Static assets use the fallback headers defined below.
  */
 
 const nextConfig: NextConfig = {
+  reactStrictMode: true,
   // Strict by default. The deploy script sets SKIP_BUILD_TYPECHECK=1 for the
   // REMOTE build only, and solely because it already ran `npm run typecheck`
   // locally and aborts on any error. Type-checking a second time inside
@@ -20,6 +21,8 @@ const nextConfig: NextConfig = {
   poweredByHeader: false,
   compress: true,
   images: {
+    formats: ["image/avif", "image/webp"],
+    minimumCacheTTL: 2592000,
     remotePatterns: [
       {
         protocol: "https",

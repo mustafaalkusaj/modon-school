@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { resolveSchoolScopedActorContext } from "@/lib/managed-users-server";
+import { jsonServerError } from "@/lib/route-utils";
 
 export const dynamic = "force-dynamic";
 
@@ -45,7 +46,7 @@ export async function GET(request: NextRequest) {
     .maybeSingle();
 
   if (error) {
-    return NextResponse.json({ ok: false, error: error.message }, { status: 500 });
+    return jsonServerError("web/exams/settings", error, "تعذر إتمام العملية. حاول مرة أخرى.");
   }
 
   return NextResponse.json({ ok: true, item: data });
@@ -100,7 +101,7 @@ export async function PUT(request: NextRequest) {
     .single();
 
   if (error) {
-    return NextResponse.json({ ok: false, error: error.message }, { status: 500 });
+    return jsonServerError("web/exams/settings", error, "تعذر إتمام العملية. حاول مرة أخرى.");
   }
 
   return NextResponse.json({ ok: true, item: data });

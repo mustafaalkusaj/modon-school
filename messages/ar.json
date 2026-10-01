@@ -275,6 +275,7 @@
     "notifications": {
       "title": "الإشعارات",
       "unread": "{count} غير مقروءة",
+      "markAllRead": "قراءة الكل",
       "refresh": "تحديث",
       "loading": "جارٍ تحميل الإشعارات...",
       "disabled": "جدول الإشعارات غير مفعّل حالياً.",
@@ -508,6 +509,7 @@
       "netSalaries": "صافي الرواتب",
       "netBalance": "الصافي",
       "transferredRevenue": "إيراد الطلاب المنقولين",
+      "netProfit": "صافي الربح",
       "profitDetails": "المستحصل + الواردات + إيراد المنقولين − المصروفات − الرواتب"
     },
     "detailedReports": "التقارير التفصيلية",
@@ -692,6 +694,7 @@
       "exportCurrentTitle": "تصدير الصفحة الحالية فقط (50 طالب)",
       "exportAllTitle": "تصدير جميع الطلاب بغض النظر عن الصفحة أو الفلتر",
       "printFiltered": "طباعة الطلاب المفلترين",
+      "duplicates": "طلاب متكررين",
       "printAllCards": "طباعة جميع بطاقات الطلاب",
       "preparing": "جارٍ التحضير...",
       "preparingCards": "جارٍ تجهيز البطاقات..."
@@ -927,6 +930,7 @@
       "progress": "نسبة الإنجاز",
       "addPayment": "إضافة دفعة",
       "viewDetails": "عرض التفاصيل",
+      "editDiscount": "تعديل التخفيض",
       "registeredPayments": "{count} دفعة مسجلة",
       "columns": {
         "studentName": "اسم الطالب",
@@ -989,6 +993,8 @@
       "printReceipt": "طباعة الإيصال",
       "printStatement": "كشف الحساب الكامل",
       "deletePayment": "حذف الدفعة",
+      "auditPayment": "تدقيق الوصل",
+      "audit": "تدقيق",
       "date": "التاريخ",
       "paperReceipt": "الإيصال الورقي",
       "digitalReceipt": "الإيصال الإلكتروني",

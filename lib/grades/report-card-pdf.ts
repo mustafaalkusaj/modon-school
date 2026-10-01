@@ -148,12 +148,25 @@ export function buildReportCardHTML(params: ReportCardParams): string {
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>كشف درجات — ${escapeHtml(studentName)}</title>
   <style>
-    @import url('https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700;900&display=swap');
+    /*
+     * Self-hosted, not Google Fonts (privacy). This document is a NAMED
+     * CHILD'S REPORT CARD: a client-side font import from Google would make
+     * the viewer's browser send its IP, User-Agent and a Referer naming this
+     * page to a third party. Same @font-face the sibling print modules use.
+     * (No backticks in this comment: it sits inside a template literal.)
+     */
+    @font-face {
+      font-family: "Noto Sans Arabic";
+      src: url("/fonts/noto-sans-arabic/NotoSansArabic-Variable.ttf") format("truetype");
+      font-style: normal;
+      font-weight: 100 900;
+      font-display: swap;
+    }
 
     * { box-sizing: border-box; margin: 0; padding: 0; }
 
     body {
-      font-family: 'Cairo', 'Tajawal', Arial, sans-serif;
+      font-family: 'Noto Sans Arabic', 'Tajawal', Arial, sans-serif;
       background: #f8fafc;
       color: #111827;
       direction: rtl;

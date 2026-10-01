@@ -1,20 +1,34 @@
+import { fetchAllRows } from "@/lib/supabase-fetch-all";
 import { NextRequest, NextResponse } from "next/server";
 
 import { isMissingTableError } from "@/lib/admin-infrastructure";
-import { compressArchiveData, decompressArchiveData } from "@/lib/payments/archive-compression";
-import { buildEditedArchiveSnapshot, MAX_ARCHIVE_ROWS } from "@/lib/payments/archive-edit";
-import { applyBranchScopeToQuery, resolveBranchScope, resolveBranchIdForWrite } from "@/lib/branch-scope";
+import {
+  compressArchiveData,
+  decompressArchiveData,
+} from "@/lib/payments/archive-compression";
+import {
+  buildEditedArchiveSnapshot,
+  MAX_ARCHIVE_ROWS,
+} from "@/lib/payments/archive-edit";
+import {
+  applyBranchScopeToQuery,
+  resolveBranchScope,
+  resolveBranchIdForWrite,
+} from "@/lib/branch-scope";
 import { resolveSchoolScopedActorContext } from "@/lib/managed-users-server";
 import { enforceRateLimit } from "@/lib/rate-limit";
 import { routeUserHasPermission } from "@/lib/route-permissions";
 import { buildStudentPromotionPlan } from "@/lib/students/promotion";
 import { invalidateSchoolCacheDomains } from "@/lib/server-cache";
+import { jsonServerError } from "@/lib/route-utils";
+import { excludeDeletedStudents } from "@/lib/students/soft-delete";
 
 function jsonError(message: string, status: number) {
   return NextResponse.json({ error: { message } }, { status });
 }
 
-const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const UUID_REGEX =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 export async function GET(req: NextRequest) {
   const archiveId = req.nextUrl.searchParams.get("archiveId") ?? "";
@@ -36,7 +50,9 @@ export async function GET(req: NextRequest) {
 
   if (!context.ok) {
     return jsonError(
-      "message" in context ? context.message : "تعذر التحقق من صلاحيات المستخدم.",
+      "message" in context
+        ? context.message
+        : "تعذر التحقق من صلاحيات المستخدم.",
       "status" in context ? context.status : 500,
     );
   }
@@ -50,7 +66,9 @@ export async function GET(req: NextRequest) {
 
   let query = actorSupabase
     .from("account_archives")
-    .select("id, school_id, branch_id, archive_year, total_students, total_payments, total_amount, data, archive_date")
+    .select(
+      "id, school_id, branch_id, archive_year, total_students, total_payments, total_amount, data, archive_date",
+    )
     .eq("id", archiveId)
     .eq("school_id", targetSchoolId);
 
@@ -75,19 +93,32 @@ export async function GET(req: NextRequest) {
       total_students: archive.total_students,
       total_payments: archive.total_payments,
       total_amount: archive.total_amount,
-      data: archive.data === null || archive.data === undefined ? null : decompressArchiveData(archive.data),
+      data:
+        archive.data === null || archive.data === undefined
+          ? null
+          : decompressArchiveData(archive.data),
     },
   });
 }
 
 export async function POST(req: NextRequest) {
-  const body = (await req.json().catch(() => null)) as Record<string, unknown> | null;
-  const schoolId = typeof body?.school_id === "string" ? body.school_id.trim() : "";
+  const body = (await req.json().catch(() => null)) as Record<
+    string,
+    unknown
+  > | null;
+  const schoolId =
+    typeof body?.school_id === "string" ? body.school_id.trim() : "";
   const archiveYear = Number(body?.archive_year ?? 0);
-  const requestedBranchId = typeof body?.branch_id === "string" ? body.branch_id.trim() || null : null;
+  const requestedBranchId =
+    typeof body?.branch_id === "string" ? body.branch_id.trim() || null : null;
 
   const currentYear = new Date().getFullYear();
-  if (!schoolId || !Number.isInteger(archiveYear) || archiveYear <= 0 || archiveYear > currentYear) {
+  if (
+    !schoolId ||
+    !Number.isInteger(archiveYear) ||
+    archiveYear <= 0 ||
+    archiveYear > currentYear
+  ) {
     return jsonError("بيانات الأرشفة غير مكتملة أو السنة غير صالحة.", 400);
   }
 
@@ -102,13 +133,19 @@ export async function POST(req: NextRequest) {
 
   if (!context.ok) {
     return jsonError(
-      "message" in context ? context.message : "تعذر التحقق من صلاحيات المستخدم.",
+      "message" in context
+        ? context.message
+        : "تعذر التحقق من صلاحيات المستخدم.",
       "status" in context ? context.status : 500,
     );
   }
 
   const { actorSupabase, actorUserId, targetSchoolId } = context.value;
-  const canArchivePayments = await routeUserHasPermission(actorSupabase, actorUserId, "delete_payments");
+  const canArchivePayments = await routeUserHasPermission(
+    actorSupabase,
+    actorUserId,
+    "delete_payments",
+  );
   if (!canArchivePayments) {
     return jsonError("ليس لديك صلاحية أرشفة الحسابات.", 403);
   }
@@ -126,7 +163,10 @@ export async function POST(req: NextRequest) {
     return jsonError(branchScope.message, branchScope.status);
   }
 
-  const branchIdResult = resolveBranchIdForWrite(branchScope.value, requestedBranchId);
+  const branchIdResult = resolveBranchIdForWrite(
+    branchScope.value,
+    requestedBranchId,
+  );
   if (!branchIdResult.ok) {
     return jsonError(branchIdResult.message, branchIdResult.status);
   }
@@ -163,68 +203,114 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  const fromDate = `${archiveYear}-01-01`;
-  const toDate = `${archiveYear}-12-31`;
+  // Year boundaries in Baghdad time (UTC+3, no DST): a payment at 01:00 on
+  // 1 January Baghdad time belongs to the new year, not the old one.
+  const fromInstant = `${archiveYear}-01-01T00:00:00+03:00`;
+  const toInstantExclusive = `${archiveYear + 1}-01-01T00:00:00+03:00`;
 
-  const { data: yearPayments, error: paymentsError } = await applyBranchScopeToQuery(
-    actorSupabase
-      .from("payments")
-      .select("id, student_id, amount, payment_method, notes, created_at, receipt_number, manual_receipt_number")
-      .eq("school_id", targetSchoolId)
-      .is("deleted_at", null)
-      .gte("created_at", fromDate)
-      .lte("created_at", `${toDate}T23:59:59.999Z`)
-      .order("created_at", { ascending: false }),
-    branchScope.value,
+  const { data: yearPayments, error: paymentsError } = await fetchAllRows(() =>
+    applyBranchScopeToQuery(
+      actorSupabase
+        .from("payments")
+        .select(
+          "id, student_id, amount, payment_method, notes, created_at, receipt_number, manual_receipt_number",
+        )
+        .eq("school_id", targetSchoolId)
+        .is("deleted_at", null)
+        .gte("created_at", fromInstant)
+        .lt("created_at", toInstantExclusive),
+      branchScope.value,
+    )
+      .order("created_at", { ascending: false })
+      .order("id", { ascending: true }),
   );
 
   if (paymentsError) {
-    return jsonError(paymentsError.message || "تعذر تحميل دفعات السنة المطلوبة.", 500);
+    return jsonServerError(
+      "web-payments-archive",
+      paymentsError,
+      "تعذر تحميل دفعات السنة المطلوبة.",
+      500,
+    );
   }
 
   if (!yearPayments || yearPayments.length === 0) {
-    return jsonError("لا توجد دفعات مسجلة في السنة المحددة لإنشاء أرشيف سنوي.", 400);
+    return jsonError(
+      "لا توجد دفعات مسجلة في السنة المحددة لإنشاء أرشيف سنوي.",
+      400,
+    );
   }
 
-  const studentIds = Array.from(new Set(yearPayments.map((payment) => payment.student_id).filter(Boolean)));
-  const { data: archiveStudents, error: studentsError } = await applyBranchScopeToQuery(
-    actorSupabase
-      .from("students")
-      .select("id, full_name, class_name, total_fee, paid_fee, remaining_fee, discount_value, status, phone")
-      .eq("school_id", targetSchoolId)
-      .in("id", studentIds),
-    branchScope.value,
+  const studentIds = Array.from(
+    new Set(yearPayments.map((payment) => payment.student_id).filter(Boolean)),
   );
+  // Chunked: hundreds of uuids in one `in` filter overflow the URL.
+  const archiveStudents: Array<Record<string, unknown>> = [];
+  let studentsError: unknown = null;
+  for (let i = 0; i < studentIds.length && !studentsError; i += 150) {
+    const chunk = studentIds.slice(i, i + 150);
+    const { data, error } = await applyBranchScopeToQuery(
+      actorSupabase
+        .from("students")
+        .select(
+          "id, full_name, class_name, total_fee, paid_fee, remaining_fee, discount_value, status, phone",
+        )
+        .eq("school_id", targetSchoolId)
+        .in("id", chunk),
+      branchScope.value,
+    );
+    if (error) studentsError = error;
+    else
+      archiveStudents.push(...((data ?? []) as Array<Record<string, unknown>>));
+  }
 
   if (studentsError) {
-    return jsonError(studentsError.message || "تعذر تحميل بيانات الطلاب للأرشفة.", 500);
+    return jsonServerError(
+      "web-payments-archive",
+      studentsError,
+      "تعذر تحميل بيانات الطلاب للأرشفة.",
+      500,
+    );
   }
 
-  const totalAmount = yearPayments.reduce((sum, payment) => sum + Number(payment.amount ?? 0), 0);
-  const { data: promotableStudents, error: promotableStudentsError } = await applyBranchScopeToQuery(
-    actorSupabase
-      .from("students")
-      .select("id, class_name, status")
-      .eq("school_id", targetSchoolId)
-      .not("status", "in", "(deleted,withdrawn,archived,graduated)"),
-    branchScope.value,
+  const totalAmount = yearPayments.reduce(
+    (sum, payment) => sum + Number(payment.amount ?? 0),
+    0,
   );
+  const { data: promotableStudents, error: promotableStudentsError } =
+    await fetchAllRows(() =>
+      applyBranchScopeToQuery(
+        excludeDeletedStudents(
+          actorSupabase.from("students").select("id, class_name, status"),
+        )
+          .eq("school_id", targetSchoolId)
+          .not("status", "in", "(deleted,withdrawn,archived,graduated)"),
+        branchScope.value,
+      ).order("id"),
+    );
 
   if (promotableStudentsError) {
-    return jsonError(promotableStudentsError.message || "تعذر تجهيز خطة ترحيل الطلاب قبل الأرشفة.", 500);
+    return jsonServerError(
+      "web-payments-archive",
+      promotableStudentsError,
+      "تعذر تجهيز خطة ترحيل الطلاب قبل الأرشفة.",
+      500,
+    );
   }
 
   const promotionPlan = buildStudentPromotionPlan(
-    ((promotableStudents ?? []) as Array<Record<string, unknown>>).map((row) => ({
-      id: String(row.id ?? ""),
-      class_name: typeof row.class_name === "string" ? row.class_name : null,
-    })),
+    ((promotableStudents ?? []) as Array<Record<string, unknown>>).map(
+      (row) => ({
+        id: String(row.id ?? ""),
+        class_name: typeof row.class_name === "string" ? row.class_name : null,
+      }),
+    ),
   );
 
   const snapshot = {
     year: archiveYear,
     payments: yearPayments,
-    students: archiveStudents ?? [],
+    students: archiveStudents,
     summary: {
       total_students: studentIds.length,
       total_payments: yearPayments.length,
@@ -256,32 +342,71 @@ export async function POST(req: NextRequest) {
     ? await existingQuery.eq("branch_id", archiveBranchId).maybeSingle()
     : await existingQuery.is("branch_id", null).maybeSingle();
 
-  if (existingError && !isMissingTableError(existingError, "account_archives")) {
-    return jsonError(existingError.message || "تعذر التحقق من الأرشيف الحالي.", 500);
+  if (
+    existingError &&
+    !isMissingTableError(existingError, "account_archives")
+  ) {
+    return jsonServerError(
+      "web-payments-archive",
+      existingError,
+      "تعذر التحقق من الأرشيف الحالي.",
+      500,
+    );
   }
 
   if (existingError && isMissingTableError(existingError, "account_archives")) {
-    return jsonError("جدول الأرشيف السنوي غير موجود بعد. نفّذ ملف database_setup.sql في Supabase.", 500);
+    return jsonError(
+      "جدول الأرشيف السنوي غير موجود بعد. نفّذ ملف database_setup.sql في Supabase.",
+      500,
+    );
   }
 
-  // Run student promotion BEFORE saving archive — if promotion fails, nothing is persisted
-  if (promotionPlan.updates.length > 0) {
-    const groups = new Map<string, string[]>();
+  // Promote students only when this year's archive is created for the first
+  // time. Re-saving an existing archive refreshes the snapshot only; it used
+  // to run the promotion again and move every student up a second grade.
+  // Each update is also guarded by the class the student is in right now, so
+  // a concurrent or repeated run cannot promote the same student twice.
+  // Promotion runs BEFORE saving the archive: if it fails, nothing is persisted.
+  const shouldPromote =
+    !existingArchive?.id && promotionPlan.updates.length > 0;
+  if (shouldPromote) {
+    const currentClassById = new Map(
+      ((promotableStudents ?? []) as Array<Record<string, unknown>>).map(
+        (row) => [String(row.id ?? ""), (row.class_name as string | null) ?? null],
+      ),
+    );
+    const groups = new Map<
+      string,
+      { from: string | null; to: string; ids: string[] }
+    >();
     for (const update of promotionPlan.updates) {
-      const current = groups.get(update.toClassName) ?? [];
-      current.push(update.id);
-      groups.set(update.toClassName, current);
+      const from = currentClassById.get(update.id) ?? null;
+      const key = `${from ?? ""}\u0000${update.toClassName}`;
+      const group = groups.get(key) ?? {
+        from,
+        to: update.toClassName,
+        ids: [],
+      };
+      group.ids.push(update.id);
+      groups.set(key, group);
     }
 
-    for (const [toClassName, studentIdsForClass] of Array.from(groups.entries())) {
-      const { error: promotionError } = await actorSupabase
+    for (const group of Array.from(groups.values())) {
+      let promotionQuery = actorSupabase
         .from("students")
-        .update({ class_name: toClassName })
+        .update({ class_name: group.to })
         .eq("school_id", targetSchoolId)
-        .in("id", studentIdsForClass);
+        .in("id", group.ids);
+      if (group.from) {
+        promotionQuery = promotionQuery.eq("class_name", group.from);
+      }
+      const { error: promotionError } = await promotionQuery;
 
       if (promotionError) {
-        return jsonError("تعذر ترحيل الطلاب إلى الصف التالي. لم يُحفظ الأرشيف.", 500);
+        return jsonError(
+          "تعذر ترحيل الطلاب إلى الصف التالي. لم يُحفظ الأرشيف.",
+          500,
+        );
       }
     }
   }
@@ -294,13 +419,26 @@ export async function POST(req: NextRequest) {
         .eq("school_id", targetSchoolId)
         .select("*")
         .single()
-    : await actorSupabase.from("account_archives").insert(payload).select("*").single();
+    : await actorSupabase
+        .from("account_archives")
+        .insert(payload)
+        .select("*")
+        .single();
 
   if (writeResult.error || !writeResult.data) {
-    return jsonError(writeResult.error?.message || "تعذر حفظ الأرشيف السنوي.", 500);
+    return jsonServerError(
+      "web-payments-archive",
+      writeResult.error,
+      "تعذر حفظ الأرشيف السنوي.",
+      500,
+    );
   }
 
-  invalidateSchoolCacheDomains(targetSchoolId, ["dashboard-overview", "payments-meta", "reports-overview"]);
+  invalidateSchoolCacheDomains(targetSchoolId, [
+    "dashboard-overview",
+    "payments-meta",
+    "reports-overview",
+  ]);
 
   return NextResponse.json({
     ok: true,
@@ -308,6 +446,7 @@ export async function POST(req: NextRequest) {
     created: !existingArchive?.id,
     promotion: {
       ...promotionPlan.summary,
+      applied: shouldPromote,
       preview: promotionPlan.updates.slice(0, 10),
     },
   });
@@ -317,10 +456,16 @@ export async function POST(req: NextRequest) {
 // then recompute and persist the aggregate totals. Editing the archive never
 // touches the live operational tables; it only rewrites the historical snapshot.
 export async function PATCH(req: NextRequest) {
-  const body = (await req.json().catch(() => null)) as Record<string, unknown> | null;
-  const archiveId = typeof body?.archive_id === "string" ? body.archive_id.trim() : "";
-  const schoolId = typeof body?.school_id === "string" ? body.school_id.trim() : "";
-  const requestedBranchId = typeof body?.branch_id === "string" ? body.branch_id.trim() || null : null;
+  const body = (await req.json().catch(() => null)) as Record<
+    string,
+    unknown
+  > | null;
+  const archiveId =
+    typeof body?.archive_id === "string" ? body.archive_id.trim() : "";
+  const schoolId =
+    typeof body?.school_id === "string" ? body.school_id.trim() : "";
+  const requestedBranchId =
+    typeof body?.branch_id === "string" ? body.branch_id.trim() || null : null;
   const incoming = (body?.data ?? null) as Record<string, unknown> | null;
 
   if (!UUID_REGEX.test(archiveId) || !schoolId) {
@@ -332,7 +477,10 @@ export async function PATCH(req: NextRequest) {
 
   const rawStudents = Array.isArray(incoming.students) ? incoming.students : [];
   const rawPayments = Array.isArray(incoming.payments) ? incoming.payments : [];
-  if (rawStudents.length > MAX_ARCHIVE_ROWS || rawPayments.length > MAX_ARCHIVE_ROWS) {
+  if (
+    rawStudents.length > MAX_ARCHIVE_ROWS ||
+    rawPayments.length > MAX_ARCHIVE_ROWS
+  ) {
     return jsonError("حجم بيانات الأرشيف يتجاوز الحد المسموح.", 400);
   }
 
@@ -347,13 +495,19 @@ export async function PATCH(req: NextRequest) {
 
   if (!context.ok) {
     return jsonError(
-      "message" in context ? context.message : "تعذر التحقق من صلاحيات المستخدم.",
+      "message" in context
+        ? context.message
+        : "تعذر التحقق من صلاحيات المستخدم.",
       "status" in context ? context.status : 500,
     );
   }
 
   const { actorSupabase, actorUserId, targetSchoolId } = context.value;
-  const canEditArchive = await routeUserHasPermission(actorSupabase, actorUserId, "delete_payments");
+  const canEditArchive = await routeUserHasPermission(
+    actorSupabase,
+    actorUserId,
+    "delete_payments",
+  );
   if (!canEditArchive) {
     return jsonError("ليس لديك صلاحية تعديل الأرشيف.", 403);
   }
@@ -387,8 +541,14 @@ export async function PATCH(req: NextRequest) {
   }
 
   // Sanitize + recompute the snapshot (remaining balances, totals) via shared, unit-tested helper.
-  const existingData = decompressArchiveData(existing.data) as Record<string, unknown> | null;
-  const existingSummary = (existingData?.summary ?? {}) as Record<string, unknown>;
+  const existingData = decompressArchiveData(existing.data) as Record<
+    string,
+    unknown
+  > | null;
+  const existingSummary = (existingData?.summary ?? {}) as Record<
+    string,
+    unknown
+  >;
 
   const { snapshot, totals } = buildEditedArchiveSnapshot({
     archiveYear: existing.archive_year,
@@ -410,14 +570,25 @@ export async function PATCH(req: NextRequest) {
     })
     .eq("id", existing.id)
     .eq("school_id", targetSchoolId)
-    .select("id, school_id, branch_id, archive_year, total_students, total_payments, total_amount, archive_date, updated_at, updated_by")
+    .select(
+      "id, school_id, branch_id, archive_year, total_students, total_payments, total_amount, archive_date, updated_at, updated_by",
+    )
     .single();
 
   if (writeResult.error || !writeResult.data) {
-    return jsonError(writeResult.error?.message || "تعذر حفظ تعديلات الأرشيف.", 500);
+    return jsonServerError(
+      "web-payments-archive",
+      writeResult.error,
+      "تعذر حفظ تعديلات الأرشيف.",
+      500,
+    );
   }
 
-  invalidateSchoolCacheDomains(targetSchoolId, ["dashboard-overview", "payments-meta", "reports-overview"]);
+  invalidateSchoolCacheDomains(targetSchoolId, [
+    "dashboard-overview",
+    "payments-meta",
+    "reports-overview",
+  ]);
 
   return NextResponse.json({
     ok: true,

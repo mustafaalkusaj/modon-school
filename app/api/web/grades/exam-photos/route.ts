@@ -6,6 +6,8 @@ import { enforceRateLimit } from "@/lib/rate-limit";
 import { routeUserHasPermission } from "@/lib/route-permissions";
 import { applyBranchScopeToQuery, resolveBranchScope } from "@/lib/branch-scope";
 import { RBAC_COOKIE_NAME, verifyRBACSession } from "@/lib/rbac-session";
+import { jsonServerError } from "@/lib/route-utils";
+import { excludeDeletedStudents } from "@/lib/students/soft-delete";
 
 function jsonError(message: string, status: number) {
   return NextResponse.json({ error: { message } }, { status });
@@ -60,7 +62,7 @@ export async function POST(req: NextRequest) {
     const studentId = (entry as Record<string, unknown>).student_id as string | null;
     if (studentId) {
       const { data: studentCheck } = await applyBranchScopeToQuery(
-        context.value.actorSupabase.from("students").select("id").eq("id", studentId),
+        excludeDeletedStudents(context.value.actorSupabase.from("students").select("id")).eq("id", studentId),
         branchScopePost.value,
       ).limit(1);
       if (!studentCheck || (studentCheck as unknown[]).length === 0) {
@@ -90,7 +92,7 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({ ok: true, url, photos: updatedPhotos });
   } catch (err) {
-    return jsonError(err instanceof Error ? err.message : "تعذر رفع الصورة.", 500);
+    return jsonServerError("web/grades/exam-photos", err, "تعذر رفع الصورة.");
   }
 }
 
@@ -127,7 +129,7 @@ export async function DELETE(req: NextRequest) {
     const studentId = (entry as Record<string, unknown>).student_id as string | null;
     if (studentId) {
       const { data: studentCheck } = await applyBranchScopeToQuery(
-        context.value.actorSupabase.from("students").select("id").eq("id", studentId),
+        excludeDeletedStudents(context.value.actorSupabase.from("students").select("id")).eq("id", studentId),
         branchScopeDelete.value,
       ).limit(1);
       if (!studentCheck || (studentCheck as unknown[]).length === 0) {

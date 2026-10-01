@@ -225,6 +225,30 @@ function normalizeNumber(value: unknown) {
   return null;
 }
 
+/**
+ * Attachments are uploaded to `${schoolId}/${teacherId}/${folder}/...`, but the
+ * assignment write used to accept whatever `{bucket, path}` the client sent.
+ * Combined with the shared download-url route (which signs any path attached to
+ * an assignment the student is targeted by), a teacher could expose another
+ * teacher's private file to students. Returns true when there is no attachment
+ * or when it sits inside this teacher's own prefix.
+ */
+function isAttachmentWithinTeacherPrefix(
+  attachment: { bucket: string; path: string } | null | undefined,
+  schoolId: string,
+  teacherId: string,
+) {
+  if (!attachment) {
+    return true;
+  }
+
+  return (
+    attachment.bucket === "school-media" &&
+    attachment.path.startsWith(`${schoolId}/${teacherId}/`) &&
+    !attachment.path.includes("..")
+  );
+}
+
 function extractAttachmentMetadata(value: unknown) {
   const row = asObject(value);
   const bucket = nullableText(row.bucket);
@@ -761,6 +785,20 @@ export async function createTeacherAssignmentRecord(
   }
 
   const attachment = extractAttachmentMetadata(input.attachment);
+
+  if (
+    !isAttachmentWithinTeacherPrefix(
+      attachment.attachment,
+      ctx.schoolId,
+      teacher.id,
+    )
+  ) {
+    return {
+      ok: false,
+      gate: AVAILABLE_GATE,
+      message: "المرفق لا يطابق نطاق المعلم.",
+    };
+  }
   const payload: Record<string, unknown> = {
     school_id: ctx.schoolId,
     teacher_id: teacher.id,
@@ -1050,6 +1088,20 @@ export async function updateTeacherAssignmentRecord(
   }
 
   const attachment = extractAttachmentMetadata(input.attachment);
+
+  if (
+    !isAttachmentWithinTeacherPrefix(
+      attachment.attachment,
+      ctx.schoolId,
+      teacher.id,
+    )
+  ) {
+    return {
+      ok: false,
+      gate: AVAILABLE_GATE,
+      message: "المرفق لا يطابق نطاق المعلم.",
+    };
+  }
   const payload: Record<string, unknown> = {
     student_id: scopedStudent?.id ?? null,
     class_name: className,

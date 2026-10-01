@@ -2,6 +2,7 @@ import { toManagedAuthEmail } from "@/lib/managed-users/auth-email";
 import { NextRequest, NextResponse } from "next/server";
 import {
   ensureManagedUserProfileLink,
+  findManagedProfileByLinkedRecord,
   resolveSchoolScopedActorContext,
   syncManagedUserAccountState,
   generateManagedLoginIdentifier,
@@ -11,6 +12,7 @@ import {
 } from "@/lib/managed-users-server";
 import { enforceRateLimit } from "@/lib/rate-limit";
 import { createServiceSupabaseClient } from "@/lib/supabase-server";
+import { excludeDeletedStudents } from "@/lib/students/soft-delete";
 
 function jsonError(message: string, status: number) {
   return NextResponse.json({ error: { message } }, { status });
@@ -32,7 +34,10 @@ export async function POST(request: NextRequest) {
   });
   if (rateLimited) return rateLimited;
 
-  const body = (await request.json().catch(() => null)) as Record<string, unknown> | null;
+  const body = (await request.json().catch(() => null)) as Record<
+    string,
+    unknown
+  > | null;
 
   const context = await resolveSchoolScopedActorContext(
     typeof body?.schoolId === "string" ? body.schoolId : null,
@@ -51,12 +56,14 @@ export async function POST(request: NextRequest) {
   const serviceSupabase = createServiceSupabaseClient();
 
   // Fetch ALL active students (both with and without accounts)
-  const { data: allStudents, error: fetchError } = await serviceSupabase
-    .from("students")
-    .select("id, full_name, phone, auth_user_id")
-    .eq("school_id", targetSchoolId)
-    .eq("status", "active")
-    .is("deleted_at", null);
+  const { data: allStudents, error: fetchError } =
+    await excludeDeletedStudents(
+      serviceSupabase
+        .from("students")
+        .select("id, full_name, phone, auth_user_id"),
+    )
+      .eq("school_id", targetSchoolId)
+      .eq("status", "active");
 
   if (fetchError) {
     return jsonError("تعذر جلب قائمة الطلبة.", 500);
@@ -118,14 +125,17 @@ export async function POST(request: NextRequest) {
           .maybeSingle();
 
         if (!existingCred) {
-          const { data: authUser } = await serviceSupabase.auth.admin.getUserById(existingAuthUserId);
+          const { data: authUser } =
+            await serviceSupabase.auth.admin.getUserById(existingAuthUserId);
           const email = authUser?.user?.email ?? "";
-          const loginId = email || await generateManagedLoginIdentifier(actorSupabase, {
-            schoolId: targetSchoolId,
-            role: "student",
-            fullName,
-            preferredEmail: "",
-          });
+          const loginId =
+            email ||
+            (await generateManagedLoginIdentifier(actorSupabase, {
+              schoolId: targetSchoolId,
+              role: "student",
+              fullName,
+              preferredEmail: "",
+            }));
           const tempPw = generateTemporaryPassword();
 
           await syncManagedUserAccountState(actorSupabase, {
@@ -150,12 +160,35 @@ export async function POST(request: NextRequest) {
 
     // ---- Student needs a new account ----
     try {
-      const loginIdentifier = await generateManagedLoginIdentifier(actorSupabase, {
-        schoolId: targetSchoolId,
-        role: "student",
-        fullName,
-        preferredEmail: "",
-      });
+      // A managed profile may already exist for this student (the students row
+      // just lost its link). Re-link it instead of minting a second auth user.
+      const existingProfile = await findManagedProfileByLinkedRecord(
+        actorSupabase,
+        {
+          schoolId: targetSchoolId,
+          role: "student",
+          relatedRecordId: student.id,
+        },
+      );
+      if (existingProfile?.authUserId) {
+        await serviceSupabase
+          .from("students")
+          .update({ auth_user_id: existingProfile.authUserId })
+          .eq("id", student.id)
+          .eq("school_id", targetSchoolId);
+        ensured++;
+        return;
+      }
+
+      const loginIdentifier = await generateManagedLoginIdentifier(
+        actorSupabase,
+        {
+          schoolId: targetSchoolId,
+          role: "student",
+          fullName,
+          preferredEmail: "",
+        },
+      );
       const temporaryPassword = generateTemporaryPassword();
       const createdAt = new Date().toISOString();
 
@@ -187,7 +220,7 @@ export async function POST(request: NextRequest) {
         failed.push({
           studentId: student.id,
           name: fullName,
-          reason: createError?.message ?? "فشل إنشاء الحساب",
+          reason: "فشل إنشاء الحساب",
         });
         return;
       }

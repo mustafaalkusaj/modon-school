@@ -6,6 +6,7 @@ import { applyBranchScopeToQuery, resolveBranchScope } from '@/lib/branch-scope'
 import { upsertGradeEntry } from '@/lib/grades/grade-entries-server'
 import { fetchGradeTypes } from '@/lib/grades/grade-types-server'
 import type { GradeCategory, GradeEntryInput, GradeType } from '@/lib/grades/types'
+import { excludeDeletedStudents } from "@/lib/students/soft-delete";
 
 /**
  * Excel component columns → grade-type category + the default name seeded in
@@ -170,7 +171,7 @@ export async function POST(req: NextRequest) {
   let branchStudentIds: Set<string> | null = null
   if (branchScope.value.branchIds.length > 0) {
     const { data: bs } = await applyBranchScopeToQuery(
-      actorSupabase.from('students').select('id').eq('school_id', targetSchoolId),
+      excludeDeletedStudents(actorSupabase.from('students').select('id')).eq('school_id', targetSchoolId),
       branchScope.value,
     )
     branchStudentIds = new Set(((bs ?? []) as Array<{ id: string }>).map((s) => s.id))

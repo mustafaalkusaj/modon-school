@@ -3,7 +3,7 @@ import { NextRequest, NextResponse } from "next/server";
 
 import { applyBranchScopeToQuery, resolveBranchScope, type ResolvedBranchScope } from "@/lib/branch-scope";
 import { resolveSchoolScopedActorContext } from "@/lib/managed-users-server";
-import { isValidUUID } from "@/lib/route-utils";
+import { isValidUUID, jsonServerError } from "@/lib/route-utils";
 import { resolveAuthoritativeStudentPaidFee } from "@/lib/payments-server";
 import { resolveStudentFeeTotal, calculateStudentRemainingFee } from "@/lib/students/financials";
 import { enforceRateLimit } from "@/lib/rate-limit";
@@ -299,7 +299,7 @@ export async function PATCH(
         .maybeSingle<StudentRow>();
 
       if (error || !data?.id) {
-        return jsonError(error?.message || "تعذر نقل الطالب إلى الصف الجديد.", 500);
+        return jsonServerError("web-students-studentId", error, "تعذر نقل الطالب إلى الصف الجديد.", 500);
       }
 
       invalidateSchoolCacheDomains(targetSchoolId, ["dashboard-overview", "payments-meta", "reports-overview", "students-meta"]);
@@ -327,7 +327,7 @@ export async function PATCH(
         .maybeSingle<StudentRow>();
 
       if (error || !data?.id) {
-        return jsonError(error?.message || "تعذر نقل الطالب إلى الشعبة الجديدة.", 500);
+        return jsonServerError("web-students-studentId", error, "تعذر نقل الطالب إلى الشعبة الجديدة.", 500);
       }
 
       invalidateSchoolCacheDomains(targetSchoolId, ["dashboard-overview", "payments-meta", "reports-overview", "students-meta"]);
@@ -367,7 +367,7 @@ export async function PATCH(
         .maybeSingle<StudentRow>();
 
       if (error || !data?.id) {
-        return jsonError(error?.message || "تعذر نقل الطالب إلى المنقولون.", 500);
+        return jsonServerError("web-students-studentId", error, "تعذر نقل الطالب إلى المنقولون.", 500);
       }
 
       invalidateSchoolCacheDomains(targetSchoolId, ["dashboard-overview", "payments-meta", "reports-overview", "students-meta"]);
@@ -439,7 +439,26 @@ export async function PATCH(
     return jsonError("الرسوم والمدفوع والخصم يجب أن تكون أرقاماً صحيحة تساوي صفراً أو أكثر.", 400);
   }
 
-  if (nextDiscount > nextTotalFee) {
+  // Resolve effective total fee through class_fees fallback before comparing
+  let effectiveTotalForValidation = nextTotalFee;
+  if (effectiveTotalForValidation <= 0 && nextClassName) {
+    let cfQuery = serviceSupabase
+      .from("class_fees")
+      .select("total_fee")
+      .eq("school_id", targetSchoolId)
+      .eq("class_name", nextClassName);
+    if (branchScope.branchId) {
+      cfQuery = cfQuery.eq("branch_id", branchScope.branchId);
+    } else if (branchScope.branchIds.length > 0) {
+      cfQuery = cfQuery.in("branch_id", branchScope.branchIds);
+    }
+    const { data: cfVal } = await cfQuery.maybeSingle<{ total_fee: number }>();
+    if (cfVal && typeof cfVal.total_fee === "number") {
+      effectiveTotalForValidation = resolveStudentFeeTotal(nextTotalFee, cfVal.total_fee);
+    }
+  }
+
+  if (nextDiscount > effectiveTotalForValidation) {
     return jsonError("الخصم لا يمكن أن يكون أكبر من إجمالي الرسوم.", 400);
   }
 
@@ -460,7 +479,7 @@ export async function PATCH(
       ? prefetchedPaidFee
       : await resolveAuthoritativeStudentPaidFee(serviceSupabase, targetSchoolId, studentId, requestedPaidFee);
   } catch (error) {
-    return jsonError(error instanceof Error ? error.message : "تعذر التحقق من إجمالي دفعات الطالب الحالية.", 500);
+    return jsonServerError("web-students-studentId", error, "تعذر التحقق من إجمالي دفعات الطالب الحالية.", 500);
   }
 
   const netFeeAfterDiscount = Math.max(nextTotalFee - nextDiscount, 0);
@@ -499,7 +518,7 @@ export async function PATCH(
     .maybeSingle<StudentRow>();
 
   if (error || !data?.id) {
-    return jsonError(error?.message || "تعذر تحديث بيانات الطالب.", 500);
+    return jsonServerError("web-students-studentId", error, "تعذر تحديث بيانات الطالب.", 500);
   }
 
   invalidateSchoolCacheDomains(targetSchoolId, ["dashboard-overview", "payments-meta", "reports-overview", "students-meta"]);
@@ -628,6 +647,22 @@ export async function DELETE(
     }
   }
 
+  // Ban the Supabase Auth user on soft-delete so they can't log in
+  if (!isHardDelete) {
+    const { data: studentAuth } = await serviceSupabase
+      .from("students")
+      .select("auth_user_id")
+      .eq("id", studentId)
+      .eq("school_id", targetSchoolId)
+      .maybeSingle();
+    const authUserId = (studentAuth as { auth_user_id?: string } | null)?.auth_user_id;
+    if (authUserId) {
+      await serviceSupabase.auth.admin
+        .updateUserById(authUserId, { ban_duration: "876600h" })
+        .catch(() => {});
+    }
+  }
+
   const deleteQuery = isHardDelete
     ? applyBranchScopeToQuery(
         serviceSupabase
@@ -658,7 +693,7 @@ export async function DELETE(
     .maybeSingle<StudentRow>();
 
   if (error || !data?.id) {
-    return jsonError(error?.message || "تعذر حذف الطالب.", 500);
+    return jsonServerError("web-students-studentId", error, "تعذر حذف الطالب.", 500);
   }
 
   invalidateSchoolCacheDomains(targetSchoolId, ["dashboard-overview", "payments-meta", "reports-overview", "students-meta"]);

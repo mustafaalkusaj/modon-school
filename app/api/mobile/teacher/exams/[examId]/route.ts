@@ -30,6 +30,10 @@ export async function GET(
       )
       .eq("id", examId)
       .eq("school_id", schoolId)
+      // This detail payload includes the question answer key. Restrict it to the
+      // authoring teacher in the query itself — school scope alone would let any
+      // teacher read another teacher's exam answers (same gate DELETE enforces).
+      .eq("created_by", authUserId)
       .maybeSingle();
 
     if (examError) {
@@ -43,16 +47,6 @@ export async function GET(
       return NextResponse.json(
         { ok: false, error: "الامتحان غير موجود." },
         { status: 404 },
-      );
-    }
-
-    // This detail payload includes the question answer key. Restrict it to the
-    // authoring teacher — school scope alone would let any teacher read another
-    // teacher's exam answers (same gate DELETE already enforces).
-    if (exam.created_by !== authUserId) {
-      return NextResponse.json(
-        { ok: false, error: "لا يمكنك عرض امتحان أنشأه معلم آخر." },
-        { status: 403 },
       );
     }
 

@@ -15,8 +15,13 @@ const NO_STORE_HEADERS = {
   "Cache-Control": "private, no-store, max-age=0",
 } as const;
 
+// This endpoint returns the resolved user profile, role and permission snapshot.
+// It is per-user and must never be stored by a browser or a shared CDN cache.
 function jsonError(message: string, status: number) {
-  return NextResponse.json({ ok: false, error: { message } }, { status });
+  return NextResponse.json(
+    { ok: false, error: { message } },
+    { status, headers: NO_STORE_HEADERS },
+  );
 }
 
 export async function GET(req: NextRequest) {
@@ -85,24 +90,26 @@ export async function GET(req: NextRequest) {
       .eq("is_active", true)
       .maybeSingle();
 
-    if (managed?.role === "student") {
-      const permissions = buildTemplatePermissions("student");
-      const studentProfile = {
+    if (managed?.role === "student" || managed?.role === "teacher") {
+      const managedRole = managed.role as "student" | "teacher";
+      const permissions = buildTemplatePermissions(managedRole);
+      const fallbackName = managedRole === "teacher" ? "Teacher" : "Student";
+      const managedProfile = {
         id: managed.auth_user_id,
-        full_name: managed.full_name ?? user.email ?? "Student",
+        full_name: managed.full_name ?? user.email ?? fallbackName,
         email: user.email ?? null,
         avatar_url: null,
-        role: "student" as const,
+        role: managedRole,
         permissions,
         school_id: managed.school_id,
         is_active: true,
-        default_path: DEFAULT_PATH_BY_ROLE.student,
+        default_path: DEFAULT_PATH_BY_ROLE[managedRole],
       };
 
       return NextResponse.json(
         {
           ok: true,
-          user: studentProfile,
+          user: managedProfile,
           session: {
             deepPermissions: permissions,
             sidebar: [],
@@ -117,15 +124,18 @@ export async function GET(req: NextRequest) {
     return jsonError("Profile not found", 404);
   }
 
-  return NextResponse.json({
-    ok: true,
-    user: {
-      ...resolved.profile,
-      deepPermissions: resolved.snapshot.deepPermissions,
-      sidebar: resolved.snapshot.sidebar,
-      dashboardSections: resolved.snapshot.dashboardSections,
-      role_color: resolved.snapshot.roleColor ?? null,
+  return NextResponse.json(
+    {
+      ok: true,
+      user: {
+        ...resolved.profile,
+        deepPermissions: resolved.snapshot.deepPermissions,
+        sidebar: resolved.snapshot.sidebar,
+        dashboardSections: resolved.snapshot.dashboardSections,
+        role_color: resolved.snapshot.roleColor ?? null,
+      },
+      session: resolved.snapshot,
     },
-    session: resolved.snapshot,
-  });
+    { headers: NO_STORE_HEADERS },
+  );
 }

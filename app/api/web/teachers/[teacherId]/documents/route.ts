@@ -1,9 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
-import { applyBranchScopeToQuery, resolveBranchScope } from "@/lib/branch-scope";
+import {
+  applyBranchScopeToQuery,
+  resolveBranchScope,
+} from "@/lib/branch-scope";
 import { resolveSchoolScopedActorContext } from "@/lib/managed-users-server";
 import { enforceRateLimit } from "@/lib/rate-limit";
 import { routeUserHasPermission } from "@/lib/route-permissions";
-import { jsonError, logRouteError } from "@/lib/route-utils";
+import { jsonError, jsonServerError, logRouteError } from "@/lib/route-utils";
 
 const ALLOWED_DOC_TYPES = [
   "national_id",
@@ -37,7 +40,9 @@ export async function GET(
 
   if (!context.ok) {
     return jsonError(
-      "message" in context ? context.message : "تعذر التحقق من صلاحيات المستخدم.",
+      "message" in context
+        ? context.message
+        : "تعذر التحقق من صلاحيات المستخدم.",
       "status" in context ? context.status : 500,
     );
   }
@@ -66,8 +71,11 @@ export async function GET(
 
   // Branch isolation: verify teacher belongs to this school and branch
   const { data: teacherCheck } = await applyBranchScopeToQuery(
-    actorSupabase.from("teachers").select("id")
-      .eq("id", teacherId).eq("school_id", context.value.targetSchoolId),
+    actorSupabase
+      .from("teachers")
+      .select("id")
+      .eq("id", teacherId)
+      .eq("school_id", context.value.targetSchoolId),
     branchScope.value,
   ).maybeSingle();
   if (!teacherCheck) {
@@ -83,10 +91,7 @@ export async function GET(
 
     if (error) {
       // Table may not exist yet — return empty list gracefully
-      if (
-        error.code === "42P01" ||
-        error.message?.includes("does not exist")
-      ) {
+      if (error.code === "42P01" || error.message?.includes("does not exist")) {
         return NextResponse.json({ ok: true, documents: [] });
       }
       logRouteError("teachers-documents-get", error, { teacherId });
@@ -105,7 +110,10 @@ export async function POST(
   { params }: { params: Promise<{ teacherId: string }> },
 ) {
   const { teacherId } = await params;
-  const body = (await req.json().catch(() => null)) as Record<string, unknown> | null;
+  const body = (await req.json().catch(() => null)) as Record<
+    string,
+    unknown
+  > | null;
   const schoolId = typeof body?.school_id === "string" ? body.school_id : null;
 
   const context = await resolveSchoolScopedActorContext(
@@ -119,7 +127,9 @@ export async function POST(
 
   if (!context.ok) {
     return jsonError(
-      "message" in context ? context.message : "تعذر التحقق من صلاحيات المستخدم.",
+      "message" in context
+        ? context.message
+        : "تعذر التحقق من صلاحيات المستخدم.",
       "status" in context ? context.status : 500,
     );
   }
@@ -148,8 +158,11 @@ export async function POST(
 
   // Branch isolation: verify teacher belongs to this school and branch
   const { data: teacherCheckPost } = await applyBranchScopeToQuery(
-    actorSupabase.from("teachers").select("id")
-      .eq("id", teacherId).eq("school_id", targetSchoolId),
+    actorSupabase
+      .from("teachers")
+      .select("id")
+      .eq("id", teacherId)
+      .eq("school_id", targetSchoolId),
     branchScope.value,
   ).maybeSingle();
   if (!teacherCheckPost) {
@@ -160,7 +173,8 @@ export async function POST(
     const doc_type = isValidDocType(body?.doc_type) ? body.doc_type : "other";
     const title = typeof body?.title === "string" ? body.title.trim() : "";
     const expiry_date =
-      typeof body?.expiry_date === "string" && body.expiry_date.trim().length > 0
+      typeof body?.expiry_date === "string" &&
+      body.expiry_date.trim().length > 0
         ? body.expiry_date.trim()
         : null;
     const notes =
@@ -196,7 +210,12 @@ export async function POST(
         actorUserId,
         schoolId: targetSchoolId,
       });
-      return jsonError(error?.message || "تعذر إضافة الوثيقة.", 500);
+      return jsonServerError(
+        "web-teachers-teacherId-documents",
+        error,
+        "تعذر إضافة الوثيقة.",
+        500,
+      );
     }
 
     return NextResponse.json({ ok: true, document: data }, { status: 201 });
@@ -233,7 +252,9 @@ export async function DELETE(
 
   if (!context.ok) {
     return jsonError(
-      "message" in context ? context.message : "تعذر التحقق من صلاحيات المستخدم.",
+      "message" in context
+        ? context.message
+        : "تعذر التحقق من صلاحيات المستخدم.",
       "status" in context ? context.status : 500,
     );
   }
@@ -262,8 +283,11 @@ export async function DELETE(
 
   // Branch isolation: verify teacher belongs to this school and branch
   const { data: teacherCheckDelete } = await applyBranchScopeToQuery(
-    actorSupabase.from("teachers").select("id")
-      .eq("id", teacherId).eq("school_id", targetSchoolId),
+    actorSupabase
+      .from("teachers")
+      .select("id")
+      .eq("id", teacherId)
+      .eq("school_id", targetSchoolId),
     branchScope.value,
   ).maybeSingle();
   if (!teacherCheckDelete) {

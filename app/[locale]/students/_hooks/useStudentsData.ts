@@ -135,7 +135,7 @@ export function useStudentsData(options: UseStudentsDataOptions): UseStudentsDat
     cacheKey,
   });
 
-  const pagedStudents: StudentWithFees[] = rows || [];
+  const pagedStudents = useMemo<StudentWithFees[]>(() => rows || [], [rows]);
 
   // Update total pages when count changes
   useEffect(() => {

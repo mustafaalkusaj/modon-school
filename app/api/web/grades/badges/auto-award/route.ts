@@ -5,6 +5,8 @@ import { routeUserHasPermission } from '@/lib/route-permissions'
 import { applyBranchScopeToQuery, resolveBranchScope } from '@/lib/branch-scope'
 import { createInsiteNotification } from '@/lib/notifications/insite-service'
 import type { BadgeType } from '@/lib/grades/types'
+import { excludeDeletedStudents } from "@/lib/students/soft-delete";
+import { jsonServerError } from "@/lib/route-utils"
 
 function jsonError(message: string, status: number) {
   return NextResponse.json({ error: { message } }, { status })
@@ -113,7 +115,7 @@ export async function POST(req: NextRequest) {
   let branchStudentIds: string[] | undefined
   if (branchScope.value.branchIds.length > 0) {
     const { data: bs } = await applyBranchScopeToQuery(
-      actorSupabase.from('students').select('id').eq('school_id', targetSchoolId),
+      excludeDeletedStudents(actorSupabase.from('students').select('id')).eq('school_id', targetSchoolId),
       branchScope.value,
     )
     branchStudentIds = ((bs ?? []) as Array<{ id: string }>).map((s) => s.id)
@@ -140,7 +142,7 @@ export async function POST(req: NextRequest) {
     if (gradesError.message?.includes('could not find the table')) {
       return jsonError('جدول grade_entries غير جاهز بعد.', 503)
     }
-    return jsonError(`تعذر جلب الدرجات: ${gradesError.message}`, 500)
+    return jsonServerError("web/grades/badges/auto-award", gradesError, "تعذر جلب الدرجات.")
   }
 
   const grades = (gradesData ?? []) as GradeRow[]
@@ -317,10 +319,7 @@ export async function POST(req: NextRequest) {
       }
     }
   } catch (err) {
-    return jsonError(
-      `تعذرت كتابة الشارات: ${err instanceof Error ? err.message : 'خطأ غير معروف'}`,
-      500,
-    )
+    return jsonServerError('web/grades/badges/auto-award', err, 'تعذرت كتابة الشارات.')
   }
 
   return NextResponse.json({

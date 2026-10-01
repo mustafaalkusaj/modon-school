@@ -1,7 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 
 import { sanitizeImageUrl } from "@/lib/brand/asset-url";
-import { detectAdminInfrastructure, isMissingTableError } from "@/lib/admin-infrastructure";
+import {
+  detectAdminInfrastructure,
+  isMissingTableError,
+} from "@/lib/admin-infrastructure";
 import { detectAppSchemaCompatWithClient } from "@/lib/schema-compat";
 import {
   buildSchoolArchivePayload,
@@ -11,6 +14,7 @@ import {
 import { resolveSuperAdminActorContext } from "@/lib/super-admin-server";
 import { rateLimitMiddleware, RATE_LIMIT_CONFIG } from "@/lib/rate-limit";
 import { logger } from "@/lib/logger";
+import { jsonServerError } from "@/lib/route-utils";
 
 function jsonError(message: string, status: number) {
   return NextResponse.json({ error: { message } }, { status });
@@ -30,7 +34,9 @@ type UpdateSchoolBody = {
   is_active?: unknown;
 };
 
-function buildSchoolSelect(schemaCompat: Awaited<ReturnType<typeof detectAppSchemaCompatWithClient>>) {
+function buildSchoolSelect(
+  schemaCompat: Awaited<ReturnType<typeof detectAppSchemaCompatWithClient>>,
+) {
   return schemaCompat.schoolColors
     ? "id, name, address, phone, owner_email, city, logo_url, primary_color, secondary_color, plan, is_active, created_at"
     : "id, name, address, phone, owner_email, city, logo_url, plan, is_active, created_at";
@@ -48,9 +54,16 @@ export async function PATCH(
   { params }: { params: Promise<{ schoolId: string }> },
 ) {
   const { schoolId } = await params;
-  const context = await resolveSuperAdminActorContext(req.headers.get("authorization"));
+  const context = await resolveSuperAdminActorContext(
+    req.headers.get("authorization"),
+  );
   if (!context.ok) {
-    return jsonError("message" in context ? context.message : "تعذر التحقق من صلاحيات المستخدم.", "status" in context ? context.status : 500);
+    return jsonError(
+      "message" in context
+        ? context.message
+        : "تعذر التحقق من صلاحيات المستخدم.",
+      "status" in context ? context.status : 500,
+    );
   }
 
   const normalizedSchoolId = schoolId.trim();
@@ -77,23 +90,34 @@ export async function PATCH(
       .maybeSingle();
 
     if (schoolError) {
-      return jsonError(schoolError.message || "تعذر تحديث حالة المدرسة.", 500);
+      return jsonServerError(
+        "web-super-admin-schools-schoolId",
+        schoolError,
+        "تعذر تحديث حالة المدرسة.",
+        500,
+      );
     }
 
     if (!school) {
       return jsonError("المدرسة المطلوبة غير موجودة.", 404);
     }
 
-    const { data: latestSubscription, error: subscriptionLookupError } = await dataSupabase
-      .from("subscriptions")
-      .select("id")
-      .eq("school_id", normalizedSchoolId)
-      .order("created_at", { ascending: false })
-      .limit(1)
-      .maybeSingle();
+    const { data: latestSubscription, error: subscriptionLookupError } =
+      await dataSupabase
+        .from("subscriptions")
+        .select("id")
+        .eq("school_id", normalizedSchoolId)
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
 
     if (subscriptionLookupError) {
-      return jsonError(subscriptionLookupError.message || "تعذر مزامنة حالة الاشتراك.", 500);
+      return jsonServerError(
+        "web-super-admin-schools-schoolId",
+        subscriptionLookupError,
+        "تعذر مزامنة حالة الاشتراك.",
+        500,
+      );
     }
 
     if (latestSubscription?.id) {
@@ -104,7 +128,12 @@ export async function PATCH(
         .eq("school_id", normalizedSchoolId);
 
       if (subscriptionError) {
-        return jsonError(subscriptionError.message || "تعذر مزامنة حالة الاشتراك.", 500);
+        return jsonServerError(
+          "web-super-admin-schools-schoolId",
+          subscriptionError,
+          "تعذر مزامنة حالة الاشتراك.",
+          500,
+        );
       }
     }
 
@@ -118,20 +147,40 @@ export async function PATCH(
 
   const payload = {
     name,
-    address: typeof body?.address === "string" && body.address.trim() ? body.address.trim() : null,
-    phone: typeof body?.phone === "string" && body.phone.trim() ? body.phone.trim() : null,
-    owner_email: typeof body?.owner_email === "string" && body.owner_email.trim() ? body.owner_email.trim() : null,
-    city: typeof body?.city === "string" && body.city.trim() ? body.city.trim() : null,
+    address:
+      typeof body?.address === "string" && body.address.trim()
+        ? body.address.trim()
+        : null,
+    phone:
+      typeof body?.phone === "string" && body.phone.trim()
+        ? body.phone.trim()
+        : null,
+    owner_email:
+      typeof body?.owner_email === "string" && body.owner_email.trim()
+        ? body.owner_email.trim()
+        : null,
+    city:
+      typeof body?.city === "string" && body.city.trim()
+        ? body.city.trim()
+        : null,
     logo_url: normalizeLogoUrl(body?.logo_url),
     ...(schemaCompat.schoolColors
       ? {
           primary_color:
-            typeof body?.primary_color === "string" && body.primary_color.trim() ? body.primary_color.trim() : null,
+            typeof body?.primary_color === "string" && body.primary_color.trim()
+              ? body.primary_color.trim()
+              : null,
           secondary_color:
-            typeof body?.secondary_color === "string" && body.secondary_color.trim() ? body.secondary_color.trim() : null,
+            typeof body?.secondary_color === "string" &&
+            body.secondary_color.trim()
+              ? body.secondary_color.trim()
+              : null,
         }
       : {}),
-    plan: body?.plan === "premium" || body?.plan === "enterprise" ? body.plan : "basic",
+    plan:
+      body?.plan === "premium" || body?.plan === "enterprise"
+        ? body.plan
+        : "basic",
   };
 
   const { data: school, error: schoolError } = await dataSupabase
@@ -142,7 +191,12 @@ export async function PATCH(
     .maybeSingle();
 
   if (schoolError) {
-    return jsonError(schoolError.message || "تعذر تحديث بيانات المدرسة.", 500);
+    return jsonServerError(
+      "web-super-admin-schools-schoolId",
+      schoolError,
+      "تعذر تحديث بيانات المدرسة.",
+      500,
+    );
   }
 
   if (!school) {
@@ -164,7 +218,10 @@ export async function DELETE(
   const requestId = Math.random().toString(36).substring(7);
 
   // Rate limiting check
-  const rateLimitResult = await rateLimitMiddleware(req, RATE_LIMIT_CONFIG.SUPER_ADMIN);
+  const rateLimitResult = await rateLimitMiddleware(
+    req,
+    RATE_LIMIT_CONFIG.SUPER_ADMIN,
+  );
   if (!rateLimitResult.ok) {
     logger.warn("Rate limit exceeded for DELETE /schools/{schoolId}", {
       ip: rateLimitResult.clientId,
@@ -172,21 +229,33 @@ export async function DELETE(
     });
     return jsonError(
       rateLimitResult.message || "تم تجاوز حد الطلبات المسموح",
-      rateLimitResult.status || 429
+      rateLimitResult.status || 429,
     );
   }
 
   const { schoolId } = await params;
-  logger.logApiRequest(`/api/web/super-admin/schools/${schoolId}`, "DELETE", undefined, rateLimitResult.clientId);
+  logger.logApiRequest(
+    `/api/web/super-admin/schools/${schoolId}`,
+    "DELETE",
+    undefined,
+    rateLimitResult.clientId,
+  );
 
   try {
-    const context = await resolveSuperAdminActorContext(req.headers.get("authorization"));
+    const context = await resolveSuperAdminActorContext(
+      req.headers.get("authorization"),
+    );
     if (!context.ok) {
       logger.warn("Authentication failed for DELETE /schools/{schoolId}", {
         requestId,
         schoolId,
       });
-      return jsonError("message" in context ? context.message : "تعذر التحقق من صلاحيات المستخدم.", "status" in context ? context.status : 500);
+      return jsonError(
+        "message" in context
+          ? context.message
+          : "تعذر التحقق من صلاحيات المستخدم.",
+        "status" in context ? context.status : 500,
+      );
     }
 
     const normalizedSchoolId = schoolId.trim();
@@ -196,20 +265,31 @@ export async function DELETE(
 
     // Check if this is a permanent delete request
     const hardDelete = req.nextUrl.searchParams.get("hardDelete") === "true";
-    const purgeArchive = req.nextUrl.searchParams.get("purgeArchive") === "true";
-    let snapshot: Awaited<ReturnType<typeof buildSchoolArchivePayload>> | null = null;
+    const purgeArchive =
+      req.nextUrl.searchParams.get("purgeArchive") === "true";
+    let snapshot: Awaited<ReturnType<typeof buildSchoolArchivePayload>> | null =
+      null;
     let archiveRecord: { id: string } | null = null;
     const archiveWarnings: string[] = [];
 
     if (!(hardDelete && purgeArchive)) {
       try {
-        snapshot = await buildSchoolArchivePayload(context.value.dataSupabase, normalizedSchoolId);
+        snapshot = await buildSchoolArchivePayload(
+          context.value.dataSupabase,
+          normalizedSchoolId,
+        );
       } catch (archiveError) {
-        logger.warn("Failed to build school archive payload — proceeding with delete", {
-          requestId,
-          schoolId: normalizedSchoolId,
-          error: archiveError instanceof Error ? archiveError.message : String(archiveError),
-        });
+        logger.warn(
+          "Failed to build school archive payload — proceeding with delete",
+          {
+            requestId,
+            schoolId: normalizedSchoolId,
+            error:
+              archiveError instanceof Error
+                ? archiveError.message
+                : String(archiveError),
+          },
+        );
         archiveWarnings.push("تعذر إنشاء نسخة أرشيف قبل الحذف.");
       }
     }
@@ -221,31 +301,46 @@ export async function DELETE(
 
     if (snapshot) {
       try {
-        archiveRecord = await persistSchoolArchiveSnapshot(context.value.dataSupabase, {
-          schoolId: normalizedSchoolId,
-          schoolName,
-          actorUserId: context.value.actorUserId,
-          source: hardDelete ? "hard_delete" : "soft_delete",
-          payload: snapshot,
-        });
+        archiveRecord = await persistSchoolArchiveSnapshot(
+          context.value.dataSupabase,
+          {
+            schoolId: normalizedSchoolId,
+            schoolName,
+            actorUserId: context.value.actorUserId,
+            source: hardDelete ? "hard_delete" : "soft_delete",
+            payload: snapshot,
+          },
+        );
       } catch (persistError) {
-        logger.warn("Failed to persist school archive snapshot — proceeding with delete", {
-          requestId,
-          schoolId: normalizedSchoolId,
-          error: persistError instanceof Error ? persistError.message : String(persistError),
-        });
+        logger.warn(
+          "Failed to persist school archive snapshot — proceeding with delete",
+          {
+            requestId,
+            schoolId: normalizedSchoolId,
+            error:
+              persistError instanceof Error
+                ? persistError.message
+                : String(persistError),
+          },
+        );
         archiveWarnings.push("تعذر حفظ نسخة الأرشيف.");
       }
     }
 
     if (hardDelete) {
       // Permanent delete — remove the record completely
-      logger.info(`Permanent delete requested for school ${normalizedSchoolId}`, {
-        requestId,
-        userId: context.value.actorUserId,
-      });
+      logger.info(
+        `Permanent delete requested for school ${normalizedSchoolId}`,
+        {
+          requestId,
+          userId: context.value.actorUserId,
+        },
+      );
 
-      const purgeResult = await purgeSchoolArchiveData(context.value.dataSupabase, normalizedSchoolId);
+      const purgeResult = await purgeSchoolArchiveData(
+        context.value.dataSupabase,
+        normalizedSchoolId,
+      );
 
       if (purgeArchive) {
         const archiveDeleteResult = await context.value.dataSupabase
@@ -254,12 +349,21 @@ export async function DELETE(
           .eq("school_id", normalizedSchoolId)
           .select("id");
 
-        if (archiveDeleteResult.error && !isMissingTableError(archiveDeleteResult.error, "school_data_archives")) {
-          logger.warn("Failed to purge linked school archives during hard delete", {
-            requestId,
-            schoolId: normalizedSchoolId,
-            error: archiveDeleteResult.error.message,
-          });
+        if (
+          archiveDeleteResult.error &&
+          !isMissingTableError(
+            archiveDeleteResult.error,
+            "school_data_archives",
+          )
+        ) {
+          logger.warn(
+            "Failed to purge linked school archives during hard delete",
+            {
+              requestId,
+              schoolId: normalizedSchoolId,
+              error: archiveDeleteResult.error.message,
+            },
+          );
         }
       }
 
@@ -271,11 +375,20 @@ export async function DELETE(
         .maybeSingle();
 
       if (error) {
-        logger.error("Failed to permanently delete school", new Error(error.message), {
-          requestId,
-          schoolId: normalizedSchoolId,
-        });
-        return jsonError(error.message || "تعذر حذف المدرسة.", 500);
+        logger.error(
+          "Failed to permanently delete school",
+          new Error(error.message),
+          {
+            requestId,
+            schoolId: normalizedSchoolId,
+          },
+        );
+        return jsonServerError(
+          "web-super-admin-schools-schoolId",
+          error,
+          "تعذر حذف المدرسة.",
+          500,
+        );
       }
 
       if (!school) {
@@ -283,9 +396,19 @@ export async function DELETE(
       }
 
       // Log the deletion
-      logger.logDataModification("delete", "schools", normalizedSchoolId, context.value.actorUserId);
+      logger.logDataModification(
+        "delete",
+        "schools",
+        normalizedSchoolId,
+        context.value.actorUserId,
+      );
 
-      logger.logApiResponse(`/api/web/super-admin/schools/${normalizedSchoolId}`, 200, Date.now() - startTime, context.value.actorUserId);
+      logger.logApiResponse(
+        `/api/web/super-admin/schools/${normalizedSchoolId}`,
+        200,
+        Date.now() - startTime,
+        context.value.actorUserId,
+      );
 
       return NextResponse.json({
         ok: true,
@@ -296,12 +419,17 @@ export async function DELETE(
       });
     } else {
       // Soft delete — archive the school
-      logger.info(`Soft delete (archive) requested for school ${normalizedSchoolId}`, {
-        requestId,
-        userId: context.value.actorUserId,
-      });
+      logger.info(
+        `Soft delete (archive) requested for school ${normalizedSchoolId}`,
+        {
+          requestId,
+          userId: context.value.actorUserId,
+        },
+      );
 
-      const infrastructure = await detectAdminInfrastructure(context.value.dataSupabase);
+      const infrastructure = await detectAdminInfrastructure(
+        context.value.dataSupabase,
+      );
       if (!infrastructure.softDeleteSchools) {
         return jsonError(
           "أرشفة المدارس تتطلب تشغيل admin_infrastructure.sql لإضافة deleted_at و deleted_by إلى جدول schools.",
@@ -324,7 +452,12 @@ export async function DELETE(
           requestId,
           schoolId: normalizedSchoolId,
         });
-        return jsonError(error.message || "تعذر أرشفة المدرسة.", 500);
+        return jsonServerError(
+          "web-super-admin-schools-schoolId",
+          error,
+          "تعذر أرشفة المدرسة.",
+          500,
+        );
       }
 
       if (!school) {
@@ -332,11 +465,22 @@ export async function DELETE(
       }
 
       // Log the archival
-      logger.logDataModification("update", "schools", normalizedSchoolId, context.value.actorUserId, {
-        action: "archived",
-      });
+      logger.logDataModification(
+        "update",
+        "schools",
+        normalizedSchoolId,
+        context.value.actorUserId,
+        {
+          action: "archived",
+        },
+      );
 
-      logger.logApiResponse(`/api/web/super-admin/schools/${normalizedSchoolId}`, 200, Date.now() - startTime, context.value.actorUserId);
+      logger.logApiResponse(
+        `/api/web/super-admin/schools/${normalizedSchoolId}`,
+        200,
+        Date.now() - startTime,
+        context.value.actorUserId,
+      );
 
       return NextResponse.json({
         ok: true,
@@ -349,7 +493,7 @@ export async function DELETE(
     logger.error(
       "Unexpected error in DELETE /schools/{schoolId}",
       error instanceof Error ? error : new Error(String(error)),
-      { requestId }
+      { requestId },
     );
     return jsonError("حدث خطأ غير متوقع. يرجى المحاولة لاحقاً.", 500);
   }

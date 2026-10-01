@@ -1,8 +1,16 @@
 import { logRouteError } from "@/lib/route-utils";
 import { toManagedAuthEmail } from "@/lib/managed-users/auth-email";
 import { NextRequest, NextResponse } from "next/server";
-import { buildStudentInsertPayloads, getStudentImportValidationMessage, readStudentImportErrorMessage, studentImportRequestSchema } from "@/lib/api/student-import";
-import { resolveBranchIdForWrite, resolveBranchScope } from "@/lib/branch-scope";
+import {
+  buildStudentInsertPayloads,
+  getStudentImportValidationMessage,
+  readStudentImportErrorMessage,
+  studentImportRequestSchema,
+} from "@/lib/api/student-import";
+import {
+  resolveBranchIdForWrite,
+  resolveBranchScope,
+} from "@/lib/branch-scope";
 import { resolveSchoolScopedActorContext } from "@/lib/managed-users/context";
 import {
   buildManagedAuthIdentityPayload,
@@ -18,6 +26,8 @@ import {
   collectDuplicateStudentNames,
   findExistingDuplicateStudentNames,
 } from "@/lib/students/import-dedup";
+import { jsonServerError } from "@/lib/route-utils";
+import { excludeDeletedStudents } from "@/lib/students/soft-delete";
 
 function jsonError(message: string, status: number) {
   return NextResponse.json({ error: { message } }, { status });
@@ -34,7 +44,10 @@ export async function POST(request: NextRequest) {
   }
 
   try {
-    const rawBody = (await request.json().catch(() => null)) as Record<string, unknown> | null;
+    const rawBody = (await request.json().catch(() => null)) as Record<
+      string,
+      unknown
+    > | null;
 
     const actorContext = await resolveSchoolScopedActorContext(
       typeof rawBody?.school === "string"
@@ -55,10 +68,16 @@ export async function POST(request: NextRequest) {
 
     // Extract rows from chunk OR from parseResult.validRows
     let rowsToImport: any[] = [];
-    if (rawBody && typeof rawBody === 'object') {
-      if (Array.isArray((rawBody as any).chunk) && (rawBody as any).chunk.length > 0) {
+    if (rawBody && typeof rawBody === "object") {
+      if (
+        Array.isArray((rawBody as any).chunk) &&
+        (rawBody as any).chunk.length > 0
+      ) {
         rowsToImport = (rawBody as any).chunk;
-      } else if ((rawBody as any).parseResult?.validRows && Array.isArray((rawBody as any).parseResult.validRows)) {
+      } else if (
+        (rawBody as any).parseResult?.validRows &&
+        Array.isArray((rawBody as any).parseResult.validRows)
+      ) {
         rowsToImport = (rawBody as any).parseResult.validRows;
       }
     }
@@ -68,11 +87,16 @@ export async function POST(request: NextRequest) {
       return jsonError("لا توجد صفوف صالحة للاستيراد", 400);
     }
     if (rowsToImport.length > MAX_IMPORT_ROWS) {
-      return jsonError(`الحد الأقصى للاستيراد ${MAX_IMPORT_ROWS} صف في المرة الواحدة. تم إرسال ${rowsToImport.length} صف.`, 400);
+      return jsonError(
+        `الحد الأقصى للاستيراد ${MAX_IMPORT_ROWS} صف في المرة الواحدة. تم إرسال ${rowsToImport.length} صف.`,
+        400,
+      );
     }
 
     // Validate using the schema
-    const parsed = studentImportRequestSchema.safeParse({ chunk: rowsToImport });
+    const parsed = studentImportRequestSchema.safeParse({
+      chunk: rowsToImport,
+    });
     if (!parsed.success) {
       return jsonError(getStudentImportValidationMessage(parsed.error), 400);
     }
@@ -97,23 +121,33 @@ export async function POST(request: NextRequest) {
     const { actorSupabase, targetSchoolId } = actorContext.value;
     const fileDuplicates = collectDuplicateStudentNames(parsed.data.chunk);
     if (fileDuplicates.length > 0) {
-      return jsonError(buildDuplicateStudentNameMessage({ fileDuplicates }), 409);
+      return jsonError(
+        buildDuplicateStudentNameMessage({ fileDuplicates }),
+        409,
+      );
     }
 
-    let existingStudentsQuery = actorSupabase
-      .from("students")
-      .select("full_name, status")
+    let existingStudentsQuery = excludeDeletedStudents(
+      actorSupabase.from("students").select("full_name, status"),
+    )
       .eq("school_id", targetSchoolId)
       .neq("status", "deleted");
 
-    existingStudentsQuery = branchScope.value.branchIds.length > 0
-      ? existingStudentsQuery.in("branch_id", branchScope.value.branchIds)
-      : existingStudentsQuery;
+    existingStudentsQuery =
+      branchScope.value.branchIds.length > 0
+        ? existingStudentsQuery.in("branch_id", branchScope.value.branchIds)
+        : existingStudentsQuery;
 
-    const { data: existingStudents, error: existingStudentsError } = await existingStudentsQuery;
+    const { data: existingStudents, error: existingStudentsError } =
+      await existingStudentsQuery;
 
     if (existingStudentsError) {
-      return jsonError(existingStudentsError.message || "تعذر فحص أسماء الطلاب قبل الاستيراد.", 500);
+      return jsonServerError(
+        "students-bulk-import",
+        existingStudentsError,
+        "تعذر فحص أسماء الطلاب قبل الاستيراد.",
+        500,
+      );
     }
 
     const existingDuplicates = findExistingDuplicateStudentNames(
@@ -124,7 +158,10 @@ export async function POST(request: NextRequest) {
     );
 
     if (existingDuplicates.length > 0) {
-      return jsonError(buildDuplicateStudentNameMessage({ existingDuplicates }), 409);
+      return jsonError(
+        buildDuplicateStudentNameMessage({ existingDuplicates }),
+        409,
+      );
     }
 
     const resolvedBranchId = writeBranch.value ?? branchScope.value.branchId;
@@ -164,7 +201,9 @@ export async function POST(request: NextRequest) {
     // Auto-create auth accounts for all imported students.
     // Each student is independent — a failure on one does not block the rest.
     // We track per-student outcomes so the admin can retry only the failed ones.
-    const insertedIds = ((data ?? []) as Array<{ id: string }>).map((row) => row.id).filter(Boolean);
+    const insertedIds = ((data ?? []) as Array<{ id: string }>)
+      .map((row) => row.id)
+      .filter(Boolean);
     let accountsCreated = 0;
     const accountsFailed: Array<{ studentId: string; reason: string }> = [];
 
@@ -177,7 +216,9 @@ export async function POST(request: NextRequest) {
       // of 10 parallel calls instead of sequential calls (~50 batches vs ~500
       // sequential awaits for a 500-student import).
       const CONCURRENCY = 10;
-      const createAccountForStudent = async (studentId: string): Promise<void> => {
+      const createAccountForStudent = async (
+        studentId: string,
+      ): Promise<void> => {
         const { data: student } = await actorSupabase
           .from("students")
           .select("id, full_name, phone")
@@ -189,12 +230,15 @@ export async function POST(request: NextRequest) {
           return;
         }
 
-        const loginIdentifier = await generateManagedLoginIdentifier(actorSupabase, {
-          schoolId: targetSchoolId,
-          role: "student",
-          fullName: student.full_name as string,
-          preferredEmail: "",
-        });
+        const loginIdentifier = await generateManagedLoginIdentifier(
+          actorSupabase,
+          {
+            schoolId: targetSchoolId,
+            role: "student",
+            fullName: student.full_name as string,
+            preferredEmail: "",
+          },
+        );
         const temporaryPassword = generateTemporaryPassword();
         const createdAt = new Date().toISOString();
         const authIdentityPayload = buildManagedAuthIdentityPayload({
@@ -235,7 +279,10 @@ export async function POST(request: NextRequest) {
         if (linkError) {
           // Roll back the auth user so we don't leave an orphaned auth account
           await serviceSupabase.auth.admin.deleteUser(authUserId);
-          accountsFailed.push({ studentId, reason: "فشل ربط حساب المصادقة بالطالب: " + linkError.message });
+          accountsFailed.push({
+            studentId,
+            reason: "فشل ربط حساب المصادقة بالطالب: " + linkError.message,
+          });
           return;
         }
 
@@ -257,10 +304,15 @@ export async function POST(request: NextRequest) {
       // Fan-out in batches of CONCURRENCY to avoid overwhelming the auth service
       for (let i = 0; i < insertedIds.length; i += CONCURRENCY) {
         const batch = insertedIds.slice(i, i + CONCURRENCY);
-        const results = await Promise.allSettled(batch.map((id) => createAccountForStudent(id)));
+        const results = await Promise.allSettled(
+          batch.map((id) => createAccountForStudent(id)),
+        );
         for (const result of results) {
           if (result.status === "rejected") {
-            const reason = result.reason instanceof Error ? result.reason.message : "خطأ غير متوقع";
+            const reason =
+              result.reason instanceof Error
+                ? result.reason.message
+                : "خطأ غير متوقع";
             // studentId not easily recoverable from a rejected promise here;
             // the per-student error push inside createAccountForStudent handles most cases.
             // This catch is a safety net for unexpected throws.
@@ -278,10 +330,15 @@ export async function POST(request: NextRequest) {
       accounts_created: accountsCreated,
       accounts_failed: accountsFailed.length,
       // Only include failed IDs when there are failures so the admin can act on them
-      ...(accountsFailed.length > 0 && { accounts_failed_details: accountsFailed }),
+      ...(accountsFailed.length > 0 && {
+        accounts_failed_details: accountsFailed,
+      }),
     });
   } catch (error) {
     console.error("Bulk import server error:", error);
-    return jsonError(readStudentImportErrorMessage(error, "Import failed"), 500);
+    return jsonError(
+      readStudentImportErrorMessage(error, "Import failed"),
+      500,
+    );
   }
 }

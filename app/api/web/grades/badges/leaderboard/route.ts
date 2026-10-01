@@ -3,6 +3,8 @@ import { resolveSchoolScopedActorContext } from '@/lib/managed-users-server'
 import { enforceRateLimit } from '@/lib/rate-limit'
 import { routeUserHasPermission } from '@/lib/route-permissions'
 import { applyBranchScopeToQuery, resolveBranchScope } from '@/lib/branch-scope'
+import { excludeDeletedStudents } from "@/lib/students/soft-delete";
+import { jsonServerError } from "@/lib/route-utils"
 
 function jsonError(message: string, status: number) {
   return NextResponse.json({ error: { message } }, { status })
@@ -77,7 +79,7 @@ export async function GET(req: NextRequest) {
   let branchStudentIds: string[] | undefined
   if (branchScope.value.branchIds.length > 0) {
     const { data: bs } = await applyBranchScopeToQuery(
-      actorSupabase.from('students').select('id').eq('school_id', targetSchoolId),
+      excludeDeletedStudents(actorSupabase.from('students').select('id')).eq('school_id', targetSchoolId),
       branchScope.value,
     )
     branchStudentIds = ((bs ?? []) as Array<{ id: string }>).map((s) => s.id)
@@ -112,7 +114,7 @@ export async function GET(req: NextRequest) {
         count: 0,
       })
     }
-    return jsonError(`تعذر جلب الشارات: ${error.message}`, 500)
+    return jsonServerError("web/grades/badges/leaderboard", error, "تعذر جلب الشارات.")
   }
 
   const allBadges = (data ?? []) as Array<{
@@ -166,9 +168,9 @@ export async function GET(req: NextRequest) {
 
   if (studentIds.length > 0) {
     try {
-      const { data: studentsData } = await actorSupabase
+      const { data: studentsData } = await excludeDeletedStudents(actorSupabase
         .from('students')
-        .select('id, full_name')
+        .select('id, full_name'))
         .in('id', studentIds)
         .eq('school_id', targetSchoolId)
       ;(studentsData ?? []).forEach((s: { id: string; full_name: string }) => {

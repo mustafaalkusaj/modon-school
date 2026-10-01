@@ -1,9 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
 
-import { applyBranchScopeToQuery, resolveBranchScope } from "@/lib/branch-scope";
+import {
+  applyBranchScopeToQuery,
+  resolveBranchScope,
+} from "@/lib/branch-scope";
 import { resolveSchoolScopedActorContext } from "@/lib/managed-users-server";
 import { enforceRateLimit } from "@/lib/rate-limit";
 import { buildSafeOrFilter } from "@/lib/supabase-query-helpers";
+import { jsonServerError } from "@/lib/route-utils";
+import { excludeDeletedStudents } from "@/lib/students/soft-delete";
 
 function jsonError(message: string, status: number) {
   return NextResponse.json({ error: { message } }, { status });
@@ -28,10 +33,17 @@ export async function GET(req: NextRequest) {
   );
 
   if (!context.ok) {
-    return jsonError("message" in context ? context.message : "تعذر التحقق من صلاحيات المستخدم.", "status" in context ? context.status : 500);
+    return jsonError(
+      "message" in context
+        ? context.message
+        : "تعذر التحقق من صلاحيات المستخدم.",
+      "status" in context ? context.status : 500,
+    );
   }
 
-  const requestedBranchId = req.nextUrl.searchParams.get("branchId") ?? req.nextUrl.searchParams.get("branch_id");
+  const requestedBranchId =
+    req.nextUrl.searchParams.get("branchId") ??
+    req.nextUrl.searchParams.get("branch_id");
   const branchScope = resolveBranchScope(context.value, requestedBranchId);
   if (!branchScope.ok) {
     return jsonError(branchScope.message, branchScope.status);
@@ -47,10 +59,13 @@ export async function GET(req: NextRequest) {
   if (rateLimited) return rateLimited;
 
   let query = applyBranchScopeToQuery(
-    context.value.actorSupabase
-      .from("students")
-      .select("id, school_id, auth_user_id, full_name, class_name, section, status")
-      .eq("school_id", context.value.targetSchoolId),
+    excludeDeletedStudents(
+      context.value.actorSupabase
+        .from("students")
+        .select(
+          "id, school_id, auth_user_id, full_name, class_name, section, status",
+        ),
+    ).eq("school_id", context.value.targetSchoolId),
     branchScope.value,
   ).order("created_at", { ascending: false });
 
@@ -74,7 +89,12 @@ export async function GET(req: NextRequest) {
 
   const { data, error } = await query;
   if (error) {
-    return jsonError(error.message || "تعذر تحميل بيانات بطاقات الدخول.", 500);
+    return jsonServerError(
+      "web-students-credential-cards",
+      error,
+      "تعذر تحميل بيانات بطاقات الدخول.",
+      500,
+    );
   }
 
   return NextResponse.json({

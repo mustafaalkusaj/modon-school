@@ -4,6 +4,7 @@ import { uploadLogoToStorage } from "@/lib/logo-upload-server";
 import { resolveSchoolScopedActorContext } from "@/lib/managed-users-server";
 import { enforceRateLimit } from "@/lib/rate-limit";
 import { RBAC_COOKIE_NAME, verifyRBACSession } from "@/lib/rbac-session";
+import { jsonServerError } from "@/lib/route-utils";
 
 export async function POST(req: NextRequest) {
   const session = await verifyRBACSession(req.cookies.get(RBAC_COOKIE_NAME)?.value);
@@ -57,9 +58,6 @@ export async function POST(req: NextRequest) {
     });
     return NextResponse.json({ ok: true, url });
   } catch (err) {
-    return NextResponse.json(
-      { error: { message: err instanceof Error ? err.message : "تعذر رفع الملف." } },
-      { status: 500 },
-    );
+    return jsonServerError("web/grades/certificate-upload", err, "تعذر رفع الملف.");
   }
 }

@@ -64,16 +64,13 @@ export async function POST(req: NextRequest) {
 
     // ── Validate QR token ──────────────────────────────────────────────
     _step = "validate_token";
-    console.log("[qr-login] validating token:", token.slice(0, 8) + "...");
     const qrRow = await validateQrToken(token);
     if (!qrRow) {
-      console.log("[qr-login] token invalid — not found or expired");
       return NextResponse.json(
         { error: "invalid_token", code: "QR_LOGIN_INVALID_TOKEN" },
         { status: 401, headers: { "Cache-Control": "no-store" } },
       );
     }
-    console.log("[qr-login] token valid, user_id:", qrRow.user_id);
 
     // ── Resolve user profile ───────────────────────────────────────────
     _step = "profile_lookup";
@@ -89,16 +86,12 @@ export async function POST(req: NextRequest) {
     });
 
     if (profileLookupFailed || !resolved) {
-      console.log("[qr-login] profile lookup failed for user:", qrRow.user_id);
       return NextResponse.json(
         { error: "login_failed", code: "QR_LOGIN_PROFILE_LOOKUP_FAILED" },
         { status: 500, headers: { "Cache-Control": "no-store" } },
       );
     }
-
-    console.log("[qr-login] resolved status:", resolved.status);
     if (resolved.status === "profile_missing" || resolved.status === "unknown_role") {
-      console.log("[qr-login] BLOCKED — profile_missing or unknown_role for user:", qrRow.user_id);
       return NextResponse.json(
         { error: "invalid_token", code: "QR_LOGIN_INVALID_TOKEN" },
         { status: 401, headers: { "Cache-Control": "no-store" } },
@@ -106,7 +99,6 @@ export async function POST(req: NextRequest) {
     }
 
     const { profile, snapshot } = resolved;
-    console.log("[qr-login] profile.is_active:", profile.is_active, "role:", snapshot.role);
     // Platform-wide accounts must never be reachable through a QR token.
     if (snapshot.role === "super_admin") {
       return NextResponse.json(

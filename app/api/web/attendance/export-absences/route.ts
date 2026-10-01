@@ -1,10 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
 
-import { applyBranchScopeToQuery, resolveBranchScope } from "@/lib/branch-scope";
+import {
+  applyBranchScopeToQuery,
+  resolveBranchScope,
+} from "@/lib/branch-scope";
 import { resolveSchoolScopedActorContext } from "@/lib/managed-users-server";
 import { enforceRateLimit } from "@/lib/rate-limit";
 import { routeUserHasPermission } from "@/lib/route-permissions";
+import { jsonServerError } from "@/lib/route-utils";
 import { addDaysBaghdadIso, todayBaghdadIso } from "@/lib/tz";
+import { excludeDeletedStudents } from "@/lib/students/soft-delete";
 
 type AttendanceStatus = "present" | "absent" | "late" | "excused";
 
@@ -41,7 +46,10 @@ function escapeCsv(value: unknown) {
 export async function GET(req: NextRequest) {
   const schoolId = req.nextUrl.searchParams.get("schoolId");
   const requestedBranchId = req.nextUrl.searchParams.get("branchId");
-  const className = normalizeText(req.nextUrl.searchParams.get("className"), 60);
+  const className = normalizeText(
+    req.nextUrl.searchParams.get("className"),
+    60,
+  );
   const section = normalizeText(req.nextUrl.searchParams.get("section"), 20);
 
   const context = await resolveSchoolScopedActorContext(
@@ -55,7 +63,9 @@ export async function GET(req: NextRequest) {
 
   if (!context.ok) {
     return jsonError(
-      "message" in context ? context.message : "تعذر التحقق من صلاحيات المستخدم.",
+      "message" in context
+        ? context.message
+        : "تعذر التحقق من صلاحيات المستخدم.",
       "status" in context ? context.status : 500,
     );
   }
@@ -90,7 +100,8 @@ export async function GET(req: NextRequest) {
 
   const defaultTo = todayBaghdadIso();
   const defaultFrom = addDaysBaghdadIso(-30);
-  const fromDate = normalizeDate(req.nextUrl.searchParams.get("from")) ?? defaultFrom;
+  const fromDate =
+    normalizeDate(req.nextUrl.searchParams.get("from")) ?? defaultFrom;
   const toDate = normalizeDate(req.nextUrl.searchParams.get("to")) ?? defaultTo;
 
   if (fromDate > toDate) {
@@ -99,14 +110,19 @@ export async function GET(req: NextRequest) {
 
   // Safety limit for exports.
   if (daysBetween(fromDate, toDate) > 92) {
-    return jsonError("نطاق التصدير كبير جدًا. يرجى تقليص الفترة إلى 3 أشهر كحد أقصى.", 400);
+    return jsonError(
+      "نطاق التصدير كبير جدًا. يرجى تقليص الفترة إلى 3 أشهر كحد أقصى.",
+      400,
+    );
   }
 
   // 1) Resolve students for the class/section within the target school.
   let studentsQuery = applyBranchScopeToQuery(
-    context.value.actorSupabase
-      .from("students")
-      .select("id, full_name, class_name, section")
+    excludeDeletedStudents(
+      context.value.actorSupabase
+        .from("students")
+        .select("id, full_name, class_name, section"),
+    )
       .eq("school_id", context.value.targetSchoolId)
       .eq("class_name", className)
       .neq("status", "deleted")
@@ -119,7 +135,12 @@ export async function GET(req: NextRequest) {
 
   const { data: studentsData, error: studentsError } = await studentsQuery;
   if (studentsError) {
-    return jsonError(studentsError.message || "تعذر تحميل طلاب الصف.", 500);
+    return jsonServerError(
+      "web-attendance-export-absences",
+      studentsError,
+      "تعذر تحميل طلاب الصف.",
+      500,
+    );
   }
 
   const students = (Array.isArray(studentsData) ? studentsData : [])
@@ -127,7 +148,10 @@ export async function GET(req: NextRequest) {
       id: String((row as Record<string, unknown>).id ?? ""),
       full_name: String((row as Record<string, unknown>).full_name ?? ""),
       class_name: String((row as Record<string, unknown>).class_name ?? ""),
-      section: typeof (row as Record<string, unknown>).section === "string" ? ((row as Record<string, unknown>).section as string) : null,
+      section:
+        typeof (row as Record<string, unknown>).section === "string"
+          ? ((row as Record<string, unknown>).section as string)
+          : null,
     }))
     .filter((row) => row.id && row.full_name);
 
@@ -142,7 +166,9 @@ export async function GET(req: NextRequest) {
         "absent_dates / تواريخ الغياب",
         "late_count / عدد أيام التأخر",
         "late_dates / تواريخ التأخر",
-      ].map(escapeCsv).join(","),
+      ]
+        .map(escapeCsv)
+        .join(","),
       "",
     ].join("\n");
     return new NextResponse("\ufeff" + csv, {
@@ -158,26 +184,33 @@ export async function GET(req: NextRequest) {
   const studentIds = students.map((s) => s.id);
 
   // 2) Fetch attendance rows (absent + late) for the class range.
-  const { data: attendanceData, error: attendanceError } = await applyBranchScopeToQuery(
-    context.value.actorSupabase
-      .from("attendance_records")
-      .select("student_id, attendance_date, status")
-      .eq("school_id", context.value.targetSchoolId)
-      .in("student_id", studentIds)
-      .gte("attendance_date", fromDate)
-      .lte("attendance_date", toDate)
-      .in("status", ["absent", "late"] satisfies AttendanceStatus[])
-      .order("attendance_date", { ascending: false })
-      .limit(50_000),
-    branchScope.value,
-  );
+  const { data: attendanceData, error: attendanceError } =
+    await applyBranchScopeToQuery(
+      context.value.actorSupabase
+        .from("attendance_records")
+        .select("student_id, attendance_date, status")
+        .eq("school_id", context.value.targetSchoolId)
+        .in("student_id", studentIds)
+        .gte("attendance_date", fromDate)
+        .lte("attendance_date", toDate)
+        .in("status", ["absent", "late"] satisfies AttendanceStatus[])
+        .order("attendance_date", { ascending: false })
+        .limit(50_000),
+      branchScope.value,
+    );
 
   if (attendanceError) {
-    return jsonError(attendanceError.message || "تعذر تحميل سجلات الغياب.", 500);
+    return jsonServerError(
+      "web-attendance-export-absences",
+      attendanceError,
+      "تعذر تحميل سجلات الغياب.",
+      500,
+    );
   }
 
   const ATTENDANCE_LIMIT = 50_000;
-  const isTruncated = Array.isArray(attendanceData) && attendanceData.length === ATTENDANCE_LIMIT;
+  const isTruncated =
+    Array.isArray(attendanceData) && attendanceData.length === ATTENDANCE_LIMIT;
 
   const perStudent = new Map<
     string,
@@ -192,9 +225,15 @@ export async function GET(req: NextRequest) {
   }
 
   for (const row of Array.isArray(attendanceData) ? attendanceData : []) {
-    const studentIdValue = String((row as Record<string, unknown>).student_id ?? "");
-    const dateValue = String((row as Record<string, unknown>).attendance_date ?? "");
-    const statusValue = String((row as Record<string, unknown>).status ?? "") as AttendanceStatus;
+    const studentIdValue = String(
+      (row as Record<string, unknown>).student_id ?? "",
+    );
+    const dateValue = String(
+      (row as Record<string, unknown>).attendance_date ?? "",
+    );
+    const statusValue = String(
+      (row as Record<string, unknown>).status ?? "",
+    ) as AttendanceStatus;
     if (!studentIdValue || !dateValue) continue;
     const entry = perStudent.get(studentIdValue);
     if (!entry) continue;
@@ -217,7 +256,10 @@ export async function GET(req: NextRequest) {
   const lines = [header.map(escapeCsv).join(",")];
 
   for (const student of students) {
-    const entry = perStudent.get(student.id) ?? { absentDates: [], lateDates: [] };
+    const entry = perStudent.get(student.id) ?? {
+      absentDates: [],
+      lateDates: [],
+    };
     lines.push(
       [
         student.id,
@@ -238,7 +280,10 @@ export async function GET(req: NextRequest) {
   const format = req.nextUrl.searchParams.get("format");
   if (format === "json") {
     const jsonItems = students.map((student) => {
-      const entry = perStudent.get(student.id) ?? { absentDates: [], lateDates: [] };
+      const entry = perStudent.get(student.id) ?? {
+        absentDates: [],
+        lateDates: [],
+      };
       return {
         student_name: student.full_name,
         class_name: student.class_name,
@@ -270,4 +315,3 @@ export async function GET(req: NextRequest) {
     headers: csvHeaders,
   });
 }
-

@@ -1,11 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
 
 import { sanitizeImageUrl } from "@/lib/brand/asset-url";
-import { detectAdminInfrastructure, isInfrastructureCompatError } from "@/lib/admin-infrastructure";
+import {
+  detectAdminInfrastructure,
+  isInfrastructureCompatError,
+} from "@/lib/admin-infrastructure";
 import { detectAppSchemaCompatWithClient } from "@/lib/schema-compat";
 import { resolveSuperAdminActorContext } from "@/lib/super-admin-server";
 import { rateLimitMiddleware, RATE_LIMIT_CONFIG } from "@/lib/rate-limit";
 import { logger } from "@/lib/logger";
+import { jsonServerError } from "@/lib/route-utils";
 import { addDaysBaghdadIso, todayBaghdadIso } from "@/lib/tz";
 
 function jsonError(message: string, status: number) {
@@ -49,7 +53,9 @@ type SubscriptionRecord = {
   created_at?: string | null;
 };
 
-function buildSchoolSelect(schemaCompat: Awaited<ReturnType<typeof detectAppSchemaCompatWithClient>>) {
+function buildSchoolSelect(
+  schemaCompat: Awaited<ReturnType<typeof detectAppSchemaCompatWithClient>>,
+) {
   return schemaCompat.schoolColors
     ? "id, name, address, phone, owner_email, city, logo_url, primary_color, secondary_color, plan, is_active, created_at"
     : "id, name, address, phone, owner_email, city, logo_url, plan, is_active, created_at";
@@ -67,7 +73,10 @@ export async function GET(req: NextRequest) {
   const requestId = Math.random().toString(36).substring(7);
 
   // Rate limiting check
-  const rateLimitResult = await rateLimitMiddleware(req, RATE_LIMIT_CONFIG.SUPER_ADMIN);
+  const rateLimitResult = await rateLimitMiddleware(
+    req,
+    RATE_LIMIT_CONFIG.SUPER_ADMIN,
+  );
   if (!rateLimitResult.ok) {
     logger.warn("Rate limit exceeded for GET /schools", {
       ip: rateLimitResult.clientId,
@@ -75,59 +84,100 @@ export async function GET(req: NextRequest) {
     });
     return jsonError(
       rateLimitResult.message || "تم تجاوز حد الطلبات المسموح",
-      rateLimitResult.status || 429
+      rateLimitResult.status || 429,
     );
   }
 
   // Log API request
-  logger.logApiRequest("/api/web/super-admin/schools", "GET", undefined, rateLimitResult.clientId);
+  logger.logApiRequest(
+    "/api/web/super-admin/schools",
+    "GET",
+    undefined,
+    rateLimitResult.clientId,
+  );
 
   try {
-    const context = await resolveSuperAdminActorContext(req.headers.get("authorization"));
+    const context = await resolveSuperAdminActorContext(
+      req.headers.get("authorization"),
+    );
     if (!context.ok) {
       logger.warn("Authentication failed for GET /schools", {
         requestId,
         reason: "message" in context ? context.message : "Invalid credentials",
       });
-      return jsonError("message" in context ? context.message : "تعذر التحقق من صلاحيات المستخدم.", "status" in context ? context.status : 500);
+      return jsonError(
+        "message" in context
+          ? context.message
+          : "تعذر التحقق من صلاحيات المستخدم.",
+        "status" in context ? context.status : 500,
+      );
     }
 
     const { dataSupabase } = context.value;
     const schemaCompat = await detectAppSchemaCompatWithClient(dataSupabase);
     const schoolSelect = buildSchoolSelect(schemaCompat);
 
-    const [{ data: schoolsData, error: schoolsError }, { data: subscriptionsData, error: subscriptionsError }] =
-      await Promise.all([
-        dataSupabase.from("schools").select(schoolSelect).order("created_at", { ascending: false }),
-        dataSupabase
-          .from("subscriptions")
-          .select("id, school_id, plan, status, start_date, end_date, created_at")
-          .order("created_at", { ascending: false }),
-      ]);
+    const [
+      { data: schoolsData, error: schoolsError },
+      { data: subscriptionsData, error: subscriptionsError },
+    ] = await Promise.all([
+      dataSupabase
+        .from("schools")
+        .select(schoolSelect)
+        .order("created_at", { ascending: false }),
+      dataSupabase
+        .from("subscriptions")
+        .select("id, school_id, plan, status, start_date, end_date, created_at")
+        .order("created_at", { ascending: false }),
+    ]);
 
     if (schoolsError) {
-      logger.error("Failed to fetch schools", new Error(schoolsError.message), { requestId });
-      return jsonError(schoolsError.message || "تعذر تحميل المدارس.", 500);
+      logger.error("Failed to fetch schools", new Error(schoolsError.message), {
+        requestId,
+      });
+      return jsonServerError(
+        "web-super-admin-schools",
+        schoolsError,
+        "تعذر تحميل المدارس.",
+        500,
+      );
     }
 
     if (subscriptionsError) {
-      logger.error("Failed to fetch subscriptions", new Error(subscriptionsError.message), { requestId });
-      return jsonError(subscriptionsError.message || "تعذر تحميل الاشتراكات.", 500);
+      logger.error(
+        "Failed to fetch subscriptions",
+        new Error(subscriptionsError.message),
+        { requestId },
+      );
+      return jsonServerError(
+        "web-super-admin-schools",
+        subscriptionsError,
+        "تعذر تحميل الاشتراكات.",
+        500,
+      );
     }
 
-    const schools = ((schoolsData ?? []) as unknown as SchoolRecord[]).map((school) => ({
-      ...school,
-      logo_url: normalizeLogoUrl(school.logo_url),
-    }));
+    const schools = ((schoolsData ?? []) as unknown as SchoolRecord[]).map(
+      (school) => ({
+        ...school,
+        logo_url: normalizeLogoUrl(school.logo_url),
+      }),
+    );
 
     const latestSubscriptionsBySchool = new Map<string, SubscriptionRecord>();
-    for (const subscription of (subscriptionsData ?? []) as SubscriptionRecord[]) {
+    for (const subscription of (subscriptionsData ??
+      []) as SubscriptionRecord[]) {
       if (!latestSubscriptionsBySchool.has(subscription.school_id)) {
         latestSubscriptionsBySchool.set(subscription.school_id, subscription);
       }
     }
 
-    logger.logApiResponse("/api/web/super-admin/schools", 200, Date.now() - startTime, context.value.actorUserId);
+    logger.logApiResponse(
+      "/api/web/super-admin/schools",
+      200,
+      Date.now() - startTime,
+      context.value.actorUserId,
+    );
 
     return NextResponse.json({
       ok: true,
@@ -139,7 +189,7 @@ export async function GET(req: NextRequest) {
     logger.error(
       "Unexpected error in GET /schools",
       error instanceof Error ? error : new Error(String(error)),
-      { requestId }
+      { requestId },
     );
     return jsonError("حدث خطأ غير متوقع. يرجى المحاولة لاحقاً.", 500);
   }
@@ -150,7 +200,10 @@ export async function POST(req: NextRequest) {
   const requestId = Math.random().toString(36).substring(7);
 
   // Rate limiting check
-  const rateLimitResult = await rateLimitMiddleware(req, RATE_LIMIT_CONFIG.SUPER_ADMIN);
+  const rateLimitResult = await rateLimitMiddleware(
+    req,
+    RATE_LIMIT_CONFIG.SUPER_ADMIN,
+  );
   if (!rateLimitResult.ok) {
     logger.warn("Rate limit exceeded for POST /schools", {
       ip: rateLimitResult.clientId,
@@ -158,26 +211,43 @@ export async function POST(req: NextRequest) {
     });
     return jsonError(
       rateLimitResult.message || "تم تجاوز حد الطلبات المسموح",
-      rateLimitResult.status || 429
+      rateLimitResult.status || 429,
     );
   }
 
   // Log API request
-  logger.logApiRequest("/api/web/super-admin/schools", "POST", undefined, rateLimitResult.clientId);
+  logger.logApiRequest(
+    "/api/web/super-admin/schools",
+    "POST",
+    undefined,
+    rateLimitResult.clientId,
+  );
 
   try {
-    const context = await resolveSuperAdminActorContext(req.headers.get("authorization"));
+    const context = await resolveSuperAdminActorContext(
+      req.headers.get("authorization"),
+    );
     if (!context.ok) {
       logger.warn("Authentication failed for POST /schools", {
         requestId,
         reason: "message" in context ? context.message : "Invalid credentials",
       });
-      return jsonError("message" in context ? context.message : "تعذر التحقق من صلاحيات المستخدم.", "status" in context ? context.status : 500);
+      return jsonError(
+        "message" in context
+          ? context.message
+          : "تعذر التحقق من صلاحيات المستخدم.",
+        "status" in context ? context.status : 500,
+      );
     }
 
-    const body = (await req.json().catch(() => null)) as CreateSchoolBody | null;
+    const body = (await req
+      .json()
+      .catch(() => null)) as CreateSchoolBody | null;
     const name = typeof body?.name === "string" ? body.name.trim() : "";
-    const plan = body?.plan === "premium" || body?.plan === "enterprise" ? body.plan : "basic";
+    const plan =
+      body?.plan === "premium" || body?.plan === "enterprise"
+        ? body.plan
+        : "basic";
 
     if (!name) {
       logger.warn("Invalid request: school name is required", { requestId });
@@ -185,75 +255,103 @@ export async function POST(req: NextRequest) {
     }
 
     const { dataSupabase } = context.value;
-  const [infrastructure, schemaCompat] = await Promise.all([
-    detectAdminInfrastructure(dataSupabase),
-    detectAppSchemaCompatWithClient(dataSupabase),
-  ]);
-  const schoolSelect = buildSchoolSelect(schemaCompat);
+    const [infrastructure, schemaCompat] = await Promise.all([
+      detectAdminInfrastructure(dataSupabase),
+      detectAppSchemaCompatWithClient(dataSupabase),
+    ]);
+    const schoolSelect = buildSchoolSelect(schemaCompat);
 
-  // Create a school_group entry first (group = top-level entity, name only)
-  let groupId: string | null = null;
-  const { data: groupData, error: groupError } = await dataSupabase
-    .from("school_groups")
-    .insert({ name })
-    .select("id")
-    .single();
-  if (!groupError && groupData) {
-    groupId = (groupData as { id: string }).id;
-  }
-
-  const schoolPayload = {
-    name,
-    address: typeof body?.address === "string" && body.address.trim() ? body.address.trim() : null,
-    phone: typeof body?.phone === "string" && body.phone.trim() ? body.phone.trim() : null,
-    owner_email: typeof body?.owner_email === "string" && body.owner_email.trim() ? body.owner_email.trim() : null,
-    city: typeof body?.city === "string" && body.city.trim() ? body.city.trim() : null,
-    logo_url: normalizeLogoUrl(body?.logo_url),
-    ...(schemaCompat.schoolColors
-      ? {
-          primary_color:
-            typeof body?.primary_color === "string" && body.primary_color.trim() ? body.primary_color.trim() : null,
-          secondary_color:
-            typeof body?.secondary_color === "string" && body.secondary_color.trim() ? body.secondary_color.trim() : null,
-        }
-      : {}),
-    plan,
-    is_active: true,
-    ...(groupId ? { group_id: groupId } : {}),
-  };
-
-  const { data: school, error: schoolError } = await dataSupabase
-    .from("schools")
-    .insert(schoolPayload)
-    .select(schoolSelect)
-    .single();
-
-  if (schoolError || !school) {
-    if (groupId) {
-      await dataSupabase.from("school_groups").delete().eq("id", groupId);
+    // Create a school_group entry first (group = top-level entity, name only)
+    let groupId: string | null = null;
+    const { data: groupData, error: groupError } = await dataSupabase
+      .from("school_groups")
+      .insert({ name })
+      .select("id")
+      .single();
+    if (!groupError && groupData) {
+      groupId = (groupData as { id: string }).id;
     }
-    return jsonError(schoolError?.message || "تعذر إنشاء المدرسة.", 500);
-  }
-  const createdSchool = school as unknown as SchoolRecord;
 
-  const startDate = todayBaghdadIso();
-  const endDate = addDaysBaghdadIso(365);
-  const { data: subscription, error: subscriptionError } = await dataSupabase
-    .from("subscriptions")
-    .insert({
-      school_id: createdSchool.id,
+    const schoolPayload = {
+      name,
+      address:
+        typeof body?.address === "string" && body.address.trim()
+          ? body.address.trim()
+          : null,
+      phone:
+        typeof body?.phone === "string" && body.phone.trim()
+          ? body.phone.trim()
+          : null,
+      owner_email:
+        typeof body?.owner_email === "string" && body.owner_email.trim()
+          ? body.owner_email.trim()
+          : null,
+      city:
+        typeof body?.city === "string" && body.city.trim()
+          ? body.city.trim()
+          : null,
+      logo_url: normalizeLogoUrl(body?.logo_url),
+      ...(schemaCompat.schoolColors
+        ? {
+            primary_color:
+              typeof body?.primary_color === "string" &&
+              body.primary_color.trim()
+                ? body.primary_color.trim()
+                : null,
+            secondary_color:
+              typeof body?.secondary_color === "string" &&
+              body.secondary_color.trim()
+                ? body.secondary_color.trim()
+                : null,
+          }
+        : {}),
       plan,
-      status: "active",
-      start_date: startDate,
-      end_date: endDate,
-    })
-    .select("id, school_id, plan, status, start_date, end_date, created_at")
-    .single();
+      is_active: true,
+      ...(groupId ? { group_id: groupId } : {}),
+    };
 
-  if (subscriptionError || !subscription) {
-    await dataSupabase.from("schools").delete().eq("id", createdSchool.id);
-    return jsonError(subscriptionError?.message || "تعذر إنشاء اشتراك المدرسة.", 500);
-  }
+    const { data: school, error: schoolError } = await dataSupabase
+      .from("schools")
+      .insert(schoolPayload)
+      .select(schoolSelect)
+      .single();
+
+    if (schoolError || !school) {
+      if (groupId) {
+        await dataSupabase.from("school_groups").delete().eq("id", groupId);
+      }
+      return jsonServerError(
+        "web-super-admin-schools",
+        schoolError,
+        "تعذر إنشاء المدرسة.",
+        500,
+      );
+    }
+    const createdSchool = school as unknown as SchoolRecord;
+
+    const startDate = todayBaghdadIso();
+    const endDate = addDaysBaghdadIso(365);
+    const { data: subscription, error: subscriptionError } = await dataSupabase
+      .from("subscriptions")
+      .insert({
+        school_id: createdSchool.id,
+        plan,
+        status: "active",
+        start_date: startDate,
+        end_date: endDate,
+      })
+      .select("id, school_id, plan, status, start_date, end_date, created_at")
+      .single();
+
+    if (subscriptionError || !subscription) {
+      await dataSupabase.from("schools").delete().eq("id", createdSchool.id);
+      return jsonServerError(
+        "web-super-admin-schools",
+        subscriptionError,
+        "تعذر إنشاء اشتراك المدرسة.",
+        500,
+      );
+    }
 
     let branchSkipped = !infrastructure.branches;
     if (!branchSkipped) {
@@ -263,27 +361,55 @@ export async function POST(req: NextRequest) {
         ...(schemaCompat.branchesIsMain ? { is_main: true } : {}),
       };
 
-      const { error: branchError } = await dataSupabase.from("branches").insert(branchPayload);
+      const { error: branchError } = await dataSupabase
+        .from("branches")
+        .insert(branchPayload);
       if (branchError) {
         if (isInfrastructureCompatError(branchError)) {
           branchSkipped = true;
         } else {
-          logger.error("Failed to create main branch", new Error(branchError.message), { requestId, schoolId: createdSchool.id });
-          await dataSupabase.from("subscriptions").delete().eq("id", subscription.id);
-          await dataSupabase.from("schools").delete().eq("id", createdSchool.id);
-          return jsonError(branchError.message || "تعذر إنشاء الفرع الرئيسي.", 500);
+          logger.error(
+            "Failed to create main branch",
+            new Error(branchError.message),
+            { requestId, schoolId: createdSchool.id },
+          );
+          await dataSupabase
+            .from("subscriptions")
+            .delete()
+            .eq("id", subscription.id);
+          await dataSupabase
+            .from("schools")
+            .delete()
+            .eq("id", createdSchool.id);
+          return jsonServerError(
+            "web-super-admin-schools",
+            branchError,
+            "تعذر إنشاء الفرع الرئيسي.",
+            500,
+          );
         }
       }
     }
 
     // Log school creation
-    logger.logDataModification("create", "schools", createdSchool.id, context.value.actorUserId, {
-      name,
-      plan,
-      city: body?.city,
-    });
+    logger.logDataModification(
+      "create",
+      "schools",
+      createdSchool.id,
+      context.value.actorUserId,
+      {
+        name,
+        plan,
+        city: body?.city,
+      },
+    );
 
-    logger.logApiResponse("/api/web/super-admin/schools", 201, Date.now() - startTime, context.value.actorUserId);
+    logger.logApiResponse(
+      "/api/web/super-admin/schools",
+      201,
+      Date.now() - startTime,
+      context.value.actorUserId,
+    );
 
     return NextResponse.json(
       {
@@ -299,7 +425,7 @@ export async function POST(req: NextRequest) {
     logger.error(
       "Unexpected error in POST /schools",
       error instanceof Error ? error : new Error(String(error)),
-      { requestId }
+      { requestId },
     );
     return jsonError("حدث خطأ غير متوقع. يرجى المحاولة لاحقاً.", 500);
   }

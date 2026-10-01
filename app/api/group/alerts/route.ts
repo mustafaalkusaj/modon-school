@@ -8,7 +8,10 @@ function getService() {
   return createServiceSupabaseClient();
 }
 
-async function resolveAuthorizedGroupId(req: NextRequest, requestedGroupId: string | null) {
+async function resolveAuthorizedGroupId(
+  req: NextRequest,
+  requestedGroupId: string | null,
+) {
   if (!requestedGroupId) {
     return { ok: false as const, status: 400, message: "groupId مطلوب" };
   }
@@ -17,7 +20,8 @@ async function resolveAuthorizedGroupId(req: NextRequest, requestedGroupId: stri
     null,
     {
       allowedRoles: ["admin"],
-      roleDeniedMessage: "هذه الواجهة مخصصة لمدير المدرسة على مستوى المدرسة فقط.",
+      roleDeniedMessage:
+        "هذه الواجهة مخصصة لمدير المدرسة على مستوى المدرسة فقط.",
     },
     req.headers.get("authorization"),
   );
@@ -26,12 +30,19 @@ async function resolveAuthorizedGroupId(req: NextRequest, requestedGroupId: stri
     return {
       ok: false as const,
       status: "status" in context ? context.status : 500,
-      message: "message" in context ? context.message : "تعذر التحقق من صلاحيات المستخدم.",
+      message:
+        "message" in context
+          ? context.message
+          : "تعذر التحقق من صلاحيات المستخدم.",
     };
   }
 
   if (context.value.scopeLevel !== "group_admin") {
-    return { ok: false as const, status: 403, message: "لا تملك صلاحية الوصول إلى تنبيهات المجموعة." };
+    return {
+      ok: false as const,
+      status: 403,
+      message: "لا تملك صلاحية الوصول إلى تنبيهات المجموعة.",
+    };
   }
 
   const { data: school, error } = await context.value.actorSupabase
@@ -41,18 +52,29 @@ async function resolveAuthorizedGroupId(req: NextRequest, requestedGroupId: stri
     .maybeSingle();
 
   if (error || !school?.id || !school.group_id) {
-    return { ok: false as const, status: 404, message: "المجموعة الحالية غير متاحة لهذا المستخدم." };
+    return {
+      ok: false as const,
+      status: 404,
+      message: "المجموعة الحالية غير متاحة لهذا المستخدم.",
+    };
   }
 
   if (school.group_id !== requestedGroupId) {
-    return { ok: false as const, status: 403, message: "لا يمكنك الوصول إلى مجموعة أخرى." };
+    return {
+      ok: false as const,
+      status: 403,
+      message: "لا يمكنك الوصول إلى مجموعة أخرى.",
+    };
   }
 
   return { ok: true as const, groupId: school.group_id };
 }
 
 export async function GET(req: NextRequest) {
-  const auth = await resolveAuthorizedGroupId(req, req.nextUrl.searchParams.get("groupId"));
+  const auth = await resolveAuthorizedGroupId(
+    req,
+    req.nextUrl.searchParams.get("groupId"),
+  );
   if (!auth.ok) {
     return jsonError(auth.message, auth.status);
   }
@@ -60,7 +82,9 @@ export async function GET(req: NextRequest) {
   const service = getService();
   const { data, error } = await service
     .from("group_alerts")
-    .select("id, group_id, title, message, type, is_read, created_at, updated_at")
+    // group_alerts has no title/updated_at column on the live schema; selecting
+    // them failed the whole query with PostgREST 42703 (endpoint always 500).
+    .select("id, group_id, branch_id, message, type, is_read, created_at")
     .eq("group_id", auth.groupId)
     .eq("is_read", false)
     .order("created_at", { ascending: false });
@@ -73,7 +97,10 @@ export async function GET(req: NextRequest) {
 }
 
 export async function PATCH(req: NextRequest) {
-  const body = (await req.json().catch(() => null)) as { id?: string; groupId?: string } | null;
+  const body = (await req.json().catch(() => null)) as {
+    id?: string;
+    groupId?: string;
+  } | null;
   const auth = await resolveAuthorizedGroupId(req, body?.groupId ?? null);
   if (!auth.ok) {
     return jsonError(auth.message, auth.status);
@@ -96,4 +123,3 @@ export async function PATCH(req: NextRequest) {
 
   return NextResponse.json({ ok: true });
 }
-

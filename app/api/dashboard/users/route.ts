@@ -1,7 +1,11 @@
 import { toManagedAuthEmail } from "@/lib/managed-users/auth-email";
 import { NextRequest, NextResponse } from "next/server";
 
-import { isInfrastructureCompatError, isMissingColumnError, isMissingTableError } from "@/lib/admin-infrastructure";
+import {
+  isInfrastructureCompatError,
+  isMissingColumnError,
+  isMissingTableError,
+} from "@/lib/admin-infrastructure";
 import { buildSafeOrFilter } from "@/lib/supabase-query-helpers";
 import {
   MANAGED_USER_INACTIVE_BAN_DURATION,
@@ -51,20 +55,31 @@ import {
   normalizeClassName,
   normalizeSection,
 } from "@/lib/normalization";
+import { excludeDeletedStudents } from "@/lib/students/soft-delete";
 
-function jsonError(message: string, status: number, fieldErrors?: Record<string, string>) {
+import { jsonServerError } from "@/lib/route-utils";
+function jsonError(
+  message: string,
+  status: number,
+  fieldErrors?: Record<string, string>,
+) {
   return NextResponse.json(
     {
       error: {
         message,
-        ...(fieldErrors && Object.keys(fieldErrors).length > 0 ? { fieldErrors } : {}),
+        ...(fieldErrors && Object.keys(fieldErrors).length > 0
+          ? { fieldErrors }
+          : {}),
       },
     },
     { status },
   );
 }
 
-function getPostgrestStatus(error: { code?: string | null } | null | undefined, fallback = 500) {
+function getPostgrestStatus(
+  error: { code?: string | null } | null | undefined,
+  fallback = 500,
+) {
   if (!error?.code) return fallback;
   if (error.code === "23505") return 409;
   if (error.code === "23503" || error.code === "23514") return 400;
@@ -88,9 +103,16 @@ type LegacyTeacherAssignment = {
 };
 
 function getPrimaryTeacherSubjectName(user: {
-  teacher?: { specialization?: string | null; assignments?: Array<{ subject_name: string }> | null } | null;
+  teacher?: {
+    specialization?: string | null;
+    assignments?: Array<{ subject_name: string }> | null;
+  } | null;
 }) {
-  return user.teacher?.specialization ?? user.teacher?.assignments?.[0]?.subject_name ?? null;
+  return (
+    user.teacher?.specialization ??
+    user.teacher?.assignments?.[0]?.subject_name ??
+    null
+  );
 }
 
 function teacherAssignmentMatchesFilters(
@@ -102,12 +124,16 @@ function teacherAssignmentMatchesFilters(
   },
 ) {
   const classMatches =
-    !filters.classFilter || normalizeIdentityText(assignment.class_name) === filters.classFilter;
+    !filters.classFilter ||
+    normalizeIdentityText(assignment.class_name) === filters.classFilter;
   const subjectMatches =
-    !filters.subjectFilter || normalizeIdentityText(assignment.subject_name) === filters.subjectFilter;
+    !filters.subjectFilter ||
+    normalizeIdentityText(assignment.subject_name) === filters.subjectFilter;
   const normalizedSection = normalizeIdentityText(assignment.section_name);
   const sectionMatches =
-    !filters.sectionFilter || !normalizedSection || normalizedSection === filters.sectionFilter;
+    !filters.sectionFilter ||
+    !normalizedSection ||
+    normalizedSection === filters.sectionFilter;
 
   return classMatches && subjectMatches && sectionMatches;
 }
@@ -135,12 +161,19 @@ function filterDecoratedManagedUsers(
 
     if (user.role === "teacher") {
       const assignments = user.teacher?.assignments ?? [];
-      if ((filters.classFilter || filters.sectionFilter || filters.subjectFilter) && assignments.length === 0) {
+      if (
+        (filters.classFilter ||
+          filters.sectionFilter ||
+          filters.subjectFilter) &&
+        assignments.length === 0
+      ) {
         return false;
       }
 
       if (
-        (filters.classFilter || filters.sectionFilter || filters.subjectFilter) &&
+        (filters.classFilter ||
+          filters.sectionFilter ||
+          filters.subjectFilter) &&
         !assignments.some((assignment) =>
           teacherAssignmentMatchesFilters(assignment, {
             classFilter: filters.classFilter,
@@ -304,18 +337,27 @@ async function fallbackListUsersFromUserProfiles(
       return { error: null, totalCount: 0, users: [] as ManagedUserRecord[] };
     }
 
-    const { data: matchingTeachers, error: matchingTeachersError } = await actorSupabase
-      .from("teachers")
-      .select("auth_user_id")
-      .eq("school_id", schoolId)
-      .in("id", options.matchingTeacherIds);
+    const { data: matchingTeachers, error: matchingTeachersError } =
+      await actorSupabase
+        .from("teachers")
+        .select("auth_user_id")
+        .eq("school_id", schoolId)
+        .in("id", options.matchingTeacherIds);
 
     if (matchingTeachersError) {
-      return { error: matchingTeachersError, totalCount: 0, users: [] as ManagedUserRecord[] };
+      return {
+        error: matchingTeachersError,
+        totalCount: 0,
+        users: [] as ManagedUserRecord[],
+      };
     }
 
-    matchingAuthUserIds = ((matchingTeachers ?? []) as Array<Record<string, unknown>>)
-      .map((teacher) => (typeof teacher.auth_user_id === "string" ? teacher.auth_user_id : null))
+    matchingAuthUserIds = (
+      (matchingTeachers ?? []) as Array<Record<string, unknown>>
+    )
+      .map((teacher) =>
+        typeof teacher.auth_user_id === "string" ? teacher.auth_user_id : null,
+      )
       .filter((authUserId): authUserId is string => Boolean(authUserId));
 
     if (matchingAuthUserIds.length === 0) {
@@ -325,12 +367,20 @@ async function fallbackListUsersFromUserProfiles(
 
   let query = actorSupabase
     .from("user_profiles")
-    .select("id, school_id, role, full_name, email, phone, is_active, created_at", { count: "exact" })
+    .select(
+      "id, school_id, role, full_name, email, phone, is_active, created_at",
+      { count: "exact" },
+    )
     .eq("school_id", schoolId)
     .in("role", ["student", "teacher"])
     .order("created_at", { ascending: false });
 
-  if (options.roleFilter && MANAGED_USER_ROLES.includes(options.roleFilter as (typeof MANAGED_USER_ROLES)[number])) {
+  if (
+    options.roleFilter &&
+    MANAGED_USER_ROLES.includes(
+      options.roleFilter as (typeof MANAGED_USER_ROLES)[number],
+    )
+  ) {
     query = query.eq("role", options.roleFilter);
   }
 
@@ -341,38 +391,61 @@ async function fallbackListUsersFromUserProfiles(
   }
 
   if (options.searchQuery) {
-    query = query.or(buildSafeOrFilter(["full_name", "email", "phone"], options.searchQuery));
+    query = query.or(
+      buildSafeOrFilter(["full_name", "email", "phone"], options.searchQuery),
+    );
   }
 
   if (matchingAuthUserIds) {
     query = query.in("id", matchingAuthUserIds);
   }
 
-  if (options.paginate && typeof options.from === "number" && typeof options.to === "number") {
+  if (
+    options.paginate &&
+    typeof options.from === "number" &&
+    typeof options.to === "number"
+  ) {
     query = query.range(options.from, options.to);
   }
 
   const { data: profiles, error: profilesError, count } = await query;
   if (profilesError) {
-    return { error: profilesError, totalCount: 0, users: [] as ManagedUserRecord[] };
+    return {
+      error: profilesError,
+      totalCount: 0,
+      users: [] as ManagedUserRecord[],
+    };
   }
 
-  const authUserIds = ((profiles ?? []) as Array<Record<string, unknown>>).map((profile) => String(profile.id));
+  const authUserIds = ((profiles ?? []) as Array<Record<string, unknown>>).map(
+    (profile) => String(profile.id),
+  );
   if (authUserIds.length === 0) {
-    return { error: null, totalCount: count ?? 0, users: [] as ManagedUserRecord[] };
+    return {
+      error: null,
+      totalCount: count ?? 0,
+      users: [] as ManagedUserRecord[],
+    };
   }
 
   const shouldLoadStudents = options.roleFilter !== "teacher";
   const shouldLoadTeachers = options.roleFilter !== "student";
   // Run all schema probes in parallel (getTeacherTableCapabilities has its own cache)
-  const [studentsLinkAvailable, teachersLinkAvailable, teacherTableCapabilitiesEager] = await Promise.all([
+  const [
+    studentsLinkAvailable,
+    teachersLinkAvailable,
+    teacherTableCapabilitiesEager,
+  ] = await Promise.all([
     tableHasColumn(actorSupabase, "students", "auth_user_id"),
     tableHasColumn(actorSupabase, "teachers", "auth_user_id"),
-    shouldLoadTeachers ? getTeacherTableCapabilities(actorSupabase) : Promise.resolve(null),
+    shouldLoadTeachers
+      ? getTeacherTableCapabilities(actorSupabase)
+      : Promise.resolve(null),
   ]);
-  const teacherTableCapabilities = teachersLinkAvailable && shouldLoadTeachers
-    ? teacherTableCapabilitiesEager
-    : null;
+  const teacherTableCapabilities =
+    teachersLinkAvailable && shouldLoadTeachers
+      ? teacherTableCapabilitiesEager
+      : null;
   const teacherSelectColumns = [
     "id",
     "auth_user_id",
@@ -390,7 +463,9 @@ async function fallbackListUsersFromUserProfiles(
     studentsLinkAvailable && shouldLoadStudents
       ? actorSupabase
           .from("students")
-          .select("id, auth_user_id, full_name, class_name, section, address, total_fee, paid_fee, discount_value, status")
+          .select(
+            "id, auth_user_id, full_name, class_name, section, address, total_fee, paid_fee, discount_value, status",
+          )
           .in("auth_user_id", authUserIds)
       : Promise.resolve({ data: [] as Record<string, unknown>[], error: null }),
     teachersLinkAvailable && shouldLoadTeachers
@@ -402,11 +477,19 @@ async function fallbackListUsersFromUserProfiles(
   ]);
 
   if (studentsResult.error) {
-    return { error: studentsResult.error, totalCount: 0, users: [] as ManagedUserRecord[] };
+    return {
+      error: studentsResult.error,
+      totalCount: 0,
+      users: [] as ManagedUserRecord[],
+    };
   }
 
   if (teachersResult.error) {
-    return { error: teachersResult.error, totalCount: 0, users: [] as ManagedUserRecord[] };
+    return {
+      error: teachersResult.error,
+      totalCount: 0,
+      users: [] as ManagedUserRecord[],
+    };
   }
 
   const studentsByAuthId = new Map<string, Record<string, unknown>>(
@@ -420,61 +503,79 @@ async function fallbackListUsersFromUserProfiles(
       .map((teacher) => [String(teacher.auth_user_id), teacher]),
   );
 
-  const users = ((profiles ?? []) as Array<Record<string, unknown>>).map((profile) => {
-    const authUserId = String(profile.id);
-    const student = studentsByAuthId.get(authUserId) ?? null;
-    const teacher = teachersByAuthId.get(authUserId) ?? null;
-    const role = profile.role === "teacher" ? "teacher" : "student";
-    const teacherStatus = typeof teacher?.status === "string" ? teacher.status.toLowerCase() : "";
+  const users = ((profiles ?? []) as Array<Record<string, unknown>>).map(
+    (profile) => {
+      const authUserId = String(profile.id);
+      const student = studentsByAuthId.get(authUserId) ?? null;
+      const teacher = teachersByAuthId.get(authUserId) ?? null;
+      const role = profile.role === "teacher" ? "teacher" : "student";
+      const teacherStatus =
+        typeof teacher?.status === "string" ? teacher.status.toLowerCase() : "";
 
-    return {
-      auth_user_id: authUserId,
-      school_id: String(profile.school_id),
-      role,
-      full_name: typeof profile.full_name === "string" ? profile.full_name : "",
-      email: typeof profile.email === "string" ? profile.email : "",
-      phone: typeof profile.phone === "string" ? profile.phone : null,
-      is_active: Boolean(profile.is_active),
-      created_at: typeof profile.created_at === "string" ? profile.created_at : null,
-      updated_at: null,
-      student:
-        role === "student" && student
-          ? {
-              id: String(student.id),
-              full_name: typeof student.full_name === "string" ? student.full_name : null,
-              class_name: typeof student.class_name === "string" ? student.class_name : null,
-              section: typeof student.section === "string" ? student.section : null,
-              address: typeof student.address === "string" ? student.address : null,
-              total_fee: normalizeNumber(student.total_fee),
-              paid_fee: normalizeNumber(student.paid_fee),
-              discount_value: normalizeNumber(student.discount_value),
-              status: typeof student.status === "string" ? student.status : null,
-            }
-          : null,
-      teacher:
-        role === "teacher" && teacher
-          ? {
-              id: String(teacher.id),
-              full_name: typeof teacher.full_name === "string" ? teacher.full_name : null,
-              email: typeof teacher.email === "string" ? teacher.email : null,
-              phone: typeof teacher.phone === "string" ? teacher.phone : null,
-              specialization:
-                typeof teacher.specialization === "string"
-                  ? teacher.specialization
-                  : typeof teacher.subject === "string"
-                    ? teacher.subject
+      return {
+        auth_user_id: authUserId,
+        school_id: String(profile.school_id),
+        role,
+        full_name:
+          typeof profile.full_name === "string" ? profile.full_name : "",
+        email: typeof profile.email === "string" ? profile.email : "",
+        phone: typeof profile.phone === "string" ? profile.phone : null,
+        is_active: Boolean(profile.is_active),
+        created_at:
+          typeof profile.created_at === "string" ? profile.created_at : null,
+        updated_at: null,
+        student:
+          role === "student" && student
+            ? {
+                id: String(student.id),
+                full_name:
+                  typeof student.full_name === "string"
+                    ? student.full_name
                     : null,
-              notes: typeof teacher.notes === "string" ? teacher.notes : null,
-              is_active:
-                typeof teacher.is_active === "boolean"
-                  ? teacher.is_active
-                  : teacherStatus !== "inactive" && teacherStatus !== "deleted",
-              assignments: [],
-            }
-          : null,
-      app_account: null,
-    } satisfies ManagedUserRecord;
-  });
+                class_name:
+                  typeof student.class_name === "string"
+                    ? student.class_name
+                    : null,
+                section:
+                  typeof student.section === "string" ? student.section : null,
+                address:
+                  typeof student.address === "string" ? student.address : null,
+                total_fee: normalizeNumber(student.total_fee),
+                paid_fee: normalizeNumber(student.paid_fee),
+                discount_value: normalizeNumber(student.discount_value),
+                status:
+                  typeof student.status === "string" ? student.status : null,
+              }
+            : null,
+        teacher:
+          role === "teacher" && teacher
+            ? {
+                id: String(teacher.id),
+                full_name:
+                  typeof teacher.full_name === "string"
+                    ? teacher.full_name
+                    : null,
+                email: typeof teacher.email === "string" ? teacher.email : null,
+                phone: typeof teacher.phone === "string" ? teacher.phone : null,
+                specialization:
+                  typeof teacher.specialization === "string"
+                    ? teacher.specialization
+                    : typeof teacher.subject === "string"
+                      ? teacher.subject
+                      : null,
+                notes: typeof teacher.notes === "string" ? teacher.notes : null,
+                is_active:
+                  typeof teacher.is_active === "boolean"
+                    ? teacher.is_active
+                    : teacherStatus !== "inactive" &&
+                      teacherStatus !== "deleted",
+                assignments: [],
+              }
+            : null,
+        app_account: null,
+      } satisfies ManagedUserRecord;
+    },
+  );
 
   return {
     error: null,
@@ -496,9 +597,16 @@ async function cleanupCreatedUser(options: {
     await serviceSupabase.auth.admin.deleteUser(options.authUserId);
   }
 
-  if (options.actorSupabase && options.relatedRecordId && options.cleanupRelatedRecord !== false) {
+  if (
+    options.actorSupabase &&
+    options.relatedRecordId &&
+    options.cleanupRelatedRecord !== false
+  ) {
     const table = options.role === "student" ? "students" : "teachers";
-    let query = options.actorSupabase.from(table).delete().eq("id", options.relatedRecordId);
+    let query = options.actorSupabase
+      .from(table)
+      .delete()
+      .eq("id", options.relatedRecordId);
     if (options.schoolId) {
       query = query.eq("school_id", options.schoolId);
     }
@@ -515,20 +623,33 @@ async function resolveTeacherIdsForFilters(
     subjectFilter: string;
   },
 ) {
-  const hasAssignmentsTable = await tableHasColumn(actorSupabase, "teacher_assignments", "id");
+  const hasAssignmentsTable = await tableHasColumn(
+    actorSupabase,
+    "teacher_assignments",
+    "id",
+  );
 
   if (hasAssignmentsTable) {
     // Optimized path: query teacher_assignments directly
     // Fetch all needed lookup tables in parallel instead of sequentially
     const [classResult, sectionResult, subjectResult] = await Promise.all([
       filters.classFilter
-        ? actorSupabase.from("classes").select("id, name, grade").eq("school_id", schoolId)
+        ? actorSupabase
+            .from("classes")
+            .select("id, name, grade")
+            .eq("school_id", schoolId)
         : Promise.resolve({ data: null }),
       filters.sectionFilter
-        ? actorSupabase.from("sections").select("id, name").eq("school_id", schoolId)
+        ? actorSupabase
+            .from("sections")
+            .select("id, name")
+            .eq("school_id", schoolId)
         : Promise.resolve({ data: null }),
       filters.subjectFilter
-        ? actorSupabase.from("subjects").select("id, name").eq("school_id", schoolId)
+        ? actorSupabase
+            .from("subjects")
+            .select("id, name")
+            .eq("school_id", schoolId)
         : Promise.resolve({ data: null }),
     ]);
 
@@ -539,25 +660,41 @@ async function resolveTeacherIdsForFilters(
       .eq("is_active", true);
 
     if (filters.classFilter && classResult.data) {
-      const matchingClassIds = ((classResult.data ?? []) as Array<Record<string, unknown>>)
-        .filter(row => normalizeIdentityText(getClassLookupName(row)) === filters.classFilter)
-        .map(row => row.id as string);
+      const matchingClassIds = (
+        (classResult.data ?? []) as Array<Record<string, unknown>>
+      )
+        .filter(
+          (row) =>
+            normalizeIdentityText(getClassLookupName(row)) ===
+            filters.classFilter,
+        )
+        .map((row) => row.id as string);
       if (matchingClassIds.length === 0) return [];
       query = query.in("class_id", matchingClassIds);
     }
 
     if (filters.sectionFilter && sectionResult.data) {
-      const matchingSectionIds = ((sectionResult.data ?? []) as Array<Record<string, unknown>>)
-        .filter(row => normalizeIdentityText(row.name as string) === filters.sectionFilter)
-        .map(row => row.id as string);
+      const matchingSectionIds = (
+        (sectionResult.data ?? []) as Array<Record<string, unknown>>
+      )
+        .filter(
+          (row) =>
+            normalizeIdentityText(row.name as string) === filters.sectionFilter,
+        )
+        .map((row) => row.id as string);
       if (matchingSectionIds.length === 0) return [];
       query = query.in("section_id", matchingSectionIds);
     }
 
     if (filters.subjectFilter && subjectResult.data) {
-      const matchingSubjectIds = ((subjectResult.data ?? []) as Array<Record<string, unknown>>)
-        .filter(row => normalizeIdentityText(row.name as string) === filters.subjectFilter)
-        .map(row => row.id as string);
+      const matchingSubjectIds = (
+        (subjectResult.data ?? []) as Array<Record<string, unknown>>
+      )
+        .filter(
+          (row) =>
+            normalizeIdentityText(row.name as string) === filters.subjectFilter,
+        )
+        .map((row) => row.id as string);
       if (matchingSubjectIds.length === 0) return [];
       query = query.in("subject_id", matchingSubjectIds);
     }
@@ -565,11 +702,13 @@ async function resolveTeacherIdsForFilters(
     const { data: assignments, error } = await query;
     if (error) throw error;
 
-    return Array.from(new Set(
-      ((assignments ?? []) as Array<{ teacher_id?: string | null }>)
-        .map(a => a.teacher_id)
-        .filter((id): id is string => Boolean(id))
-    ));
+    return Array.from(
+      new Set(
+        ((assignments ?? []) as Array<{ teacher_id?: string | null }>)
+          .map((a) => a.teacher_id)
+          .filter((id): id is string => Boolean(id)),
+      ),
+    );
   }
 
   // Legacy fallback: still fetching in memory but limited to school
@@ -584,18 +723,27 @@ async function resolveTeacherIdsForFilters(
 
   return ((teachers ?? []) as Array<Record<string, unknown>>)
     .filter((teacher) => {
-      const assignments = parseTeacherClassesTaught(teacher.classes_taught) as LegacyTeacherAssignment[];
+      const assignments = parseTeacherClassesTaught(
+        teacher.classes_taught,
+      ) as LegacyTeacherAssignment[];
       return assignments.some((assignment) =>
-        teacherAssignmentMatchesFilters({
-          id: "",
-          subject_id: null,
-          subject_name: String(assignment.subject_name || ""),
-          class_id: null,
-          class_name: String(assignment.class_name || assignment.grade || ""),
-          section_id: null,
-          section_name: assignment.section ? String(assignment.section) : assignment.section_name ? String(assignment.section_name) : null,
-          is_active: true
-        } as ManagedTeacherAssignmentRecord, filters),
+        teacherAssignmentMatchesFilters(
+          {
+            id: "",
+            subject_id: null,
+            subject_name: String(assignment.subject_name || ""),
+            class_id: null,
+            class_name: String(assignment.class_name || assignment.grade || ""),
+            section_id: null,
+            section_name: assignment.section
+              ? String(assignment.section)
+              : assignment.section_name
+                ? String(assignment.section_name)
+                : null,
+            is_active: true,
+          } as ManagedTeacherAssignmentRecord,
+          filters,
+        ),
       );
     })
     .map((teacher) => String(teacher.id));
@@ -606,25 +754,45 @@ export async function GET(req: NextRequest) {
   const roleFilter = req.nextUrl.searchParams.get("role");
   const statusFilter = req.nextUrl.searchParams.get("status");
   const searchQuery = (req.nextUrl.searchParams.get("search") || "").trim();
-  const classFilter = normalizeIdentityText(req.nextUrl.searchParams.get("className"));
-  const sectionFilter = normalizeIdentityText(req.nextUrl.searchParams.get("section"));
-  const subjectFilter = normalizeIdentityText(req.nextUrl.searchParams.get("subject"));
-  const rawPage = Number.parseInt(req.nextUrl.searchParams.get("page") || "", 10);
-  const rawPageSize = Number.parseInt(req.nextUrl.searchParams.get("pageSize") || "", 10);
-  const hasPagination = Number.isFinite(rawPage) && Number.isFinite(rawPageSize);
+  const classFilter = normalizeIdentityText(
+    req.nextUrl.searchParams.get("className"),
+  );
+  const sectionFilter = normalizeIdentityText(
+    req.nextUrl.searchParams.get("section"),
+  );
+  const subjectFilter = normalizeIdentityText(
+    req.nextUrl.searchParams.get("subject"),
+  );
+  const rawPage = Number.parseInt(
+    req.nextUrl.searchParams.get("page") || "",
+    10,
+  );
+  const rawPageSize = Number.parseInt(
+    req.nextUrl.searchParams.get("pageSize") || "",
+    10,
+  );
+  const hasPagination =
+    Number.isFinite(rawPage) && Number.isFinite(rawPageSize);
   const page = hasPagination ? Math.max(1, rawPage) : 1;
   const pageSize = hasPagination ? Math.min(200, Math.max(10, rawPageSize)) : 0;
   const from = hasPagination ? (page - 1) * pageSize : 0;
   const to = hasPagination ? from + pageSize - 1 : 0;
   const skipCache = req.nextUrl.searchParams.get("cache") === "0";
   const requiresTeacherScopedFiltering =
-    roleFilter === "teacher" && Boolean(classFilter || sectionFilter || subjectFilter);
-  const fallbackNeedsDecoratedFiltering = requiresTeacherScopedFiltering && Boolean(searchQuery);
+    roleFilter === "teacher" &&
+    Boolean(classFilter || sectionFilter || subjectFilter);
+  const fallbackNeedsDecoratedFiltering =
+    requiresTeacherScopedFiltering && Boolean(searchQuery);
 
-  const context = await resolveManagedUsersActorContext(schoolId, req.headers.get("authorization"));
+  const context = await resolveManagedUsersActorContext(
+    schoolId,
+    req.headers.get("authorization"),
+  );
   if (!context.ok) {
     return jsonError(
-      "message" in context ? context.message : "تعذر التحقق من صلاحيات المستخدم.",
+      "message" in context
+        ? context.message
+        : "تعذر التحقق من صلاحيات المستخدم.",
       "status" in context ? context.status : 500,
     );
   }
@@ -644,14 +812,16 @@ export async function GET(req: NextRequest) {
   });
 
   if (!skipCache) {
-    const cachedPayload = getManagedUsersListCache<Record<string, unknown>>(cacheKey);
+    const cachedPayload =
+      getManagedUsersListCache<Record<string, unknown>>(cacheKey);
     if (cachedPayload) {
       return NextResponse.json(cachedPayload, {
         headers: { "x-managed-users-cache": "HIT" },
       });
     }
 
-    const pendingPayload = getManagedUsersListPending<Record<string, unknown>>(cacheKey);
+    const pendingPayload =
+      getManagedUsersListPending<Record<string, unknown>>(cacheKey);
     if (pendingPayload) {
       return NextResponse.json(await pendingPayload, {
         headers: { "x-managed-users-cache": "PENDING" },
@@ -668,7 +838,11 @@ export async function GET(req: NextRequest) {
         })
       : null;
 
-    if (requiresTeacherScopedFiltering && matchingTeacherIds && matchingTeacherIds.length === 0) {
+    if (
+      requiresTeacherScopedFiltering &&
+      matchingTeacherIds &&
+      matchingTeacherIds.length === 0
+    ) {
       return {
         ok: true,
         users: [],
@@ -684,7 +858,12 @@ export async function GET(req: NextRequest) {
       .eq("school_id", targetSchoolId)
       .order("created_at", { ascending: false });
 
-    if (roleFilter && MANAGED_USER_ROLES.includes(roleFilter as (typeof MANAGED_USER_ROLES)[number])) {
+    if (
+      roleFilter &&
+      MANAGED_USER_ROLES.includes(
+        roleFilter as (typeof MANAGED_USER_ROLES)[number],
+      )
+    ) {
       query = query.eq("role", roleFilter);
     }
 
@@ -694,8 +873,13 @@ export async function GET(req: NextRequest) {
       query = query.eq("is_active", false);
     }
 
-    if (searchQuery && !(requiresTeacherScopedFiltering && matchingTeacherIds)) {
-      query = query.or(buildSafeOrFilter(["full_name", "email", "phone"], searchQuery));
+    if (
+      searchQuery &&
+      !(requiresTeacherScopedFiltering && matchingTeacherIds)
+    ) {
+      query = query.or(
+        buildSafeOrFilter(["full_name", "email", "phone"], searchQuery),
+      );
     }
 
     if (matchingTeacherIds) {
@@ -708,24 +892,35 @@ export async function GET(req: NextRequest) {
 
     const { data, error, count } = await query;
     if (error) {
-      if (isMissingTableError(error, "managed_user_profiles") || isInfrastructureCompatError(error)) {
-        const fallback = await fallbackListUsersFromUserProfiles(actorSupabase, targetSchoolId, {
-          roleFilter,
-          statusFilter,
-          searchQuery: fallbackNeedsDecoratedFiltering ? "" : searchQuery,
-          matchingTeacherIds,
-          from,
-          to,
-          paginate: hasPagination && !fallbackNeedsDecoratedFiltering,
-        });
+      if (
+        isMissingTableError(error, "managed_user_profiles") ||
+        isInfrastructureCompatError(error)
+      ) {
+        const fallback = await fallbackListUsersFromUserProfiles(
+          actorSupabase,
+          targetSchoolId,
+          {
+            roleFilter,
+            statusFilter,
+            searchQuery: fallbackNeedsDecoratedFiltering ? "" : searchQuery,
+            matchingTeacherIds,
+            from,
+            to,
+            paginate: hasPagination && !fallbackNeedsDecoratedFiltering,
+          },
+        );
         if (fallback.error) {
           return jsonError(
-            fallback.error.message || "تعذر تحميل الحسابات من ملفات المستخدمين الحالية.",
+            fallback.error.message ||
+              "تعذر تحميل الحسابات من ملفات المستخدمين الحالية.",
             getPostgrestStatus(fallback.error),
           );
         }
 
-        const decoratedUsers = await decorateManagedUsers(actorSupabase, fallback.users);
+        const decoratedUsers = await decorateManagedUsers(
+          actorSupabase,
+          fallback.users,
+        );
         const searchedUsers = fallbackNeedsDecoratedFiltering
           ? filterDecoratedManagedUsers(decoratedUsers, {
               roleFilter,
@@ -735,33 +930,45 @@ export async function GET(req: NextRequest) {
               subjectFilter,
             })
           : decoratedUsers;
-        const pagedUsers = fallbackNeedsDecoratedFiltering && hasPagination
-          ? searchedUsers.slice(from, to + 1)
-          : searchedUsers;
+        const pagedUsers =
+          fallbackNeedsDecoratedFiltering && hasPagination
+            ? searchedUsers.slice(from, to + 1)
+            : searchedUsers;
 
         return {
           ok: true,
           users: pagedUsers,
-          totalCount: fallbackNeedsDecoratedFiltering ? searchedUsers.length : fallback.totalCount,
+          totalCount: fallbackNeedsDecoratedFiltering
+            ? searchedUsers.length
+            : fallback.totalCount,
           page,
           pageSize: hasPagination ? pageSize : searchedUsers.length,
         };
       }
 
-      return jsonError(error.message || "تعذر تحميل الحسابات.", getPostgrestStatus(error));
+      return jsonError(
+        error.message || "تعذر تحميل الحسابات.",
+        getPostgrestStatus(error),
+      );
     }
 
-    const normalizedUsers = normalizeManagedUserRecords((data ?? []) as Record<string, unknown>[]);
-    const decoratedUsers = await decorateManagedUsers(actorSupabase, normalizedUsers);
-    const filteredUsers = requiresTeacherScopedFiltering && Boolean(searchQuery)
-      ? filterDecoratedManagedUsers(decoratedUsers, {
-          roleFilter,
-          searchQuery,
-          classFilter,
-          sectionFilter,
-          subjectFilter,
-        })
-      : decoratedUsers;
+    const normalizedUsers = normalizeManagedUserRecords(
+      (data ?? []) as Record<string, unknown>[],
+    );
+    const decoratedUsers = await decorateManagedUsers(
+      actorSupabase,
+      normalizedUsers,
+    );
+    const filteredUsers =
+      requiresTeacherScopedFiltering && Boolean(searchQuery)
+        ? filterDecoratedManagedUsers(decoratedUsers, {
+            roleFilter,
+            searchQuery,
+            classFilter,
+            sectionFilter,
+            subjectFilter,
+          })
+        : decoratedUsers;
     const pagedUsers =
       requiresTeacherScopedFiltering && Boolean(searchQuery) && hasPagination
         ? filteredUsers.slice(from, to + 1)
@@ -770,11 +977,12 @@ export async function GET(req: NextRequest) {
     return {
       ok: true,
       users: pagedUsers,
-      totalCount: requiresTeacherScopedFiltering && Boolean(searchQuery)
-        ? filteredUsers.length
-        : typeof count === "number"
-          ? count
-          : decoratedUsers.length,
+      totalCount:
+        requiresTeacherScopedFiltering && Boolean(searchQuery)
+          ? filteredUsers.length
+          : typeof count === "number"
+            ? count
+            : decoratedUsers.length,
       page,
       pageSize: hasPagination ? pageSize : filteredUsers.length,
     };
@@ -807,7 +1015,9 @@ export async function POST(req: NextRequest) {
   const validation = validateCreateManagedUserInput(body);
   if (!validation.ok) {
     return jsonError(
-      "message" in validation ? validation.message : "تحقق من الحقول المطلوبة ثم أعد المحاولة.",
+      "message" in validation
+        ? validation.message
+        : "تحقق من الحقول المطلوبة ثم أعد المحاولة.",
       400,
       "fieldErrors" in validation ? validation.fieldErrors : {},
     );
@@ -819,12 +1029,20 @@ export async function POST(req: NextRequest) {
   );
   if (!context.ok) {
     return jsonError(
-      "message" in context ? context.message : "تعذر التحقق من صلاحيات المستخدم.",
+      "message" in context
+        ? context.message
+        : "تعذر التحقق من صلاحيات المستخدم.",
       "status" in context ? context.status : 500,
     );
   }
 
-  const { actorSupabase, actorUserId, targetSchoolId, actorBranchId, allowedBranchIds } = context.value;
+  const {
+    actorSupabase,
+    actorUserId,
+    targetSchoolId,
+    actorBranchId,
+    allowedBranchIds,
+  } = context.value;
   const rateLimited = await enforceRateLimit(req, {
     namespace: "dashboard-managed-users-post",
     windowMs: 10 * 60_000,
@@ -860,10 +1078,7 @@ export async function POST(req: NextRequest) {
       }
     }
   } catch (err) {
-    return jsonError(
-      err instanceof Error ? err.message : "تعذر التحقق من صلاحيات الفروع.",
-      500
-    );
+    return jsonServerError("dashboard-users", err, "تعذر التحقق من صلاحيات الفروع.", 500);
   }
 
   // Determine branch for new student/teacher
@@ -879,7 +1094,7 @@ export async function POST(req: NextRequest) {
         400,
         {
           "student.branch_id": "تحديد الفرع مطلوب للمستخدمين متعددي الفروع.",
-        }
+        },
       );
     }
 
@@ -887,13 +1102,9 @@ export async function POST(req: NextRequest) {
     if (requestedBranchId) {
       // Validate it's in actor's accessible branches
       if (!actorAccessibleBranches.includes(requestedBranchId)) {
-        return jsonError(
-          "الفرع المحدد غير متاح لهذا المستخدم.",
-          403,
-          {
-            "student.branch_id": "ليس لديك صلاحيات الوصول إلى هذا الفرع.",
-          }
-        );
+        return jsonError("الفرع المحدد غير متاح لهذا المستخدم.", 403, {
+          "student.branch_id": "ليس لديك صلاحيات الوصول إلى هذا الفرع.",
+        });
       }
 
       // Validate branch exists and belongs to school (use serviceSupabase to bypass RLS)
@@ -905,9 +1116,13 @@ export async function POST(req: NextRequest) {
         .maybeSingle();
 
       if (branchError || !branchData) {
-        return jsonError("الفرع المحدد غير موجود أو لا ينتمي لهذه المدرسة.", 404, {
-          "student.branch_id": "الفرع المطلوب غير موجود.",
-        });
+        return jsonError(
+          "الفرع المحدد غير موجود أو لا ينتمي لهذه المدرسة.",
+          404,
+          {
+            "student.branch_id": "الفرع المطلوب غير موجود.",
+          },
+        );
       }
 
       branchId = requestedBranchId;
@@ -925,7 +1140,7 @@ export async function POST(req: NextRequest) {
         400,
         {
           "teacher.branch_id": "تحديد الفرع مطلوب للمستخدمين متعددي الفروع.",
-        }
+        },
       );
     }
 
@@ -933,13 +1148,9 @@ export async function POST(req: NextRequest) {
     if (requestedBranchId) {
       // Validate it's in actor's accessible branches
       if (!actorAccessibleBranches.includes(requestedBranchId)) {
-        return jsonError(
-          "الفرع المحدد غير متاح لهذا المستخدم.",
-          403,
-          {
-            "teacher.branch_id": "ليس لديك صلاحيات الوصول إلى هذا الفرع.",
-          }
-        );
+        return jsonError("الفرع المحدد غير متاح لهذا المستخدم.", 403, {
+          "teacher.branch_id": "ليس لديك صلاحيات الوصول إلى هذا الفرع.",
+        });
       }
 
       // Validate branch exists and belongs to school (use serviceSupabase to bypass RLS)
@@ -951,9 +1162,13 @@ export async function POST(req: NextRequest) {
         .maybeSingle();
 
       if (branchError || !branchData) {
-        return jsonError("الفرع المحدد غير موجود أو لا ينتمي لهذه المدرسة.", 404, {
-          "teacher.branch_id": "الفرع المطلوب غير موجود.",
-        });
+        return jsonError(
+          "الفرع المحدد غير موجود أو لا ينتمي لهذه المدرسة.",
+          404,
+          {
+            "teacher.branch_id": "الفرع المطلوب غير موجود.",
+          },
+        );
       }
 
       branchId = requestedBranchId;
@@ -963,8 +1178,13 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  if (validation.value.role !== "student" && validation.value.role !== "teacher") {
-    return jsonError("نوع المستخدم غير مدعوم في هذا المسار.", 400, { role: "يجب أن يكون نوع المستخدم طالباً أو أستاذاً." });
+  if (
+    validation.value.role !== "student" &&
+    validation.value.role !== "teacher"
+  ) {
+    return jsonError("نوع المستخدم غير مدعوم في هذا المسار.", 400, {
+      role: "يجب أن يكون نوع المستخدم طالباً أو أستاذاً.",
+    });
   }
   const managedRole = validation.value.role as "student" | "teacher";
 
@@ -974,15 +1194,20 @@ export async function POST(req: NextRequest) {
     fullName: validation.value.full_name,
     preferredEmail: validation.value.email,
   });
-  const temporaryPassword = validation.value.password || generateTemporaryPassword();
-  const linkTable = validation.value.role === "student" ? "students" : "teachers";
+  const temporaryPassword =
+    validation.value.password || generateTemporaryPassword();
+  const linkTable =
+    validation.value.role === "student" ? "students" : "teachers";
 
   // Run column probe, school brand fetch, and teacher capabilities in parallel
-  const [linkColumnProbe, schoolBrand, teacherTableCapabilities] = await Promise.all([
-    actorSupabase.from(linkTable).select("auth_user_id").limit(1),
-    fetchManagedAccountSchoolBrand(actorSupabase, targetSchoolId),
-    validation.value.role === "teacher" ? getTeacherTableCapabilities(actorSupabase) : Promise.resolve(null),
-  ]);
+  const [linkColumnProbe, schoolBrand, teacherTableCapabilities] =
+    await Promise.all([
+      actorSupabase.from(linkTable).select("auth_user_id").limit(1),
+      fetchManagedAccountSchoolBrand(actorSupabase, targetSchoolId),
+      validation.value.role === "teacher"
+        ? getTeacherTableCapabilities(actorSupabase)
+        : Promise.resolve(null),
+    ]);
 
   if (isMissingColumnError(linkColumnProbe.error, linkTable, "auth_user_id")) {
     return jsonError(
@@ -997,9 +1222,13 @@ export async function POST(req: NextRequest) {
   const createdAt = new Date().toISOString();
 
   if (validation.value.role === "student" && !branchId) {
-    return jsonError("يجب إضافة فرع واحد على الأقل للمدرسة قبل إنشاء حساب طالب.", 400, {
-      role: "تعذر إنشاء سجل الطالب لعدم وجود فرع مرتبط بالمدرسة.",
-    });
+    return jsonError(
+      "يجب إضافة فرع واحد على الأقل للمدرسة قبل إنشاء حساب طالب.",
+      400,
+      {
+        role: "تعذر إنشاء سجل الطالب لعدم وجود فرع مرتبط بالمدرسة.",
+      },
+    );
   }
 
   let relatedRecordId: string | null = null;
@@ -1010,16 +1239,24 @@ export async function POST(req: NextRequest) {
     if (validation.value.role === "student") {
       const requestedSection = validation.value.student!.section || "";
       const normalizedFullName = normalizeFullName(validation.value.full_name);
-      const normalizedClassName = normalizeClassName(validation.value.student!.class_name);
+      const normalizedClassName = normalizeClassName(
+        validation.value.student!.class_name,
+      );
       const normalizedSection = normalizeSection(requestedSection);
 
-      const { data: existingStudents, error: existingStudentError } = await actorSupabase
-        .from("students")
-        .select("id, auth_user_id, section, full_name, class_name, branch_id")
-        .eq("school_id", targetSchoolId)
-        .eq("branch_id", branchId!)
-        .neq("status", "deleted")
-        .limit(25);
+      const { data: existingStudents, error: existingStudentError } =
+        await excludeDeletedStudents(
+          actorSupabase
+            .from("students")
+            .select(
+              "id, auth_user_id, section, full_name, class_name, branch_id",
+            ),
+        )
+          .eq("school_id", targetSchoolId)
+          .eq("branch_id", branchId!)
+          .eq("class_name", validation.value.student!.class_name)
+          .neq("status", "deleted")
+          .limit(200);
 
       if (existingStudentError) {
         return jsonError(
@@ -1029,10 +1266,18 @@ export async function POST(req: NextRequest) {
       }
 
       // Find matching student with normalized comparison
-      const matchingStudent = ((existingStudents ?? []) as Array<Record<string, unknown>>).find((row) => {
-        const rowNormalizedName = normalizeFullName(String(row.full_name || ""));
-        const rowNormalizedClass = normalizeClassName(String(row.class_name || ""));
-        const rowNormalizedSection = normalizeSection(row.section as string | null);
+      const matchingStudent = (
+        (existingStudents ?? []) as Array<Record<string, unknown>>
+      ).find((row) => {
+        const rowNormalizedName = normalizeFullName(
+          String(row.full_name || ""),
+        );
+        const rowNormalizedClass = normalizeClassName(
+          String(row.class_name || ""),
+        );
+        const rowNormalizedSection = normalizeSection(
+          row.section as string | null,
+        );
 
         return (
           rowNormalizedName === normalizedFullName &&
@@ -1066,16 +1311,18 @@ export async function POST(req: NextRequest) {
             validation.value.student!.paid_fee,
           );
         } catch (paymentError) {
-          return jsonError(
-            paymentError instanceof Error ? paymentError.message : "تعذر التحقق من إجمالي دفعات الطالب الحالية.",
-            500,
-          );
+          return jsonServerError("dashboard-users", paymentError, "تعذر التحقق من إجمالي دفعات الطالب الحالية.", 500);
         }
 
         if (nextPaidFee > validation.value.student!.total_fee) {
-          return jsonError("المدفوع الفعلي لا يمكن أن يكون أكبر من إجمالي الرسوم.", 400, {
-            "student.total_fee": "إجمالي الرسوم أقل من مجموع الدفعات المسجلة فعلياً.",
-          });
+          return jsonError(
+            "المدفوع الفعلي لا يمكن أن يكون أكبر من إجمالي الرسوم.",
+            400,
+            {
+              "student.total_fee":
+                "إجمالي الرسوم أقل من مجموع الدفعات المسجلة فعلياً.",
+            },
+          );
         }
 
         const { error: reuseStudentError } = await actorSupabase
@@ -1090,7 +1337,8 @@ export async function POST(req: NextRequest) {
             total_fee: validation.value.student!.total_fee,
             paid_fee: nextPaidFee,
             discount_value: validation.value.student!.discount_value,
-            registration_number: validation.value.student!.registration_number ?? null,
+            registration_number:
+              validation.value.student!.registration_number ?? null,
             date_of_birth: validation.value.student!.date_of_birth ?? null,
             parent_name: validation.value.student!.parent_name ?? null,
             gender: validation.value.student!.gender ?? null,
@@ -1124,7 +1372,8 @@ export async function POST(req: NextRequest) {
             paid_fee: validation.value.student!.paid_fee,
             discount_value: validation.value.student!.discount_value,
             status: "active",
-            registration_number: validation.value.student!.registration_number ?? null,
+            registration_number:
+              validation.value.student!.registration_number ?? null,
             date_of_birth: validation.value.student!.date_of_birth ?? null,
             parent_name: validation.value.student!.parent_name ?? null,
             gender: validation.value.student!.gender ?? null,
@@ -1136,14 +1385,20 @@ export async function POST(req: NextRequest) {
           .single();
 
         if (studentError || !student?.id) {
-          return jsonError(studentError?.message || "تعذر إنشاء سجل الطالب.", getPostgrestStatus(studentError, 400));
+          return jsonError(
+            studentError?.message || "تعذر إنشاء سجل الطالب.",
+            getPostgrestStatus(studentError, 400),
+          );
         }
 
         relatedRecordId = student.id;
         cleanupRelatedRecord = true;
       }
     } else {
-      const teacherSubject = validation.value.teacher?.specialization ?? validation.value.teacher?.assignments?.[0]?.subject_name ?? null;
+      const teacherSubject =
+        validation.value.teacher?.specialization ??
+        validation.value.teacher?.assignments?.[0]?.subject_name ??
+        null;
       const teacherInsertPayload: Record<string, unknown> = {
         school_id: targetSchoolId,
         full_name: validation.value.full_name,
@@ -1168,19 +1423,24 @@ export async function POST(req: NextRequest) {
       if (teacherTableCapabilities?.is_active) {
         teacherInsertPayload.is_active = validation.value.is_active;
       } else if (teacherTableCapabilities?.status) {
-        teacherInsertPayload.status = validation.value.is_active ? "active" : "inactive";
+        teacherInsertPayload.status = validation.value.is_active
+          ? "active"
+          : "inactive";
       }
 
       if (teacherTableCapabilities?.classes_taught) {
-        teacherInsertPayload.classes_taught = buildTeacherClassesTaught(validation.value.teacher?.assignments ?? []);
+        teacherInsertPayload.classes_taught = buildTeacherClassesTaught(
+          validation.value.teacher?.assignments ?? [],
+        );
       }
 
-      const { data: existingTeachers, error: existingTeacherError } = await actorSupabase
-        .from("teachers")
-        .select("id, auth_user_id, phone, email")
-        .eq("school_id", targetSchoolId)
-        .eq("full_name", validation.value.full_name)
-        .limit(25);
+      const { data: existingTeachers, error: existingTeacherError } =
+        await actorSupabase
+          .from("teachers")
+          .select("id, auth_user_id, phone, email")
+          .eq("school_id", targetSchoolId)
+          .eq("full_name", validation.value.full_name)
+          .limit(25);
 
       if (existingTeacherError) {
         return jsonError(
@@ -1190,19 +1450,24 @@ export async function POST(req: NextRequest) {
       }
 
       const incomingPhone = normalizeIdentityText(validation.value.phone);
-      const incomingLoginIdentifier = normalizeIdentityText(validation.value.email || loginIdentifier);
-      const teacherRows = (existingTeachers ?? []) as Array<Record<string, unknown>>;
+      const incomingLoginIdentifier = normalizeIdentityText(
+        validation.value.email || loginIdentifier,
+      );
+      const teacherRows = (existingTeachers ?? []) as Array<
+        Record<string, unknown>
+      >;
       const matchingTeacher = incomingPhone
         ? teacherRows.find(
             (row) =>
               normalizeIdentityText(row.phone) === incomingPhone ||
-              (incomingLoginIdentifier && normalizeIdentityText(row.email) === incomingLoginIdentifier),
+              (incomingLoginIdentifier &&
+                normalizeIdentityText(row.email) === incomingLoginIdentifier),
           )
-        : teacherRows.find((row) =>
+        : (teacherRows.find((row) =>
             incomingLoginIdentifier
               ? normalizeIdentityText(row.email) === incomingLoginIdentifier
               : teacherRows.length === 1 && !normalizeIdentityText(row.phone),
-          ) ?? null;
+          ) ?? null);
 
       if (matchingTeacher?.auth_user_id) {
         return jsonError("هذا الأستاذ يملك حساب تطبيق مرتبطاً مسبقاً.", 409, {
@@ -1237,7 +1502,10 @@ export async function POST(req: NextRequest) {
           .single();
 
         if (teacherError || !teacher?.id) {
-          return jsonError(teacherError?.message || "تعذر إنشاء سجل المدرس.", getPostgrestStatus(teacherError, 400));
+          return jsonError(
+            teacherError?.message || "تعذر إنشاء سجل المدرس.",
+            getPostgrestStatus(teacherError, 400),
+          );
         }
 
         relatedRecordId = teacher.id;
@@ -1248,11 +1516,14 @@ export async function POST(req: NextRequest) {
     // Only check managed profile for REUSED records (cleanupRelatedRecord=false).
     // New inserts (cleanupRelatedRecord=true) can't have an existing profile.
     if (relatedRecordId && !cleanupRelatedRecord) {
-      const existingManagedProfile = await findManagedProfileByLinkedRecord(actorSupabase, {
-        schoolId: targetSchoolId,
-        role: validation.value.role,
-        relatedRecordId,
-      });
+      const existingManagedProfile = await findManagedProfileByLinkedRecord(
+        actorSupabase,
+        {
+          schoolId: targetSchoolId,
+          role: validation.value.role,
+          relatedRecordId,
+        },
+      );
 
       if (existingManagedProfile?.authUserId) {
         return jsonError(
@@ -1300,18 +1571,25 @@ export async function POST(req: NextRequest) {
         cleanupRelatedRecord,
       });
 
-      const status = createAuthError?.message?.toLowerCase().includes("already") ? 409 : 400;
-      return jsonError(createAuthError?.message || "تعذر إنشاء مستخدم المصادقة.", status, {
-        email: "تعذر استخدام معرّف الدخول المحدد.",
-      });
+      const status = createAuthError?.message?.toLowerCase().includes("already")
+        ? 409
+        : 400;
+      return jsonError(
+        createAuthError?.message || "تعذر إنشاء مستخدم المصادقة.",
+        status,
+        {
+          email: "تعذر استخدام معرّف الدخول المحدد.",
+        },
+      );
     }
 
     authUserId = authData.user.id;
 
     if (!validation.value.is_active) {
-      const { error: banError } = await serviceSupabase.auth.admin.updateUserById(authUserId, {
-        ban_duration: MANAGED_USER_INACTIVE_BAN_DURATION,
-      });
+      const { error: banError } =
+        await serviceSupabase.auth.admin.updateUserById(authUserId, {
+          ban_duration: MANAGED_USER_INACTIVE_BAN_DURATION,
+        });
 
       if (banError) {
         await cleanupCreatedUser({
@@ -1322,12 +1600,13 @@ export async function POST(req: NextRequest) {
           relatedRecordId,
           cleanupRelatedRecord,
         });
-        return jsonError(banError.message || "تعذر تعطيل الحساب الجديد.", 500);
+        return jsonServerError("dashboard-users", banError, "تعذر تعطيل الحساب الجديد.", 500);
       }
     }
 
     // Link auth_user_id + create managed profile in parallel (different tables)
-    const relatedTable = validation.value.role === "student" ? "students" : "teachers";
+    const relatedTable =
+      validation.value.role === "student" ? "students" : "teachers";
     const [linkResult, profileResult] = await Promise.allSettled([
       actorSupabase
         .from(relatedTable)
@@ -1348,7 +1627,8 @@ export async function POST(req: NextRequest) {
       }),
     ]);
 
-    const linkFailed = linkResult.status === "rejected" ||
+    const linkFailed =
+      linkResult.status === "rejected" ||
       (linkResult.status === "fulfilled" && linkResult.value?.error);
     const profileFailed = profileResult.status === "rejected";
 
@@ -1362,15 +1642,22 @@ export async function POST(req: NextRequest) {
         cleanupRelatedRecord,
       });
       if (linkFailed) {
-        const linkError = linkResult.status === "fulfilled" ? linkResult.value?.error : linkResult.reason;
+        const linkError =
+          linkResult.status === "fulfilled"
+            ? linkResult.value?.error
+            : linkResult.reason;
         return jsonError(
-          linkError?.message || "تم إنشاء المستخدم لكن تعذر ربطه بالسجل المطلوب.",
+          linkError?.message ||
+            "تم إنشاء المستخدم لكن تعذر ربطه بالسجل المطلوب.",
           getPostgrestStatus(linkError, 400),
         );
       }
-      const profileError = profileResult.status === "rejected" ? profileResult.reason : null;
+      const profileError =
+        profileResult.status === "rejected" ? profileResult.reason : null;
       return jsonError(
-        profileError instanceof Error ? profileError.message : "تعذر إنشاء ملف الحساب.",
+        profileError instanceof Error
+          ? profileError.message
+          : "تعذر إنشاء ملف الحساب.",
         getPostgrestStatus(profileError as { code?: string | null }, 400),
       );
     }
@@ -1393,7 +1680,9 @@ export async function POST(req: NextRequest) {
         });
 
         return jsonError(
-          assignmentError instanceof Error ? assignmentError.message : "تعذر حفظ تكليفات المدرس.",
+          assignmentError instanceof Error
+            ? assignmentError.message
+            : "تعذر حفظ تكليفات المدرس.",
           400,
           {
             teacher: "تعذر ربط تكليفات المدرس الحالية بإعدادات الصفوف والمواد.",
@@ -1455,16 +1744,19 @@ export async function POST(req: NextRequest) {
             ? {
                 specialization: getPrimaryTeacherSubjectName({
                   teacher: {
-                    specialization: validation.value.teacher?.specialization ?? null,
+                    specialization:
+                      validation.value.teacher?.specialization ?? null,
                     assignments:
-                      (validation.value.teacher?.assignments ?? []).map((assignment) => ({
-                        subject_name: assignment.subject_name,
-                      })) ?? [],
+                      (validation.value.teacher?.assignments ?? []).map(
+                        (assignment) => ({
+                          subject_name: assignment.subject_name,
+                        }),
+                      ) ?? [],
                   },
                 }),
                 notes: validation.value.teacher?.notes ?? null,
-                assignments:
-                  (validation.value.teacher?.assignments ?? []).map((assignment, index) => ({
+                assignments: (validation.value.teacher?.assignments ?? []).map(
+                  (assignment, index) => ({
                     id: `pending-${index}`,
                     subject_id: null,
                     subject_name: assignment.subject_name,
@@ -1473,7 +1765,8 @@ export async function POST(req: NextRequest) {
                     section_id: null,
                     section_name: assignment.section,
                     is_active: true,
-                  })),
+                  }),
+                ),
               }
             : null,
       });
@@ -1481,10 +1774,13 @@ export async function POST(req: NextRequest) {
 
     try {
       accountCard = decoratedUser
-        ? await buildManagedUserAccountCard(actorSupabase, decoratedUser, { temporaryPassword })
+        ? await buildManagedUserAccountCard(actorSupabase, decoratedUser, {
+            temporaryPassword,
+          })
         : null;
     } catch {
-      const firstTeacherAssignment = validation.value.teacher?.assignments?.[0] ?? null;
+      const firstTeacherAssignment =
+        validation.value.teacher?.assignments?.[0] ?? null;
       accountCard = buildImmediateAccountCard({
         authUserId,
         role: validation.value.role,
@@ -1495,11 +1791,11 @@ export async function POST(req: NextRequest) {
         className:
           validation.value.role === "student"
             ? validation.value.student!.class_name
-            : firstTeacherAssignment?.class_name ?? "غير محدد",
+            : (firstTeacherAssignment?.class_name ?? "غير محدد"),
         section:
           validation.value.role === "student"
             ? validation.value.student!.section
-            : firstTeacherAssignment?.section ?? null,
+            : (firstTeacherAssignment?.section ?? null),
         loginIdentifier,
         temporaryPassword,
       });
@@ -1507,7 +1803,11 @@ export async function POST(req: NextRequest) {
 
     invalidateManagedUsersListCache(targetSchoolId);
     if (validation.value.role === "student") {
-      invalidateSchoolCacheDomains(targetSchoolId, ["dashboard-overview", "payments-meta", "reports-overview"]);
+      invalidateSchoolCacheDomains(targetSchoolId, [
+        "dashboard-overview",
+        "payments-meta",
+        "reports-overview",
+      ]);
     }
 
     return NextResponse.json(
@@ -1528,9 +1828,6 @@ export async function POST(req: NextRequest) {
       cleanupRelatedRecord,
     });
 
-    return jsonError(
-      error instanceof Error ? error.message : "تعذر إنشاء الحساب المطلوب.",
-      500,
-    );
+    return jsonServerError("dashboard-users", error, "تعذر إنشاء الحساب المطلوب.", 500);
   }
 }

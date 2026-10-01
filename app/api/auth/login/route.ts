@@ -5,10 +5,7 @@ import type { UserProfile } from "@/lib/auth";
 import { resolveWebUserProfileWithStatus } from "@/lib/authorization/snapshot";
 import { studentLoginRequestSchema } from "@/lib/api-schemas";
 import {
-  ACCOUNT_LOGIN_RATE_LIMIT,
-  buildAccountRateLimitIdentifier,
-  buildAuthRateLimitIdentifier,
-  enforceRateLimit,
+  enforceLoginRateLimits,
   normalizeRateLimitEmail,
 } from "@/lib/rate-limit";
 import {
@@ -81,12 +78,9 @@ export async function POST(req: NextRequest) {
 
     _step = "rate_limit";
     const normalizedEmail = normalizeRateLimitEmail(parsed.data.email);
-    const rateLimited = await enforceRateLimit(req, {
+    const rateLimited = await enforceLoginRateLimits(req, {
       namespace: "auth-login",
-      windowMs: 10 * 60_000,
-      maxHits: 20,
-      identifier: buildAuthRateLimitIdentifier(req, normalizedEmail),
-      productionFailureMode: "memory-fallback",
+      account: normalizedEmail,
       onRateLimited: {
         error: "too_many_attempts",
         message: LOGIN_RATE_LIMIT_MESSAGE,
@@ -94,17 +88,6 @@ export async function POST(req: NextRequest) {
     });
     if (rateLimited) {
       return rateLimited;
-    }
-
-    const accountId = buildAccountRateLimitIdentifier(normalizedEmail);
-    if (accountId) {
-      const accountLimited = await enforceRateLimit(req, {
-        ...ACCOUNT_LOGIN_RATE_LIMIT,
-        identifier: accountId,
-        productionFailureMode: "memory-fallback",
-        onRateLimited: { error: "too_many_attempts", message: LOGIN_RATE_LIMIT_MESSAGE },
-      });
-      if (accountLimited) return accountLimited;
     }
 
     _step = "rbac_secret_check";

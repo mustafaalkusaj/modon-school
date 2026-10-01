@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { isMissingTableError } from "@/lib/admin-infrastructure";
 import { resolveSuperAdminActorContext } from "@/lib/super-admin-server";
+import { jsonServerError } from "@/lib/route-utils";
 
 function jsonError(message: string, status: number) {
   return NextResponse.json({ error: { message } }, { status });
@@ -11,7 +12,9 @@ export async function DELETE(
   { params }: { params: Promise<{ archiveId: string }> },
 ) {
   const { archiveId } = await params;
-  const context = await resolveSuperAdminActorContext(req.headers.get("authorization"));
+  const context = await resolveSuperAdminActorContext(
+    req.headers.get("authorization"),
+  );
   if (!context.ok) {
     return jsonError(context.message, context.status);
   }
@@ -33,12 +36,21 @@ export async function DELETE(
     if (isMissingTableError(error, "account_archives")) {
       return jsonError("جدول account_archives غير موجود بعد.", 500);
     }
-    return jsonError(error.message || "تعذر حذف الأرشيف.", 500);
+    return jsonServerError(
+      "web-super-admin-payment-archives-archiveId",
+      error,
+      "تعذر حذف الأرشيف.",
+      500,
+    );
   }
 
   if (!data) {
     return jsonError("الأرشيف المطلوب غير موجود.", 404);
   }
 
-  return NextResponse.json({ ok: true, id: normalizedId, archive_year: data.archive_year });
+  return NextResponse.json({
+    ok: true,
+    id: normalizedId,
+    archive_year: data.archive_year,
+  });
 }

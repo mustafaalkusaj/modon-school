@@ -3,19 +3,25 @@ import { formatNumber } from "@/lib/formatting";
 import { escapeHtml, wrapPrintDocument } from "@/lib/print/branding";
 import { STUDENT_IMPORT_ALLOWED_EXTENSIONS, STUDENT_IMPORT_MAX_FILE_SIZE_BYTES } from "./_constants";
 
+const DEFAULT_QR_LOGIN_ORIGIN = "https://modon-school.com";
+
+// The QR carries only an opaque, revocable login token. Usernames and
+// passwords are never embedded: a printed or photographed card must not leak a
+// reusable credential. Without a token no QR is produced.
 export async function generateLoginQrDataUrl(
-  loginIdentifier: string,
-  password: string,
+  _loginIdentifier: string,
+  _password: string,
   qrLoginToken?: string | null,
+  locale: "ar" | "en" = "ar",
 ): Promise<string | null> {
+  if (!qrLoginToken) return null;
   try {
     const QRCode = (await import("qrcode")).default;
-    const payload = qrLoginToken
-      ? `schoolapp://login?t=${encodeURIComponent(qrLoginToken)}`
-      : password && password !== "••••••••"
-        ? `schoolapp://login?u=${encodeURIComponent(loginIdentifier)}&p=${encodeURIComponent(password)}`
-        : null;
-    if (!payload) return null;
+    const origin =
+      typeof window !== "undefined" && window.location?.origin
+        ? window.location.origin
+        : DEFAULT_QR_LOGIN_ORIGIN;
+    const payload = `${origin}/${locale}/qr-login?t=${encodeURIComponent(qrLoginToken)}`;
     return await QRCode.toDataURL(payload, { width: 180, margin: 1, errorCorrectionLevel: "M" });
   } catch {
     return null;
@@ -476,6 +482,7 @@ export type BulkCardItem = {
   section: string | null;
   login_identifier: string | null;
   password: string | null;
+  qr_token?: string | null;
 };
 
 export async function buildBulkLoginCardsHtml(
@@ -504,8 +511,8 @@ export async function buildBulkLoginCardsHtml(
   // Generate QR codes for all cards in parallel
   const qrDataUrls = await Promise.all(
     cards.map((card) =>
-      card.login_identifier && card.password
-        ? generateLoginQrDataUrl(card.login_identifier, card.password)
+      card.qr_token
+        ? generateLoginQrDataUrl(card.login_identifier ?? "", card.password ?? "", card.qr_token, locale)
         : Promise.resolve(null),
     ),
   );

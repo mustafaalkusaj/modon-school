@@ -1,5 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
+import { enforceRateLimit } from "@/lib/rate-limit";
 import { resolveStudentContext, unauthorized } from "@/lib/student-api";
+
+const sendMessageSchema = z.object({
+  body: z.string().trim().min(1, "body_required").max(5000, "body_too_long"),
+});
 
 interface RouteParams {
   params: Promise<{ threadId: string }>;
@@ -110,6 +116,14 @@ export async function POST(req: NextRequest, { params }: RouteParams) {
   const ctx = await resolveStudentContext(req);
   if (!ctx) return unauthorized();
 
+  const rlResponse = await enforceRateLimit(req, {
+    namespace: "student-messages",
+    windowMs: 60_000,
+    maxHits: 20,
+    identifier: ctx.userId,
+  });
+  if (rlResponse) return rlResponse;
+
   const { supabase, userId, schoolId } = ctx;
   const { threadId } = await params;
 
@@ -143,23 +157,15 @@ export async function POST(req: NextRequest, { params }: RouteParams) {
   }
 
   // 2. Parse and validate body
-  let body: string;
-  try {
-    const json = await req.json();
-    body = typeof json.body === "string" ? json.body.trim() : "";
-  } catch {
+  const raw = await req.json().catch(() => null);
+  const parsed = sendMessageSchema.safeParse(raw);
+  if (!parsed.success) {
     return NextResponse.json(
-      { ok: false, error: "invalid_body" },
+      { ok: false, error: parsed.error.issues[0]?.message ?? "invalid_body" },
       { status: 400 },
     );
   }
-
-  if (!body) {
-    return NextResponse.json(
-      { ok: false, error: "message body is required" },
-      { status: 400 },
-    );
-  }
+  const body = parsed.data.body;
 
   // 3. Insert the new message
   const { data: newMsg, error: insertErr } = await supabase

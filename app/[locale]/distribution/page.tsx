@@ -11,7 +11,14 @@ import {
 import { useSchoolScope } from "@/hooks/useSchoolScope";
 import { useRole } from "@/hooks/useRole";
 import { getLocaleFromPath } from "@/lib/locale-routing";
-import { ClipboardList } from "@/lib/icons";
+import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
+import { useDistributionData } from "./_hooks/useDistributionData";
+import DeliveryTab from "./_components/DeliveryTab";
+import GapsTab from "./_components/GapsTab";
+import StockTab from "./_components/StockTab";
+import ReportsTab from "./_components/ReportsTab";
+import SettingsTab from "./_components/SettingsTab";
+import { useEffect } from "react";
 
 type Locale = "ar" | "en";
 
@@ -21,15 +28,16 @@ const T: Record<string, Record<Locale, string>> = {
     ar: "إدارة تسليم الزي المدرسي والكتب المنهجية للطلاب",
     en: "Manage uniform and textbook distribution to students",
   },
-  comingSoon: { ar: "قريباً", en: "Coming Soon" },
-  comingSoonDesc: {
-    ar: "نعمل على تجهيز نظام تسليم الزي والكتب المنهجية. سيتيح لك تتبع تسليم كل قطعة زي وكتاب لكل طالب.",
-    en: "We are preparing the uniform and textbook distribution system. It will allow you to track delivery of every uniform item and book to each student.",
-  },
   selectSchool: {
     ar: "اختر مدرسة لعرض بيانات التسليم",
     en: "Select a school to view distribution data",
   },
+  tabDelivery: { ar: "التسليم", en: "Delivery" },
+  tabGaps: { ar: "النواقص", en: "Gaps" },
+  tabStock: { ar: "المخزن", en: "Stock" },
+  tabReports: { ar: "التقارير", en: "Reports" },
+  tabSettings: { ar: "الضبط", en: "Settings" },
+  loading: { ar: "جارٍ التحميل...", en: "Loading..." },
 };
 
 export default function DistributionPage() {
@@ -37,8 +45,35 @@ export default function DistributionPage() {
   const pathname = usePathname();
   const locale = (getLocaleFromPath(pathname) || "ar") as Locale;
   const schoolScope = useSchoolScope(profile);
+  const schoolId = schoolScope.selectedSchoolId ?? null;
+
+  const {
+    loading,
+    items,
+    records,
+    students,
+    stock,
+    settings,
+    seedDefaults,
+    toggleDelivery,
+    bulkDeliver,
+    updateRecord,
+    updateStock,
+    saveItem,
+    deleteItem,
+    saveSettings,
+  } = useDistributionData(schoolId);
+
+  useEffect(() => {
+    if (schoolId && !loading && items.length === 0) {
+      void seedDefaults(schoolId);
+    }
+  }, [schoolId, loading, items.length, seedDefaults]);
 
   const t = (key: string) => T[key]?.[locale] ?? key;
+
+  const schoolName =
+    schoolScope.selectedSchool?.name ?? "مدارس مدن الأهلية";
 
   return (
     <ProtectedRoute roles={["super_admin", "admin", "employee"]}>
@@ -63,24 +98,81 @@ export default function DistributionPage() {
                     description={t("selectSchool")}
                   />
                 </div>
-              ) : (
-                <div className="flex flex-col items-center justify-center py-20 text-center">
-                  <div
-                    className="w-20 h-20 rounded-3xl flex items-center justify-center mb-6"
-                    style={{
-                      background:
-                        "linear-gradient(135deg, var(--primary), color-mix(in srgb, var(--primary) 70%, #000))",
-                    }}
-                  >
-                    <ClipboardList size={36} className="text-white" />
+              ) : loading ? (
+                <div className="flex items-center justify-center py-20">
+                  <div className="text-[var(--text-secondary)] text-sm">
+                    {t("loading")}
                   </div>
-                  <h2 className="text-2xl font-black text-[var(--text-primary)] mb-2">
-                    {t("comingSoon")}
-                  </h2>
-                  <p className="text-sm text-[var(--text-secondary)] max-w-md leading-relaxed">
-                    {t("comingSoonDesc")}
-                  </p>
                 </div>
+              ) : (
+                <Tabs defaultValue="delivery">
+                  <TabsList>
+                    <TabsTrigger value="delivery">
+                      {t("tabDelivery")}
+                    </TabsTrigger>
+                    <TabsTrigger value="gaps">{t("tabGaps")}</TabsTrigger>
+                    <TabsTrigger value="stock">{t("tabStock")}</TabsTrigger>
+                    <TabsTrigger value="reports">
+                      {t("tabReports")}
+                    </TabsTrigger>
+                    <TabsTrigger value="settings">
+                      {t("tabSettings")}
+                    </TabsTrigger>
+                  </TabsList>
+
+                  <TabsContent value="delivery">
+                    <DeliveryTab
+                      students={students}
+                      items={items}
+                      records={records}
+                      settings={settings}
+                      onToggleDelivery={toggleDelivery}
+                      onBulkDeliver={bulkDeliver}
+                      onUpdateRecord={updateRecord}
+                    />
+                  </TabsContent>
+
+                  <TabsContent value="gaps">
+                    <GapsTab
+                      students={students}
+                      items={items}
+                      records={records}
+                    />
+                  </TabsContent>
+
+                  <TabsContent value="stock">
+                    <StockTab
+                      items={items}
+                      stock={stock}
+                      records={records}
+                      students={students}
+                      settings={settings}
+                      onUpdateStock={updateStock}
+                    />
+                  </TabsContent>
+
+                  <TabsContent value="reports">
+                    <ReportsTab
+                      students={students}
+                      items={items}
+                      records={records}
+                      settings={settings}
+                      schoolName={schoolName}
+                    />
+                  </TabsContent>
+
+                  <TabsContent value="settings">
+                    <SettingsTab
+                      items={items}
+                      settings={settings}
+                      schoolId={schoolId!}
+                      onSaveItem={saveItem}
+                      onDeleteItem={deleteItem}
+                      onSaveSettings={saveSettings}
+                      onSeedDefaults={seedDefaults}
+                    />
+                  </TabsContent>
+                </Tabs>
               )}
             </div>
           </main>

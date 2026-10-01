@@ -1,5 +1,15 @@
 "use client";
+import { useEffect, useState } from "react";
+import { fetchJsonWithAuthorizedSession } from "@/lib/authorized-api";
+import { useSchoolScope } from "@/hooks/useSchoolScope";
+import { useRole } from "@/hooks/useRole";
 import type { TeacherRecord } from "../../../_types";
+
+interface AssignmentRow {
+  classes: { id: string; name: string; grade?: string; section?: string } | null;
+  sections: { id: string; name: string } | null;
+  subjects: { id: string; name: string } | null;
+}
 
 interface Props {
   teacher: TeacherRecord;
@@ -57,6 +67,27 @@ const QUALIFICATION_EN: Record<string, string> = {
 
 export function SubjectsTab({ teacher, locale }: Props) {
   const isEn = locale === "en";
+  const { profile } = useRole();
+  const schoolScope = useSchoolScope(profile);
+  const [assignments, setAssignments] = useState<AssignmentRow[]>([]);
+  const [assignmentsLoading, setAssignmentsLoading] = useState(true);
+
+  useEffect(() => {
+    const schoolId = schoolScope.selectedSchoolId ?? profile?.school_id;
+    if (!schoolId || !teacher.id) return;
+    setAssignmentsLoading(true);
+    const params = new URLSearchParams({ schoolId });
+    fetchJsonWithAuthorizedSession<{ ok: boolean; assignments: AssignmentRow[] }>(
+      `/api/web/teachers/${teacher.id}/subjects?${params.toString()}`
+    )
+      .then(({ response, payload }) => {
+        if (response.ok && payload?.assignments) {
+          setAssignments(payload.assignments);
+        }
+      })
+      .catch(() => {})
+      .finally(() => setAssignmentsLoading(false));
+  }, [teacher.id, schoolScope.selectedSchoolId, profile?.school_id]);
 
   const contractLabel = teacher.contract_type
     ? (isEn ? CONTRACT_TYPE_EN[teacher.contract_type] : CONTRACT_TYPE_AR[teacher.contract_type]) ?? teacher.contract_type
@@ -126,31 +157,49 @@ export function SubjectsTab({ teacher, locale }: Props) {
         </InfoCard>
       </div>
 
-      {/* Classes taught placeholder */}
+      {/* Assigned classes */}
       <div>
         <h3 className="text-sm font-semibold text-[var(--text-primary)] mb-3">
           {isEn ? "Assigned Classes" : "الصفوف المخصصة"}
         </h3>
-        <div className="bg-[var(--card-bg)] border border-[var(--card-border)] rounded-xl p-8 flex flex-col items-center gap-2 text-[var(--text-muted)]">
-          <svg
-            width="36"
-            height="36"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="1.5"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          >
-            <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" />
-            <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z" />
-          </svg>
-          <p className="text-sm text-center">
-            {isEn
-              ? "Class assignments will appear here once configured."
-              : "ستظهر الصفوف المخصصة هنا بعد ربط الجداول."}
-          </p>
-        </div>
+        {assignmentsLoading ? (
+          <div className="bg-[var(--card-bg)] border border-[var(--card-border)] rounded-xl p-8 flex items-center justify-center text-[var(--text-muted)] text-sm">
+            {isEn ? "Loading..." : "جاري التحميل..."}
+          </div>
+        ) : assignments.length === 0 ? (
+          <div className="bg-[var(--card-bg)] border border-[var(--card-border)] rounded-xl p-8 flex flex-col items-center gap-2 text-[var(--text-muted)]">
+            <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" />
+              <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z" />
+            </svg>
+            <p className="text-sm text-center">
+              {isEn ? "No class assignments yet." : "لا توجد صفوف مخصصة بعد."}
+            </p>
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            {assignments.map((a, i) => (
+              <div
+                key={i}
+                className="bg-[var(--card-bg)] border border-[var(--card-border)] rounded-xl p-4 flex flex-col gap-1.5"
+              >
+                <span className="text-sm font-semibold text-[var(--text-primary)]">
+                  {a.classes?.name ?? "—"}
+                </span>
+                {a.sections && (
+                  <span className="text-xs text-[var(--text-muted)]">
+                    {isEn ? "Section" : "الشعبة"}: {a.sections.name}
+                  </span>
+                )}
+                {a.subjects && (
+                  <span className="text-xs text-[var(--text-muted)]">
+                    {isEn ? "Subject" : "المادة"}: {a.subjects.name}
+                  </span>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
       </div>
     </div>
   );

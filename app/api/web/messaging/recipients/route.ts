@@ -21,9 +21,7 @@ export async function GET(request: NextRequest) {
       {
         ok: false,
         error:
-          "message" in context
-            ? context.message
-            : "تعذر التحقق من الصلاحيات.",
+          "message" in context ? context.message : "تعذر التحقق من الصلاحيات.",
       },
       { status: "status" in context ? context.status : 500 },
     );
@@ -48,13 +46,13 @@ export async function GET(request: NextRequest) {
 
   let query = actorSupabase
     .from("managed_user_profiles")
-    .select("auth_user_id, full_name, role")
+    .select("auth_user_id, full_name, role, created_at")
     .eq("school_id", targetSchoolId)
     .eq("is_active", true)
     .neq("auth_user_id", actorUserId)
     .ilike("full_name", `%${q}%`)
     .order("full_name")
-    .limit(20);
+    .limit(40);
 
   if (roleFilter) {
     query = query.eq("role", roleFilter);
@@ -69,12 +67,29 @@ export async function GET(request: NextRequest) {
     );
   }
 
-  const items = (data ?? []).map((row) => ({
-    id: row.auth_user_id,
-    name: row.full_name,
-    role: row.role,
-    class_name: null,
-  }));
+  const rows = data ?? [];
+
+  const seen = new Map<string, (typeof rows)[number]>();
+  for (const row of rows) {
+    const key = `${row.full_name}::${row.role}`;
+    const existing = seen.get(key);
+    if (!existing) {
+      seen.set(key, row);
+      continue;
+    }
+    if (row.created_at > existing.created_at) {
+      seen.set(key, row);
+    }
+  }
+
+  const items = Array.from(seen.values())
+    .slice(0, 20)
+    .map((row) => ({
+      id: row.auth_user_id,
+      name: row.full_name,
+      role: row.role,
+      class_name: null,
+    }));
 
   return NextResponse.json({ ok: true, items });
 }
