@@ -59,8 +59,31 @@ Status = 'no_fee_configured'
 File: lib/students/financials.ts
 Function: resolveStudentFeeTotal()
 
-Migration: 20260429_fix_payment_fee_resolution.sql
+Migrations: 20261001090600_finance_schema_and_totals.sql
+            20261001090700_finance_rpcs.sql
 ```
+
+### كيف تُطبَّق القاعدة في قاعدة البيانات
+
+> قاعدة مدن: **قسط الصف أولاً** (على عكس المشروع الشقيق (school-app) التي تقدّم قسط الطالب).
+> لا نغيّر هذه الأولوية هنا؛ أُضيف فقط استثناء صريح للطالب المتفق معه على قسط خاص.
+
+- `resolve_class_fee(school, class, branch, student_branch)` هي المصدر الوحيد لقراءة
+  `class_fees`: فرع الدفعة ← فرع الطالب ← صف على مستوى المدرسة (`branch_id IS NULL`).
+  تتجاهل الصفوف التي قسطها `<= 0` (أي «غير مضبوط»).
+- `students.fee_override` (افتراضي `false`): عندما يكون `true` يُعتمد `students.total_fee`
+  ولا يستبدله قسط الصف في `recompute_student_payment_totals` ولا في `create_payment_atomic`.
+  عندما يكون `false` (كل الطلاب الحاليين) السلوك مطابق لما كان قبل التعديل.
+- `students.remaining_fee` عمود محسوب ومقيَّد بصفر: `GREATEST(total_fee - paid_fee - discount_value, 0)`.
+  الدفع الزائد لا يظهر كرصيد سالب ولا يلغي دين طالب آخر في مجاميع `SUM(remaining_fee)`.
+- `students.fee_cycle_start` (افتراضي `NULL` = تُحتسب كل الدفعات): بعد تصفير الأقساط
+  في نهاية السنة (`promote_year_execute` أو مسار year-end) تُحتسب فقط الدفعات التي
+  `created_at >= fee_cycle_start`، حتى لا تعود دفعات السنة السابقة عند أول دفعة جديدة.
+- `create_payment_atomic`: تقفل صف الطالب (`FOR UPDATE`)، وتتحقق أن المستدعي ينتمي
+  للمدرسة (`SCHOOL_FORBIDDEN`)، وترفض الدفعة المطابقة (الطالب + المبلغ + الطريقة)
+  خلال 10 ثوانٍ (`DUPLICATE_PAYMENT`)، وترفض ما يتجاوز المتبقي
+  (`PAYMENT_EXCEEDS_REMAINING`) أو طالباً مسدَّد بالكامل (`PAID_IN_FULL`). تُنفَّذ بـ
+  `service_role` فقط.
 
 ---
 

@@ -73,6 +73,7 @@ export type Database = {
       }
       account_deletion_requests: {
         Row: {
+          attempt_count: number
           auth_user_id: string | null
           cancelled_at: string | null
           completed_at: string | null
@@ -93,6 +94,7 @@ export type Database = {
           verified_at: string | null
         }
         Insert: {
+          attempt_count?: number
           auth_user_id?: string | null
           cancelled_at?: string | null
           completed_at?: string | null
@@ -113,6 +115,7 @@ export type Database = {
           verified_at?: string | null
         }
         Update: {
+          attempt_count?: number
           auth_user_id?: string | null
           cancelled_at?: string | null
           completed_at?: string | null
@@ -678,6 +681,48 @@ export type Database = {
             referencedColumns: ["id"]
           },
         ]
+      }
+      announcements: {
+        Row: {
+          audience: string
+          author_id: string | null
+          author_name: string | null
+          body: string
+          created_at: string
+          id: string
+          is_active: boolean
+          kind: string
+          link_url: string | null
+          school_id: string | null
+          title: string
+        }
+        Insert: {
+          audience?: string
+          author_id?: string | null
+          author_name?: string | null
+          body?: string
+          created_at?: string
+          id?: string
+          is_active?: boolean
+          kind?: string
+          link_url?: string | null
+          school_id?: string | null
+          title: string
+        }
+        Update: {
+          audience?: string
+          author_id?: string | null
+          author_name?: string | null
+          body?: string
+          created_at?: string
+          id?: string
+          is_active?: boolean
+          kind?: string
+          link_url?: string | null
+          school_id?: string | null
+          title?: string
+        }
+        Relationships: []
       }
       app_config: {
         Row: {
@@ -2367,7 +2412,10 @@ export type Database = {
           id: string
           is_global: boolean
           is_recurring: boolean
+          reminder_sent: boolean | null
           school_id: string | null
+          target_class: string | null
+          target_section: string | null
           title: string
           title_en: string | null
           type: string
@@ -2384,7 +2432,10 @@ export type Database = {
           id?: string
           is_global?: boolean
           is_recurring?: boolean
+          reminder_sent?: boolean | null
           school_id?: string | null
+          target_class?: string | null
+          target_section?: string | null
           title: string
           title_en?: string | null
           type: string
@@ -2401,7 +2452,10 @@ export type Database = {
           id?: string
           is_global?: boolean
           is_recurring?: boolean
+          reminder_sent?: boolean | null
           school_id?: string | null
+          target_class?: string | null
+          target_section?: string | null
           title?: string
           title_en?: string | null
           type?: string
@@ -2505,12 +2559,15 @@ export type Database = {
           day_of_week: number
           end_time: string | null
           id: string
+          is_locked: boolean
+          period_number: number | null
           room: string | null
           school_id: string
           section: string | null
           start_time: string | null
           subject_name: string
           teacher_id: string | null
+          time_slot_id: string | null
         }
         Insert: {
           academic_year?: string | null
@@ -2519,12 +2576,15 @@ export type Database = {
           day_of_week: number
           end_time?: string | null
           id?: string
+          is_locked?: boolean
+          period_number?: number | null
           room?: string | null
           school_id: string
           section?: string | null
           start_time?: string | null
           subject_name: string
           teacher_id?: string | null
+          time_slot_id?: string | null
         }
         Update: {
           academic_year?: string | null
@@ -2533,12 +2593,15 @@ export type Database = {
           day_of_week?: number
           end_time?: string | null
           id?: string
+          is_locked?: boolean
+          period_number?: number | null
           room?: string | null
           school_id?: string
           section?: string | null
           start_time?: string | null
           subject_name?: string
           teacher_id?: string | null
+          time_slot_id?: string | null
         }
         Relationships: [
           {
@@ -2787,6 +2850,7 @@ export type Database = {
       }
       daily_lectures: {
         Row: {
+          branch_id: string | null
           created_at: string | null
           grade: string | null
           id: string
@@ -2799,6 +2863,7 @@ export type Database = {
           teacher_id: string | null
         }
         Insert: {
+          branch_id?: string | null
           created_at?: string | null
           grade?: string | null
           id?: string
@@ -2811,6 +2876,7 @@ export type Database = {
           teacher_id?: string | null
         }
         Update: {
+          branch_id?: string | null
           created_at?: string | null
           grade?: string | null
           id?: string
@@ -2887,6 +2953,7 @@ export type Database = {
       deductions: {
         Row: {
           amount: number | null
+          branch_id: string | null
           created_at: string | null
           deduction_date: string | null
           id: string
@@ -2898,6 +2965,7 @@ export type Database = {
         }
         Insert: {
           amount?: number | null
+          branch_id?: string | null
           created_at?: string | null
           deduction_date?: string | null
           id?: string
@@ -2909,6 +2977,7 @@ export type Database = {
         }
         Update: {
           amount?: number | null
+          branch_id?: string | null
           created_at?: string | null
           deduction_date?: string | null
           id?: string
@@ -3112,6 +3181,159 @@ export type Database = {
             referencedColumns: ["id"]
           },
         ]
+      }
+      distribution_items: {
+        Row: {
+          academic_year: string
+          category: string
+          created_at: string
+          grade: string | null
+          id: string
+          is_active: boolean
+          name: string
+          school_id: string
+          size_scale: string | null
+          sort_order: number
+          updated_at: string
+          variants: string[] | null
+        }
+        Insert: {
+          academic_year?: string
+          category: string
+          created_at?: string
+          grade?: string | null
+          id?: string
+          is_active?: boolean
+          name: string
+          school_id: string
+          size_scale?: string | null
+          sort_order?: number
+          updated_at?: string
+          variants?: string[] | null
+        }
+        Update: {
+          academic_year?: string
+          category?: string
+          created_at?: string
+          grade?: string | null
+          id?: string
+          is_active?: boolean
+          name?: string
+          school_id?: string
+          size_scale?: string | null
+          sort_order?: number
+          updated_at?: string
+          variants?: string[] | null
+        }
+        Relationships: []
+      }
+      distribution_records: {
+        Row: {
+          created_at: string
+          created_by: string | null
+          delivered_at: string | null
+          id: string
+          item_id: string
+          note: string | null
+          school_id: string
+          size: string | null
+          status: number
+          student_id: string
+          updated_at: string
+          variant: string | null
+        }
+        Insert: {
+          created_at?: string
+          created_by?: string | null
+          delivered_at?: string | null
+          id?: string
+          item_id: string
+          note?: string | null
+          school_id: string
+          size?: string | null
+          status?: number
+          student_id: string
+          updated_at?: string
+          variant?: string | null
+        }
+        Update: {
+          created_at?: string
+          created_by?: string | null
+          delivered_at?: string | null
+          id?: string
+          item_id?: string
+          note?: string | null
+          school_id?: string
+          size?: string | null
+          status?: number
+          student_id?: string
+          updated_at?: string
+          variant?: string | null
+        }
+        Relationships: []
+      }
+      distribution_settings: {
+        Row: {
+          academic_year: string
+          created_at: string
+          id: string
+          school_id: string
+          size_scales: Json
+          updated_at: string
+        }
+        Insert: {
+          academic_year?: string
+          created_at?: string
+          id?: string
+          school_id: string
+          size_scales?: Json
+          updated_at?: string
+        }
+        Update: {
+          academic_year?: string
+          created_at?: string
+          id?: string
+          school_id?: string
+          size_scales?: Json
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      distribution_stock: {
+        Row: {
+          academic_year: string
+          created_at: string
+          id: string
+          item_id: string
+          quantity: number
+          school_id: string
+          size: string
+          updated_at: string
+          variant: string
+        }
+        Insert: {
+          academic_year?: string
+          created_at?: string
+          id?: string
+          item_id: string
+          quantity?: number
+          school_id: string
+          size?: string
+          updated_at?: string
+          variant?: string
+        }
+        Update: {
+          academic_year?: string
+          created_at?: string
+          id?: string
+          item_id?: string
+          quantity?: number
+          school_id?: string
+          size?: string
+          updated_at?: string
+          variant?: string
+        }
+        Relationships: []
       }
       driver_documents: {
         Row: {
@@ -3376,7 +3598,10 @@ export type Database = {
         Row: {
           answers_json: Json | null
           exam_id: string | null
+          graded_at: string | null
+          graded_by: string | null
           id: string
+          results_released_at: string | null
           school_id: string | null
           score: number | null
           started_at: string | null
@@ -3388,7 +3613,10 @@ export type Database = {
         Insert: {
           answers_json?: Json | null
           exam_id?: string | null
+          graded_at?: string | null
+          graded_by?: string | null
           id?: string
+          results_released_at?: string | null
           school_id?: string | null
           score?: number | null
           started_at?: string | null
@@ -3400,7 +3628,10 @@ export type Database = {
         Update: {
           answers_json?: Json | null
           exam_id?: string | null
+          graded_at?: string | null
+          graded_by?: string | null
           id?: string
+          results_released_at?: string | null
           school_id?: string | null
           score?: number | null
           started_at?: string | null
@@ -4746,6 +4977,7 @@ export type Database = {
           income_date: string
           income_type_id: string | null
           notes: string | null
+          receipt_image_url: string | null
           receipt_number: string | null
           school_id: string
           source: string | null
@@ -4760,6 +4992,7 @@ export type Database = {
           income_date?: string
           income_type_id?: string | null
           notes?: string | null
+          receipt_image_url?: string | null
           receipt_number?: string | null
           school_id: string
           source?: string | null
@@ -4774,6 +5007,7 @@ export type Database = {
           income_date?: string
           income_type_id?: string | null
           notes?: string | null
+          receipt_image_url?: string | null
           receipt_number?: string | null
           school_id?: string
           source?: string | null
@@ -4805,6 +5039,7 @@ export type Database = {
       installments: {
         Row: {
           amount: number
+          branch_id: string | null
           created_at: string | null
           due_date: string
           id: string
@@ -4817,6 +5052,7 @@ export type Database = {
         }
         Insert: {
           amount: number
+          branch_id?: string | null
           created_at?: string | null
           due_date: string
           id?: string
@@ -4829,6 +5065,7 @@ export type Database = {
         }
         Update: {
           amount?: number
+          branch_id?: string | null
           created_at?: string | null
           due_date?: string
           id?: string
@@ -5053,6 +5290,7 @@ export type Database = {
           created_at: string
           has_pending_setup: boolean
           login_identifier: string
+          password_hash_algorithm: string
           password_last_reset_at: string
           school_id: string
           temporary_password_hash: string
@@ -5065,6 +5303,7 @@ export type Database = {
           created_at?: string
           has_pending_setup?: boolean
           login_identifier: string
+          password_hash_algorithm?: string
           password_last_reset_at?: string
           school_id: string
           temporary_password_hash?: string
@@ -5077,6 +5316,7 @@ export type Database = {
           created_at?: string
           has_pending_setup?: boolean
           login_identifier?: string
+          password_hash_algorithm?: string
           password_last_reset_at?: string
           school_id?: string
           temporary_password_hash?: string
@@ -5762,6 +6002,7 @@ export type Database = {
       payments: {
         Row: {
           amount: number
+          audited_at: string | null
           branch_id: string
           created_at: string | null
           created_by: string | null
@@ -5781,6 +6022,7 @@ export type Database = {
         }
         Insert: {
           amount: number
+          audited_at?: string | null
           branch_id: string
           created_at?: string | null
           created_by?: string | null
@@ -5800,6 +6042,7 @@ export type Database = {
         }
         Update: {
           amount?: number
+          audited_at?: string | null
           branch_id?: string
           created_at?: string | null
           created_by?: string | null
@@ -6051,27 +6294,42 @@ export type Database = {
       }
       qr_login_tokens: {
         Row: {
+          account_type: string | null
+          auth_user_id: string | null
           created_at: string
+          created_by: string | null
           expires_at: string
           id: string
+          is_active: boolean
+          last_used_at: string | null
           school_id: string
           token: string
           used_at: string | null
           user_id: string | null
         }
         Insert: {
+          account_type?: string | null
+          auth_user_id?: string | null
           created_at?: string
+          created_by?: string | null
           expires_at: string
           id?: string
+          is_active?: boolean
+          last_used_at?: string | null
           school_id: string
           token: string
           used_at?: string | null
           user_id?: string | null
         }
         Update: {
+          account_type?: string | null
+          auth_user_id?: string | null
           created_at?: string
+          created_by?: string | null
           expires_at?: string
           id?: string
+          is_active?: boolean
+          last_used_at?: string | null
           school_id?: string
           token?: string
           used_at?: string | null
@@ -6761,6 +7019,126 @@ export type Database = {
           id?: string
           is_enabled?: boolean
           school_id?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      school_app_versions: {
+        Row: {
+          build_number: string | null
+          changelog: string | null
+          created_at: string
+          id: string
+          is_mandatory: boolean
+          platform: string
+          published_at: string | null
+          published_by: string | null
+          school_id: string
+          version: string
+        }
+        Insert: {
+          build_number?: string | null
+          changelog?: string | null
+          created_at?: string
+          id?: string
+          is_mandatory?: boolean
+          platform: string
+          published_at?: string | null
+          published_by?: string | null
+          school_id: string
+          version: string
+        }
+        Update: {
+          build_number?: string | null
+          changelog?: string | null
+          created_at?: string
+          id?: string
+          is_mandatory?: boolean
+          platform?: string
+          published_at?: string | null
+          published_by?: string | null
+          school_id?: string
+          version?: string
+        }
+        Relationships: []
+      }
+      school_apps: {
+        Row: {
+          android_status: string
+          app_icon_url: string | null
+          app_name: string
+          app_store_url: string | null
+          bundle_id_ios: string | null
+          created_at: string
+          current_version: string
+          custom_login_background: string | null
+          download_count_android: number
+          download_count_ios: number
+          fcm_key_android: string | null
+          force_update: boolean
+          id: string
+          ios_status: string
+          is_active: boolean
+          last_published_at: string | null
+          login_style: string
+          min_version: string
+          package_name_android: string | null
+          play_store_url: string | null
+          push_certificate_ios: string | null
+          school_id: string
+          splash_image_url: string | null
+          updated_at: string
+        }
+        Insert: {
+          android_status?: string
+          app_icon_url?: string | null
+          app_name: string
+          app_store_url?: string | null
+          bundle_id_ios?: string | null
+          created_at?: string
+          current_version?: string
+          custom_login_background?: string | null
+          download_count_android?: number
+          download_count_ios?: number
+          fcm_key_android?: string | null
+          force_update?: boolean
+          id?: string
+          ios_status?: string
+          is_active?: boolean
+          last_published_at?: string | null
+          login_style?: string
+          min_version?: string
+          package_name_android?: string | null
+          play_store_url?: string | null
+          push_certificate_ios?: string | null
+          school_id: string
+          splash_image_url?: string | null
+          updated_at?: string
+        }
+        Update: {
+          android_status?: string
+          app_icon_url?: string | null
+          app_name?: string
+          app_store_url?: string | null
+          bundle_id_ios?: string | null
+          created_at?: string
+          current_version?: string
+          custom_login_background?: string | null
+          download_count_android?: number
+          download_count_ios?: number
+          fcm_key_android?: string | null
+          force_update?: boolean
+          id?: string
+          ios_status?: string
+          is_active?: boolean
+          last_published_at?: string | null
+          login_style?: string
+          min_version?: string
+          package_name_android?: string | null
+          play_store_url?: string | null
+          push_certificate_ios?: string | null
+          school_id?: string
+          splash_image_url?: string | null
           updated_at?: string
         }
         Relationships: []
@@ -7581,6 +7959,7 @@ export type Database = {
           deleted_at: string | null
           deleted_by: string | null
           discount_value: number
+          fee_cycle_start: string | null
           fee_override: boolean
           full_name: string
           gender: string | null
@@ -7615,6 +7994,7 @@ export type Database = {
           deleted_at?: string | null
           deleted_by?: string | null
           discount_value?: number
+          fee_cycle_start?: string | null
           fee_override?: boolean
           full_name: string
           gender?: string | null
@@ -7649,6 +8029,7 @@ export type Database = {
           deleted_at?: string | null
           deleted_by?: string | null
           discount_value?: number
+          fee_cycle_start?: string | null
           fee_override?: boolean
           full_name?: string
           gender?: string | null
@@ -9347,6 +9728,14 @@ export type Database = {
       }
     }
     Functions: {
+      account_deletion_retention_deadline: {
+        Args: { p_requested_at: string }
+        Returns: string
+      }
+      apply_student_promotions: {
+        Args: { p_moves: Json; p_school_id: string }
+        Returns: number
+      }
       create_exam_atomic: {
         Args: {
           p_class_name?: string
@@ -9393,12 +9782,59 @@ export type Database = {
           student_id: string
         }[]
       }
+      current_accessible_branch_ids: { Args: never; Returns: string[] }
       current_app_role: { Args: never; Returns: string }
+      current_managed_branch_id: { Args: never; Returns: string }
+      current_parent_can_access_student: {
+        Args: { p_school_id: string; p_student_id: string }
+        Returns: boolean
+      }
       current_school_id: { Args: never; Returns: string }
+      current_staff_can_access_branch: {
+        Args: { p_branch_id: string; p_school_id: string }
+        Returns: boolean
+      }
+      current_student_id: { Args: never; Returns: string }
+      current_teacher_can_access_student: {
+        Args: { p_school_id: string; p_student_id: string }
+        Returns: boolean
+      }
       current_teacher_id: { Args: never; Returns: string }
       current_user_can_access_branch: {
         Args: { p_branch_id: string; p_school_id: string }
         Returns: boolean
+      }
+      execute_account_deletion_erasure: {
+        Args: {
+          p_anonymization_token: string
+          p_auth_user_id: string
+          p_request_id: string
+          p_student_id: string
+          p_teacher_id: string
+        }
+        Returns: Json
+      }
+      get_current_user_school_id: { Args: never; Returns: string }
+      log_audit_action: {
+        Args: {
+          p_action: string
+          p_error_message?: string
+          p_new_value?: Json
+          p_old_value?: Json
+          p_resource_id: string
+          p_resource_type: string
+        }
+        Returns: undefined
+      }
+      mark_overdue_installments: { Args: never; Returns: undefined }
+      promote_year_execute: {
+        Args: {
+          p_promotions: Json
+          p_reset_ids: string[]
+          p_school_id: string
+          p_terminal_ids: string[]
+        }
+        Returns: Json
       }
       provision_admin_account: {
         Args: { p_email: string; p_full_name: string; p_password: string }
@@ -9407,6 +9843,42 @@ export type Database = {
       recompute_student_payment_totals: {
         Args: { target_student_id: string }
         Returns: undefined
+      }
+      resolve_class_fee: {
+        Args: {
+          p_branch_id: string
+          p_class_name: string
+          p_school_id: string
+          p_student_branch_id?: string
+        }
+        Returns: number
+      }
+      school_expense_types_overview: {
+        Args: { p_school_id: string; p_search?: string }
+        Returns: {
+          id: string
+          name: string
+          notes: string
+          school_id: string
+          usage_count: number
+          usage_total: number
+        }[]
+      }
+      school_expenses_summary: {
+        Args: {
+          p_expense_type_id?: string
+          p_from_date?: string
+          p_school_id: string
+          p_search?: string
+          p_to_date?: string
+        }
+        Returns: {
+          filtered_total_amount: number
+          filtered_total_count: number
+          school_today_amount: number
+          school_total_amount: number
+          school_total_count: number
+        }[]
       }
       school_payment_students_page: {
         Args: {
@@ -9470,6 +9942,76 @@ export type Database = {
         }[]
       }
     }
+      seed_default_roles_for_school: {
+        Args: { p_school_id: string }
+        Returns: undefined
+      }
+      soft_delete_student: {
+        Args: { p_reason?: string; p_student_id: string }
+        Returns: undefined
+      }
+      start_or_resume_exam_attempt: {
+        Args: { p_exam_id: string; p_school_id: string; p_student_id: string }
+        Returns: {
+          attempt_id: string
+          resumed: boolean
+          started_at: string
+        }[]
+      }
+      student_can_read_assignment: {
+        Args: {
+          target_class_name: string
+          target_school_id: string
+          target_section: string
+          target_student_id: string
+        }
+        Returns: boolean
+      }
+      submit_exam_attempt_atomic: {
+        Args: {
+          p_answers: Json
+          p_attempt_id: string
+          p_exam_id: string
+          p_school_id: string
+          p_score: number
+          p_status: string
+          p_student_id: string
+        }
+        Returns: {
+          attempt_id: string
+          results_released_at: string
+          score: number
+          status: string
+          submitted_at: string
+          time_spent_seconds: number
+        }[]
+      }
+      teacher_can_access_class: {
+        Args: { target_class_name: string; target_section: string }
+        Returns: boolean
+      }
+      teacher_can_access_student: {
+        Args: { target_student_id: string }
+        Returns: boolean
+      }
+      teacher_can_read_assignment: {
+        Args: {
+          target_class_name: string
+          target_school_id: string
+          target_section: string
+          target_student_id: string
+        }
+        Returns: boolean
+      }
+      teacher_can_write_assignment: {
+        Args: {
+          target_class_name: string
+          target_school_id: string
+          target_section: string
+          target_student_id: string
+        }
+        Returns: boolean
+      }
     Enums: {
       [_ in never]: never
     }
