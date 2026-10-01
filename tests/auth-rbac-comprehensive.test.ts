@@ -67,9 +67,9 @@ describe("RBAC Session - buildRBACSessionPayload", () => {
   // Long-lived by product decision: the cookie is not refreshed in the
   // background, and recheckRbacFreshness() revalidates is_active and
   // permissions_version on every request, which bounds the stale-cookie risk.
-  it("يجب أن تكون RBAC_SESSION_MAX_AGE مساوية لـ 12 ساعة", async () => {
+  it("يجب أن تكون RBAC_SESSION_MAX_AGE مساوية لـ 300 يوم", async () => {
     const { RBAC_SESSION_MAX_AGE } = await import("@/lib/rbac-session");
-    expect(RBAC_SESSION_MAX_AGE).toBe(60 * 60 * 12);
+    expect(RBAC_SESSION_MAX_AGE).toBe(60 * 60 * 24 * 300);
   });
 
   it("يجب أن تحسب exp = iat + RBAC_SESSION_MAX_AGE", async () => {
@@ -83,7 +83,7 @@ describe("RBAC Session - buildRBACSessionPayload", () => {
     expect(payload.iat).toBeGreaterThanOrEqual(before);
     expect(payload.iat).toBeLessThanOrEqual(after);
     expect(payload.exp).toBe(payload.iat + RBAC_SESSION_MAX_AGE);
-    expect(payload.exp - payload.iat).toBe(60 * 60 * 12);
+    expect(payload.exp - payload.iat).toBe(60 * 60 * 24 * 300);
   });
 
   it("يجب أن يضع version=2 عندما لا توجد deepPermissions", async () => {
