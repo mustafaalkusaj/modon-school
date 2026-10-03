@@ -1,15 +1,15 @@
 import { randomBytes } from "node:crypto";
 
 const PASSWORD_CHARSET =
-  "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789";
-const DEFAULT_PASSWORD_LENGTH = 12;
+  "0123456789";
+const DEFAULT_PASSWORD_LENGTH = 8;
 
 /**
  * Cryptographically strong, unbiased temporary password.
  *
  * Uses rejection sampling instead of `byte % charset.length` so every character
  * in the charset is equally likely (plain modulo over 256 favours the first
- * 256 % 55 = 36 characters).
+ * 256 % 10 = 6 characters).
  */
 export function generatePassword(length = DEFAULT_PASSWORD_LENGTH): string {
   const charsetLength = PASSWORD_CHARSET.length;

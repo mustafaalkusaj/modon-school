@@ -51,18 +51,14 @@ function secureRandomCharacters(alphabet: string, length: number) {
 
 // Password generation and hashing
 //
-// Temporary passwords are typed by students on phones, so they use lowercase
-// letters and digits only, without look-alikes (0/o, 1/l/i). 8 characters
-// from 31 symbols is ~40 bits, far beyond what the per-account login limit
-// lets anyone try; the old 6-digit PINs were ~20 bits.
-const TEMP_PASSWORD_ALPHABET = "abcdefghjkmnpqrstuvwxyz23456789";
+// Temporary passwords are typed by students on phones, so they are digits
+// only (no letters, no look-alikes). 8 digits is ~26 bits; the per-account
+// login limit is what keeps guessing impractical.
+const TEMP_PASSWORD_ALPHABET = "0123456789";
 const TEMP_PASSWORD_LENGTH = 8;
 
 export function generateTemporaryPassword() {
-  for (;;) {
-    const password = secureRandomCharacters(TEMP_PASSWORD_ALPHABET, TEMP_PASSWORD_LENGTH);
-    if (/[a-z]/.test(password) && /[0-9]/.test(password)) return password;
-  }
+  return secureRandomCharacters(TEMP_PASSWORD_ALPHABET, TEMP_PASSWORD_LENGTH);
 }
 
 const BCRYPT_ROUNDS = 10;
