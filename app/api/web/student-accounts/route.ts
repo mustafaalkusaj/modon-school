@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { getManagedLoginLocalPart } from "@/lib/managed-users/auth-email";
 import { openTemporaryPassword } from "@/lib/managed-users/password-vault";
 import { resolveSchoolScopedActorContext } from "@/lib/managed-users-server";
 import { createServiceSupabaseClient } from "@/lib/supabase-server";
@@ -83,7 +84,7 @@ export async function GET(request: NextRequest) {
       fullName: s.full_name,
       className: s.class_name,
       section: s.section,
-      username: cred?.login_identifier ?? "",
+      username: cred?.login_identifier ? (getManagedLoginLocalPart(cred.login_identifier) ?? cred.login_identifier) : "",
       password: openTemporaryPassword(cred?.temporary_password_plain),
       hasAccount: !!(cred?.login_identifier),
     };

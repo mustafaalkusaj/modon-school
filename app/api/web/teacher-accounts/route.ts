@@ -1,4 +1,4 @@
-import { toManagedAuthEmail } from "@/lib/managed-users/auth-email";
+import { getManagedLoginLocalPart, toManagedAuthEmail } from "@/lib/managed-users/auth-email";
 import { NextRequest, NextResponse } from "next/server";
 import { openTemporaryPassword } from "@/lib/managed-users/password-vault";
 import { resolveSchoolScopedActorContext } from "@/lib/managed-users-server";
@@ -82,7 +82,7 @@ export async function GET(request: NextRequest) {
       fullName: t.full_name,
       subject: t.subject ?? "",
       jobTitle: t.job_title ?? "",
-      username: t.app_username ?? cred?.login_identifier ?? "",
+      username: t.app_username ?? (cred?.login_identifier ? (getManagedLoginLocalPart(cred.login_identifier) ?? cred.login_identifier) : ""),
       password: openTemporaryPassword(cred?.temporary_password_plain),
       appStatus: t.app_status ?? "",
     };
