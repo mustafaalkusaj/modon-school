@@ -397,6 +397,39 @@ export async function POST(req: NextRequest) {
       return jsonServerError("web-teachers", error, "تعذر إضافة المعلم.", 500);
     }
 
+    // Sync teacher_assignments from classes_taught
+    if (Array.isArray(body?.classes_taught) && body.classes_taught.length > 0) {
+      try {
+        const { replaceTeacherAssignments } = await import(
+          "@/lib/managed-users/queries"
+        );
+        const assignments = (
+          body.classes_taught as Array<{
+            grade?: string;
+            class_name?: string;
+            className?: string;
+            section?: string;
+            subject_name?: string;
+          }>
+        ).map((ct) => ({
+          subject_name: ct.subject_name ?? "",
+          class_name: ct.class_name ?? ct.className ?? ct.grade ?? "",
+          section: ct.section || null,
+        }));
+        await replaceTeacherAssignments(actorSupabase, {
+          schoolId: targetSchoolId,
+          teacherId: data.id,
+          assignments,
+        });
+      } catch (err) {
+        // Don't fail teacher creation if assignment sync fails
+        logRouteError("teachers-create-assignments", err, {
+          schoolId: targetSchoolId,
+          teacherId: data.id,
+        });
+      }
+    }
+
     let accountInfo: {
       app_username: string;
       app_password_plain: string;
