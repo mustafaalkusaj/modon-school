@@ -46,9 +46,12 @@ export function RoleProvider({ children }: { children: React.ReactNode }) {
   const [loading, setLoading] = useState(true);
   const lastSyncedUserRef = useRef<string | null>(null);
   const lastSyncedAtRef = useRef<number>(0);
+  const hasLoadedRef = useRef(false);
 
   const refreshProfile = useCallback(async () => {
-    setLoading(true);
+    // Only block the UI on the very first load. Background refreshes (token
+    // refresh, tab focus auth events) must not unmount protected pages.
+    if (!hasLoadedRef.current) setLoading(true);
     try {
       const nextProfile = await getUserProfile();
       setProfile(nextProfile);
@@ -73,6 +76,7 @@ export function RoleProvider({ children }: { children: React.ReactNode }) {
     } catch {
       setProfile(null);
     } finally {
+      hasLoadedRef.current = true;
       setLoading(false);
     }
   }, []);
